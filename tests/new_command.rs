@@ -88,3 +88,66 @@ fn should_fail_when_project_name_is_missing() {
 
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
 }
+
+/// 校验 `fama build` 能读取项目配置并在约定目录下生成可执行文件。
+#[test]
+fn should_build_project_binary_into_configured_output_directory() {
+    let workdir = create_temp_dir("build");
+    let new_output = Command::new(fama_bin())
+        .arg("new")
+        .arg("demo")
+        .current_dir(&workdir)
+        .output()
+        .expect("执行 fama new 失败");
+
+    assert!(new_output.status.success(), "{new_output:?}");
+
+    let build_output = Command::new(fama_bin())
+        .arg("build")
+        .current_dir(workdir.join("demo"))
+        .output()
+        .expect("执行 fama build 失败");
+
+    assert!(build_output.status.success(), "{build_output:?}");
+    assert!(
+        workdir
+            .join("demo")
+            .join("build")
+            .join("demo.exe")
+            .is_file()
+    );
+
+    fs::remove_dir_all(workdir).expect("删除临时目录失败");
+}
+
+/// 校验 `fama run` 能够完整跑通编译和执行流程，并输出程序结果。
+#[test]
+fn should_run_project_binary_after_building() {
+    let workdir = create_temp_dir("run");
+    let new_output = Command::new(fama_bin())
+        .arg("new")
+        .arg("demo")
+        .current_dir(&workdir)
+        .output()
+        .expect("执行 fama new 失败");
+
+    assert!(new_output.status.success(), "{new_output:?}");
+
+    fs::write(
+        workdir.join("demo").join("src").join("main.ms"),
+        "var name:string = \"Mascript\"\nprint(\"Hello \" + name)\n",
+    )
+    .expect("写入测试源码失败");
+
+    let run_output = Command::new(fama_bin())
+        .arg("run")
+        .current_dir(workdir.join("demo"))
+        .output()
+        .expect("执行 fama run 失败");
+
+    assert!(run_output.status.success(), "{run_output:?}");
+    let stdout = String::from_utf8_lossy(&run_output.stdout);
+    assert!(stdout.contains("Hello Mascript"));
+
+    fs::remove_dir_all(workdir).expect("删除临时目录失败");
+}

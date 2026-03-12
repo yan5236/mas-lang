@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod error;
+mod project;
 mod template;
 
 use clap::Parser;
@@ -21,5 +22,7 @@ fn run() -> Result<(), FamaError> {
 
     match cli.command {
         Commands::New(args) => commands::new::run(args),
+        Commands::Build(args) => commands::build::run(args),
+        Commands::Run(args) => commands::run::run(args),
     }
 }

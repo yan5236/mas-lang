@@ -8,6 +8,10 @@ use std::path::PathBuf;
 pub enum FamaError {
     InvalidProjectName(String),
     ProjectAlreadyExists(PathBuf),
+    MissingFile(PathBuf),
+    InvalidSettings { path: PathBuf, message: String },
+    CommandFailed { command: String, code: Option<i32> },
+    Compiler(String),
     Io { path: PathBuf, source: io::Error },
 }
 
@@ -26,8 +30,19 @@ impl Display for FamaError {
             Self::ProjectAlreadyExists(path) => {
                 write!(f, "目标目录已存在：{}", path.display())
             }
+            Self::MissingFile(path) => {
+                write!(f, "缺少必需文件：{}", path.display())
+            }
+            Self::InvalidSettings { path, message } => {
+                write!(f, "项目配置无效：{}，原因：{message}", path.display())
+            }
+            Self::CommandFailed { command, code } => match code {
+                Some(code) => write!(f, "命令执行失败：{command}，退出码：{code}"),
+                None => write!(f, "命令执行失败：{command}"),
+            },
+            Self::Compiler(message) => write!(f, "{message}"),
             Self::Io { path, source } => {
-                write!(f, "写入路径失败：{}，原因：{source}", path.display())
+                write!(f, "访问路径失败：{}，原因：{source}", path.display())
             }
         }
     }
