@@ -268,7 +268,7 @@ impl<'a> Lexer<'a> {
         ))
     }
 
-    /// 解析整数或浮点数字面量，并转换为对应的值类型。
+    /// 解析整数或浮点数字面量，并避免把 `0..5` 误识别为浮点数。
     fn lex_number(&mut self, line_end: usize) -> Result<Token, CompilerError> {
         let start = self.position;
         let mut seen_dot = false;
@@ -284,6 +284,7 @@ impl<'a> Lexer<'a> {
                 && self
                     .peek_next_char(line_end)
                     .is_some_and(|next| next.is_ascii_digit())
+                && !self.source.text()[self.position..line_end].starts_with("..")
             {
                 seen_dot = true;
                 self.advance_char(line_end);
@@ -352,12 +353,20 @@ impl<'a> Lexer<'a> {
         Token::new(kind, Span::new(start, self.position))
     }
 
-    /// 解析单字符运算符和分隔符。
+    /// 解析多字符运算符、单字符运算符和分隔符。
     fn lex_operator_or_punctuation(&mut self, line_end: usize) -> Result<Token, CompilerError> {
         let start = self.position;
         let rest = &self.source.text()[self.position..line_end];
 
         for (pattern, kind) in [
+            ("->", TokenKind::Arrow),
+            ("%/%", TokenKind::IntDivide),
+            ("+=", TokenKind::PlusEqual),
+            ("-=", TokenKind::MinusEqual),
+            ("*=", TokenKind::StarEqual),
+            ("/=", TokenKind::SlashEqual),
+            ("%=", TokenKind::PercentEqual),
+            ("..", TokenKind::DotDot),
             ("==", TokenKind::EqualEqual),
             ("!=", TokenKind::BangEqual),
             ("<=", TokenKind::LessEqual),
@@ -383,6 +392,7 @@ impl<'a> Lexer<'a> {
             '-' => TokenKind::Minus,
             '*' => TokenKind::Star,
             '/' => TokenKind::Slash,
+            '%' => TokenKind::Percent,
             '<' => TokenKind::Less,
             '>' => TokenKind::Greater,
             '(' => TokenKind::LeftParen,
@@ -436,6 +446,30 @@ mod tests {
         assert!(kinds.contains(&TokenKind::FloatLiteral(1.5)));
         assert!(kinds.contains(&TokenKind::BoolLiteral(true)));
         assert!(kinds.contains(&TokenKind::StringLiteral("文本".to_string())));
+    }
+
+    /// 校验第二阶段新增运算符能够被正确识别。
+    #[test]
+    fn should_tokenize_phase2_operators() {
+        let kinds = lex("func add(a:int) -> int:\n    a += 1\n    return a %/% 2\nfor i in 0..5:\n    print(i % 2)\n");
+        assert!(kinds.contains(&TokenKind::Arrow));
+        assert!(kinds.contains(&TokenKind::PlusEqual));
+        assert!(kinds.contains(&TokenKind::IntDivide));
+        assert!(kinds.contains(&TokenKind::DotDot));
+        assert!(kinds.contains(&TokenKind::Percent));
+    }
+
+    /// 校验 `0..5` 会被切成整数加区间运算符，而不是浮点数。
+    #[test]
+    fn should_tokenize_range_without_float_conflict() {
+        let kinds = lex("for i in 0..5:\n    print(i)\n");
+        assert!(kinds.windows(3).any(|window| {
+            window == [
+                TokenKind::IntLiteral(0),
+                TokenKind::DotDot,
+                TokenKind::IntLiteral(5),
+            ]
+        }));
     }
 
     /// 校验冒号块结构依然会生成缩进相关词法单元。

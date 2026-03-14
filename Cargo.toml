@@ -1,5 +1,5 @@
 [package]
-name = "compiler-llvm"
+name = "mascript-compiler-llvm"
 version = "0.1.0"
 edition = "2024"
 

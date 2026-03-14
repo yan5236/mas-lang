@@ -228,4 +228,14 @@ mod tests {
         );
         assert_eq!(output, "Hello Mascript\n");
     }
+
+    /// 校验第二阶段的控制流、函数和运算符可以通过 LLVM 后端完整运行。
+    #[test]
+    fn should_build_and_run_phase2_program() {
+        let output = build_and_run(
+            "phase2",
+            "func add(a:int, b:int) -> int:\n    return a + b\nfunc main():\n    var total:int = 0\n    for i in 0..5:\n        if i == 2:\n            continue\n        total += i\n    while total < 10:\n        total += 1\n    print(add(total, 1))\n    print(7 %/% 2)\n    print(7 % 2)\n",
+        );
+        assert_eq!(output, "11\n3\n1\n");
+    }
 }

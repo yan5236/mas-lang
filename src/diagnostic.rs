@@ -15,6 +15,7 @@ pub enum ErrorStage {
 /// 表示所有本地化消息模板的稳定标识。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MessageId {
+    CustomMessage,
     CliHelpTitle,
     CliHelpUsage,
     CliHelpCommands,
@@ -104,9 +105,19 @@ impl CompilerError {
         Self::new(ErrorStage::Syntax, message_id, args, span)
     }
 
+    /// 构造一个直接使用给定文本的语法分析阶段错误。
+    pub fn syntax_message(message: impl Into<String>, span: Span) -> Self {
+        Self::syntax(MessageId::CustomMessage, vec![message.into()], span)
+    }
+
     /// 构造一个语义分析阶段错误。
     pub fn semantic(message_id: MessageId, args: Vec<String>, span: Span) -> Self {
         Self::new(ErrorStage::Semantic, message_id, args, span)
+    }
+
+    /// 构造一个直接使用给定文本的语义分析阶段错误。
+    pub fn semantic_message(message: impl Into<String>, span: Span) -> Self {
+        Self::semantic(MessageId::CustomMessage, vec![message.into()], span)
     }
 
     /// 构造一个命令行阶段错误。
@@ -117,6 +128,11 @@ impl CompilerError {
     /// 构造一个构建阶段错误。
     pub fn build(message_id: MessageId, args: Vec<String>, span: Span) -> Self {
         Self::new(ErrorStage::Build, message_id, args, span)
+    }
+
+    /// 构造一个直接使用给定文本的构建阶段错误。
+    pub fn build_message(message: impl Into<String>, span: Span) -> Self {
+        Self::build(MessageId::CustomMessage, vec![message.into()], span)
     }
 
     /// 在原有参数前面插入一个额外参数，便于补足路径等上下文信息。
@@ -184,6 +200,7 @@ pub fn render_message(language: UiLanguage, id: MessageId, args: &[String]) -> S
 
     match language {
         UiLanguage::ZhCn => match id {
+            MessageId::CustomMessage => arg(0),
             MessageId::CliHelpTitle => "Mascript LLVM 编译器".to_string(),
             MessageId::CliHelpUsage => "用法: compiler-llvm <build|run> <file> [选项]".to_string(),
             MessageId::CliHelpCommands => "命令:\n  build <file> [-o <path>]  编译为 Windows 可执行文件\n  run <file>                编译到临时可执行文件后立即运行".to_string(),
@@ -242,6 +259,7 @@ pub fn render_message(language: UiLanguage, id: MessageId, args: &[String]) -> S
             MessageId::BuildWriteIrFailed => format!("生成目标文件失败: {}", arg(0)),
         },
         UiLanguage::EnUs => match id {
+            MessageId::CustomMessage => arg(0),
             MessageId::CliHelpTitle => "Mascript LLVM Compiler".to_string(),
             MessageId::CliHelpUsage => "Usage: compiler-llvm <build|run> <file> [options]".to_string(),
             MessageId::CliHelpCommands => "Commands:\n  build <file> [-o <path>]  Build a Windows executable\n  run <file>                Build a temporary executable and run it".to_string(),

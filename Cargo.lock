@@ -19,15 +19,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compiler-llvm"
-version = "0.1.0"
-dependencies = [
- "inkwell",
- "serde",
- "toml",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -103,6 +94,15 @@ dependencies = [
  "libc",
  "regex-lite",
  "semver",
+]
+
+[[package]]
+name = "mascript-compiler-llvm"
+version = "0.1.0"
+dependencies = [
+ "inkwell",
+ "serde",
+ "toml",
 ]
 
 [[package]]

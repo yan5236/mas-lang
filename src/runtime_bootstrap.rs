@@ -50,6 +50,18 @@ pub extern "C" fn string_concat(
     ptr
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn string_equals(
+    left_ptr: *const u8,
+    left_len: u64,
+    right_ptr: *const u8,
+    right_len: u64,
+) -> u8 {
+    let left_bytes = unsafe { std::slice::from_raw_parts(left_ptr, left_len as usize) };
+    let right_bytes = unsafe { std::slice::from_raw_parts(right_ptr, right_len as usize) };
+    u8::from(left_bytes == right_bytes)
+}
+
 unsafe extern "C" {
     fn mascript_entry();
 }
