@@ -1,71 +1,59 @@
-# mascript-lang README
+# mascript-lang
 
-This is the README for your extension "mascript-lang". After writing up a brief description, we recommend including the following sections.
+`mascript-lang` 为 VS Code 提供 Mascript 语言支持。
 
-## Features
+当前版本只覆盖编译器已经实现的语法能力，不会把设计文档中的未来特性提前加入高亮和补全。
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+## 支持内容
 
-For example if there is an image subfolder under your extension project workspace:
+- `.ms` 文件识别
+- TextMate 语法高亮
+- 基础语言配置
+  - `//` 行注释
+  - `()` 自动闭合
+  - 以 `:` 结尾的代码块缩进
+- 轻上下文补全
+  - 关键字：`var` `const` `func` `if` `elif` `else` `while` `for` `in` `break` `continue` `return` `and` `or` `not`
+  - 类型：`int` `float` `bool` `string`
+  - 内建：`print`
+  - 布尔字面量：`true` `false`
+  - 代码骨架：`func` `if` `elif` `else` `while` `for` `main`
 
-\!\[feature X\]\(images/feature-x.png\)
+## 当前语法范围
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+本扩展只按当前编译器真实支持的语法高亮和补全，主要包括：
 
-## Requirements
+- 变量与常量声明
+- 函数定义与调用
+- `if / elif / else`
+- `while`
+- `for ... in start..end`
+- `break / continue / return`
+- 基础类型 `int / float / bool / string`
+- 字符串、整数、浮点数、布尔值
+- 运算符 `= + - * / % %/% += -= *= /= %= == != < <= > >= .. ->`
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+以下设计文档中的内容本版本不纳入扩展能力范围：
 
-## Extension Settings
+- `import`
+- `list / array / map`
+- 字符串模板
+- 标准库模块补全
+- LSP 语义分析能力
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## 示例
 
-For example:
+```ms
+func add(a:int, b:int) -> int :
+    return a + b
 
-This extension contributes the following settings:
+func main() :
+    var result :int = add(3, 4)
+    if result >= 7 :
+        print("ok")
+```
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## 说明
 
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- 扩展不会修改或依赖编译器实现。
+- 当前不提供格式化、诊断、跳转定义或语义高亮。

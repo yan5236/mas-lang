@@ -1,21 +1,37 @@
 {
   "name": "mascript-lang",
   "displayName": "mascript-lang",
-  "description": "",
+  "description": "Mascript language support for Visual Studio Code.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.107.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:mascript"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
-    "commands": [
+    "languages": [
       {
-        "command": "mascript-lang.helloWorld",
-        "title": "Hello World"
+        "id": "mascript",
+        "aliases": [
+          "Mascript",
+          "mascript"
+        ],
+        "extensions": [
+          ".ms"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mascript",
+        "scopeName": "source.mascript",
+        "path": "./syntaxes/mascript.tmLanguage.json"
       }
     ]
   },
