@@ -1,0 +1,175 @@
+use std::collections::HashMap;
+
+use inkwell::builder::BuilderError;
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::values::{BasicValueEnum, GlobalValue, PointerValue};
+
+use super::*;
+
+impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
+    /// 为新的全局变量创建可寻址的 LLVM 全局对象。
+    pub(super) fn declare_global(
+        &mut self,
+        name: &str,
+        value_type: ValueType,
+        is_mutable: bool,
+    ) -> Result<VariableInfo<'ctx>, CompilerError> {
+        if let Some(variable) = self.globals.get(name).copied() {
+            return Ok(variable);
+        }
+
+        let symbol = format!("__ms_global_{}_{}", name, self.global_index);
+        self.global_index += 1;
+        let global = self.module.add_global(self.basic_type_for(value_type)?, None, &symbol);
+        self.initialize_global(&global, value_type);
+        let variable = VariableInfo {
+            value_type,
+            pointer: global.as_pointer_value(),
+            is_mutable,
+        };
+        self.globals.insert(name.to_string(), variable);
+        Ok(variable)
+    }
+
+    /// 为全局变量写入零值初始化器，确保在入口执行前内存布局稳定。
+    pub(super) fn initialize_global(&self, global: &GlobalValue<'ctx>, value_type: ValueType) {
+        match value_type {
+            ValueType::Int => global.set_initializer(&self.context.i64_type().const_zero()),
+            ValueType::Float => global.set_initializer(&self.context.f64_type().const_zero()),
+            ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
+            ValueType::String => global.set_initializer(&self.string_type.const_zero()),
+            ValueType::Unit => {}
+        }
+    }
+
+    /// 为局部变量创建栈内存槽位。
+    pub(super) fn allocate_local(
+        &self,
+        value_type: ValueType,
+        name: &str,
+    ) -> Result<PointerValue<'ctx>, CompilerError> {
+        self.map_builder(
+            self.builder
+                .build_alloca(self.basic_type_for(value_type)?, name),
+        )
+    }
+
+    /// 从变量指针中加载值。
+    pub(super) fn load_variable(
+        &self,
+        variable: VariableInfo<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let value = self.map_builder(self.builder.build_load(
+            self.basic_type_for(variable.value_type)?,
+            variable.pointer,
+            "load.var",
+        ))?;
+        Ok(TypedValue {
+            value_type: variable.value_type,
+            value,
+        })
+    }
+
+    /// 把 LLVM 值写回变量指针。
+    pub(super) fn store_variable(
+        &self,
+        variable: VariableInfo<'ctx>,
+        value: BasicValueEnum<'ctx>,
+    ) -> Result<(), CompilerError> {
+        self.map_builder(self.builder.build_store(variable.pointer, value))?;
+        Ok(())
+    }
+
+    /// 返回指定语义类型在 LLVM 中对应的基础类型对象。
+    pub(super) fn basic_type_for(
+        &self,
+        value_type: ValueType,
+    ) -> Result<BasicTypeEnum<'ctx>, CompilerError> {
+        Ok(match value_type {
+            ValueType::Int => self.context.i64_type().into(),
+            ValueType::Float => self.context.f64_type().into(),
+            ValueType::Bool => self.context.bool_type().into(),
+            ValueType::String => self.string_type.into(),
+            ValueType::Unit => {
+                return Err(CompilerError::build_message(
+                    "unit 不应该被映射为可存储的基础类型",
+                    Span::new(0, self.source.text().len()),
+                ))
+            }
+        })
+    }
+
+    /// 把基础类型转换为函数签名所需的元数据类型。
+    pub(super) fn basic_metadata_type_for(
+        &self,
+        value_type: ValueType,
+    ) -> Result<BasicMetadataTypeEnum<'ctx>, CompilerError> {
+        Ok(self.basic_type_for(value_type)?.into())
+    }
+
+    /// 统一包装所有 Inkwell 构建器错误，转换成内部构建诊断。
+    pub(super) fn map_builder<T>(&self, value: Result<T, BuilderError>) -> Result<T, CompilerError> {
+        value.map_err(|error| {
+            CompilerError::build(
+                MessageId::BuildWriteIrFailed,
+                vec![error.to_string()],
+                Span::new(0, self.source.text().len()),
+            )
+        })
+    }
+
+    /// 确保表达式编译结果不是 `unit`，否则返回内部构建错误。
+    pub(super) fn expect_value(
+        &self,
+        value: CodegenValue<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        match value {
+            CodegenValue::Value(value) => Ok(value),
+            CodegenValue::Unit => Err(CompilerError::build_message(
+                "表达式返回了不可参与计算的 unit 值",
+                Span::new(0, self.source.text().len()),
+            )),
+        }
+    }
+
+    /// 判断当前正在生成的语句是否位于顶层入口作用域。
+    pub(super) fn is_top_level_scope(&self) -> bool {
+        self.current_function.is_some()
+            && self.current_function == self.entry_function
+            && self.scopes.len() == 1
+    }
+
+    /// 在局部作用域链和全局变量表中查找变量。
+    pub(super) fn lookup_variable(&self, name: &str) -> Option<VariableInfo<'ctx>> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+            .or_else(|| self.globals.get(name).copied())
+    }
+
+    /// 压入一个新的块级作用域。
+    pub(super) fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    /// 弹出当前块级作用域。
+    pub(super) fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    /// 返回当前最内层作用域的可变引用。
+    pub(super) fn current_scope_mut(&mut self) -> &mut HashMap<String, VariableInfo<'ctx>> {
+        self.scopes
+            .last_mut()
+            .expect("作用域栈至少包含一个当前作用域")
+    }
+
+    /// 判断当前插入块是否已经包含终结指令。
+    pub(super) fn current_block_has_terminator(&self) -> bool {
+        self.builder
+            .get_insert_block()
+            .and_then(|block| block.get_terminator())
+            .is_some()
+    }
+}
