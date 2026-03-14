@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 inkwell = { version = "0.8.0", features = ["llvm19-1"] }
+serde = { version = "1.0.219", features = ["derive"] }
+toml = "0.8.20"

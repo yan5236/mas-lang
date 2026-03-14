@@ -1,0 +1,150 @@
+use crate::source::Span;
+
+/// 表示词法单元的粗粒度类别，供语法分析阶段快速分支判断。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TokenTag {
+    Var,
+    Const,
+    Func,
+    If,
+    Elif,
+    Else,
+    While,
+    For,
+    In,
+    Return,
+    Break,
+    Continue,
+    And,
+    Or,
+    Not,
+    Identifier,
+    IntLiteral,
+    FloatLiteral,
+    StringLiteral,
+    BoolLiteral,
+    Colon,
+    Equal,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    EqualEqual,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    LeftParen,
+    RightParen,
+    Comma,
+    Newline,
+    Indent,
+    Dedent,
+    Eof,
+}
+
+/// 保存词法单元的具体值，必要时携带字面量或标识符文本。
+#[derive(Clone, Debug, PartialEq)]
+pub enum TokenKind {
+    Var,
+    Const,
+    Func,
+    If,
+    Elif,
+    Else,
+    While,
+    For,
+    In,
+    Return,
+    Break,
+    Continue,
+    And,
+    Or,
+    Not,
+    Identifier(String),
+    IntLiteral(i64),
+    FloatLiteral(f64),
+    StringLiteral(String),
+    BoolLiteral(bool),
+    Colon,
+    Equal,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    EqualEqual,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    LeftParen,
+    RightParen,
+    Comma,
+    Newline,
+    Indent,
+    Dedent,
+    Eof,
+}
+
+impl TokenKind {
+    /// 返回词法单元所属的粗粒度类别，便于忽略其内部载荷参与判断。
+    pub fn tag(&self) -> TokenTag {
+        match self {
+            Self::Var => TokenTag::Var,
+            Self::Const => TokenTag::Const,
+            Self::Func => TokenTag::Func,
+            Self::If => TokenTag::If,
+            Self::Elif => TokenTag::Elif,
+            Self::Else => TokenTag::Else,
+            Self::While => TokenTag::While,
+            Self::For => TokenTag::For,
+            Self::In => TokenTag::In,
+            Self::Return => TokenTag::Return,
+            Self::Break => TokenTag::Break,
+            Self::Continue => TokenTag::Continue,
+            Self::And => TokenTag::And,
+            Self::Or => TokenTag::Or,
+            Self::Not => TokenTag::Not,
+            Self::Identifier(_) => TokenTag::Identifier,
+            Self::IntLiteral(_) => TokenTag::IntLiteral,
+            Self::FloatLiteral(_) => TokenTag::FloatLiteral,
+            Self::StringLiteral(_) => TokenTag::StringLiteral,
+            Self::BoolLiteral(_) => TokenTag::BoolLiteral,
+            Self::Colon => TokenTag::Colon,
+            Self::Equal => TokenTag::Equal,
+            Self::Plus => TokenTag::Plus,
+            Self::Minus => TokenTag::Minus,
+            Self::Star => TokenTag::Star,
+            Self::Slash => TokenTag::Slash,
+            Self::EqualEqual => TokenTag::EqualEqual,
+            Self::BangEqual => TokenTag::BangEqual,
+            Self::Less => TokenTag::Less,
+            Self::LessEqual => TokenTag::LessEqual,
+            Self::Greater => TokenTag::Greater,
+            Self::GreaterEqual => TokenTag::GreaterEqual,
+            Self::LeftParen => TokenTag::LeftParen,
+            Self::RightParen => TokenTag::RightParen,
+            Self::Comma => TokenTag::Comma,
+            Self::Newline => TokenTag::Newline,
+            Self::Indent => TokenTag::Indent,
+            Self::Dedent => TokenTag::Dedent,
+            Self::Eof => TokenTag::Eof,
+        }
+    }
+}
+
+/// 表示词法分析器输出的单个词法单元及其源码跨度。
+#[derive(Clone, Debug, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
+
+impl Token {
+    /// 使用给定类别和值创建新的词法单元对象。
+    pub fn new(kind: TokenKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+}
