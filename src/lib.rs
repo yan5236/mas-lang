@@ -66,6 +66,9 @@ pub fn load_settings() -> CompilerSettings {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::{CompileOptions, analyze_source, compile_to_executable};
     use crate::settings::{CompilerSettings, UiLanguage};
     use crate::source::SourceFile;
@@ -86,8 +89,15 @@ mod tests {
     /// 校验原生后端能够把最小程序编译为可执行文件。
     #[test]
     fn should_compile_minimal_program() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let source_path = env::temp_dir()
+            .join(format!("mascript-llvm-minimal-{unique}"))
+            .join("minimal.ms");
         let source = SourceFile::new(
-            "E:\\temp\\minimal.ms",
+            source_path.display().to_string(),
             "print(\"Hello world.\")\n".to_string(),
         );
         let binary =

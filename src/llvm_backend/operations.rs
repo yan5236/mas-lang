@@ -63,7 +63,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             return Err(CompilerError::build_message("短路逻辑只支持布尔值", span));
         }
 
-        let slot = self.allocate_local(ValueType::Bool, "logic.tmp")?;
+        let slot = self.allocate_local(&ValueType::Bool, "logic.tmp")?;
         self.map_builder(self.builder.build_store(slot, left_value.value))?;
 
         let rhs_block = self.context.append_basic_block(function, "logic.rhs");
@@ -122,7 +122,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             let right_len = self
                 .extract_string_part(right_string, 1, "right.len")?
                 .into_int_value();
-            let out_len_ptr = self.allocate_local(ValueType::Int, "concat.out_len")?;
+            let out_len_ptr = self.allocate_local(&ValueType::Int, "concat.out_len")?;
             let call = self.map_builder(self.builder.build_call(
                 self.runtime.string_concat,
                 &[
@@ -250,7 +250,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         op: BinaryOp,
         span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
-        let value = match (left.value_type, right.value_type) {
+        let value = match (&left.value_type, &right.value_type) {
             (ValueType::Int, ValueType::Int) | (ValueType::Bool, ValueType::Bool) => self
                 .map_builder(self.builder.build_int_compare(
                     if op == BinaryOp::Equal {
@@ -289,7 +289,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ))?
                 .into()
             }
-            _ => {
+            (ValueType::Float, ValueType::Float)
+            | (ValueType::Float, ValueType::Int)
+            | (ValueType::Int, ValueType::Float) => {
                 let (left_float, right_float) = self.coerce_to_float_pair(left, right, span)?;
                 self.map_builder(self.builder.build_float_compare(
                     if op == BinaryOp::Equal {
@@ -302,6 +304,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     "cmp.float",
                 ))?
                 .into()
+            }
+            _ => {
+                return Err(CompilerError::build_message(
+                    "当前相等比较无法生成目标代码",
+                    span,
+                ))
             }
         };
 

@@ -395,8 +395,11 @@ impl<'a> Lexer<'a> {
             '%' => TokenKind::Percent,
             '<' => TokenKind::Less,
             '>' => TokenKind::Greater,
+            '.' => TokenKind::Dot,
             '(' => TokenKind::LeftParen,
             ')' => TokenKind::RightParen,
+            '[' => TokenKind::LeftBracket,
+            ']' => TokenKind::RightBracket,
             ',' => TokenKind::Comma,
             _ => {
                 return Err(CompilerError::lexical(
@@ -457,6 +460,17 @@ mod tests {
         assert!(kinds.contains(&TokenKind::IntDivide));
         assert!(kinds.contains(&TokenKind::DotDot));
         assert!(kinds.contains(&TokenKind::Percent));
+    }
+
+    /// 校验列表相关分隔符会被词法分析器正确识别。
+    #[test]
+    fn should_tokenize_list_tokens() {
+        let kinds = lex("var items:list<int> = [1, 2]\nprint(items[0])\nitems.append(3)\n");
+        assert!(kinds.contains(&TokenKind::LeftBracket));
+        assert!(kinds.contains(&TokenKind::RightBracket));
+        assert!(kinds.contains(&TokenKind::Dot));
+        assert!(kinds.contains(&TokenKind::Less));
+        assert!(kinds.contains(&TokenKind::Greater));
     }
 
     /// 校验 `0..5` 会被切成整数加区间运算符，而不是浮点数。

@@ -238,4 +238,14 @@ mod tests {
         );
         assert_eq!(output, "11\n3\n1\n");
     }
+
+    /// 校验列表字面量、遍历、索引、切片和方法调用能够通过 LLVM 后端完整运行。
+    #[test]
+    fn should_build_and_run_list_program() {
+        let output = build_and_run(
+            "list",
+            "func main():\n    var items:list<int> = [3, 1, 2]\n    print(len(items))\n    print(items[0])\n    items.append(4)\n    print(len(items))\n    var part = items[1:3]\n    print(part[0])\n    print(part[1])\n    print(items.contains(2))\n    print(items.index(4))\n    items.remove(1)\n    print(len(items))\n    print(items.pop())\n    items.append(1)\n    items.sort()\n    print(items[0])\n    print(items[2])\n    items.reverse()\n    print(items[0])\n    print(items.pop(1))\n    for item in items:\n        print(item)\n",
+        );
+        assert_eq!(output, "3\n3\n4\n1\n2\ntrue\n3\n3\n4\n1\n3\n3\n2\n3\n1\n");
+    }
 }

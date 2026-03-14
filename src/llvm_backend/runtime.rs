@@ -1,11 +1,12 @@
 use inkwell::AddressSpace;
+use inkwell::types::BasicType;
 use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue, StructValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
 
 use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 预声明最小运行时 ABI，供 `print`、字符串拼接和字符串比较直接调用。
+    /// 预声明运行时 ABI，供打印、字符串和列表相关能力直接调用。
     pub(super) fn declare_runtime(
         context: &'ctx Context,
         module: &Module<'ctx>,
@@ -16,7 +17,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let f64_type = context.f64_type();
         let ptr_type = context.ptr_type(AddressSpace::default());
 
-        RuntimeFunctions {
+        let runtime = RuntimeFunctions {
             print_int: module.add_function(
                 "print_int",
                 void_type.fn_type(&[i64_type.into()], false),
@@ -64,7 +65,68 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ),
                 None,
             ),
-        }
+            list_create: module.add_function(
+                "list_create",
+                ptr_type.fn_type(&[i8_type.into()], false),
+                None,
+            ),
+            list_len: module.add_function("list_len", i64_type.fn_type(&[ptr_type.into()], false), None),
+            list_slice: module.add_function(
+                "list_slice",
+                ptr_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
+                None,
+            ),
+            list_reverse: module.add_function(
+                "list_reverse",
+                void_type.fn_type(&[ptr_type.into()], false),
+                None,
+            ),
+        };
+
+        let string_struct = context.struct_type(&[ptr_type.into(), i64_type.into()], false);
+        let add_void = |name: &str, args: &[inkwell::types::BasicMetadataTypeEnum<'ctx>]| {
+            module.add_function(name, void_type.fn_type(args, false), None);
+        };
+        let add_value = |name: &str,
+                         return_type: inkwell::types::BasicTypeEnum<'ctx>,
+                         args: &[inkwell::types::BasicMetadataTypeEnum<'ctx>]| {
+            module.add_function(name, return_type.fn_type(args, false), None);
+        };
+
+        add_void("list_append_int", &[ptr_type.into(), i64_type.into()]);
+        add_void("list_append_float", &[ptr_type.into(), f64_type.into()]);
+        add_void("list_append_bool", &[ptr_type.into(), i8_type.into()]);
+        add_void("list_append_string", &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
+        add_value("list_get_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_get_float", f64_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_get_bool", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_get_string", string_struct.into(), &[ptr_type.into(), i64_type.into()]);
+        add_void("list_remove_int", &[ptr_type.into(), i64_type.into()]);
+        add_void("list_remove_float", &[ptr_type.into(), f64_type.into()]);
+        add_void("list_remove_bool", &[ptr_type.into(), i8_type.into()]);
+        add_void("list_remove_string", &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
+        add_value("list_pop_int", i64_type.into(), &[ptr_type.into()]);
+        add_value("list_pop_float", f64_type.into(), &[ptr_type.into()]);
+        add_value("list_pop_bool", i8_type.into(), &[ptr_type.into()]);
+        add_value("list_pop_string", string_struct.into(), &[ptr_type.into()]);
+        add_value("list_pop_at_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_pop_at_float", f64_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_pop_at_bool", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_pop_at_string", string_struct.into(), &[ptr_type.into(), i64_type.into()]);
+        add_void("list_sort_int", &[ptr_type.into()]);
+        add_void("list_sort_float", &[ptr_type.into()]);
+        add_void("list_sort_bool", &[ptr_type.into()]);
+        add_void("list_sort_string", &[ptr_type.into()]);
+        add_value("list_index_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_index_float", i64_type.into(), &[ptr_type.into(), f64_type.into()]);
+        add_value("list_index_bool", i64_type.into(), &[ptr_type.into(), i8_type.into()]);
+        add_value("list_index_string", i64_type.into(), &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
+        add_value("list_contains_int", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value("list_contains_float", i8_type.into(), &[ptr_type.into(), f64_type.into()]);
+        add_value("list_contains_bool", i8_type.into(), &[ptr_type.into(), i8_type.into()]);
+        add_value("list_contains_string", i8_type.into(), &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
+
+        runtime
     }
 
     /// 把字符串字面量构造成 `{ ptr, len }` 结构值。
@@ -113,5 +175,49 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         name: &str,
     ) -> Result<BasicValueEnum<'ctx>, CompilerError> {
         self.map_builder(self.builder.build_extract_value(value, index, name))
+    }
+
+    /// 返回列表元素类型在运行时中的固定类型标记。
+    pub(super) fn list_type_tag(&self, value_type: &ValueType) -> Result<u8, CompilerError> {
+        match value_type {
+            ValueType::Int => Ok(1),
+            ValueType::Float => Ok(2),
+            ValueType::Bool => Ok(3),
+            ValueType::String => Ok(4),
+            _ => Err(CompilerError::build_message(
+                "当前阶段列表元素只支持基础类型",
+                Span::new(0, self.source.text().len()),
+            )),
+        }
+    }
+
+    /// 把列表元素类型转换为运行时函数名使用的后缀。
+    pub(super) fn list_type_suffix(&self, value_type: &ValueType) -> Result<&'static str, CompilerError> {
+        match value_type {
+            ValueType::Int => Ok("int"),
+            ValueType::Float => Ok("float"),
+            ValueType::Bool => Ok("bool"),
+            ValueType::String => Ok("string"),
+            _ => Err(CompilerError::build_message(
+                "当前阶段列表元素只支持基础类型",
+                Span::new(0, self.source.text().len()),
+            )),
+        }
+    }
+
+    /// 根据基础名称和元素类型查找已声明的列表运行时函数。
+    pub(super) fn list_runtime_function(
+        &self,
+        base_name: &str,
+        value_type: &ValueType,
+    ) -> Result<FunctionValue<'ctx>, CompilerError> {
+        let suffix = self.list_type_suffix(value_type)?;
+        let function_name = format!("{base_name}_{suffix}");
+        self.module.get_function(&function_name).ok_or_else(|| {
+            CompilerError::build_message(
+                format!("代码生成阶段找不到运行时函数 `{function_name}`"),
+                Span::new(0, self.source.text().len()),
+            )
+        })
     }
 }

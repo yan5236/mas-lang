@@ -1,39 +1,33 @@
 use std::collections::HashMap;
 
-use crate::ast::{AssignOp, BinaryOp, BindingKind, Expr, Literal, Program, Stmt, TypeName, UnaryOp};
+use crate::ast::{
+    AssignOp, BinaryOp, BindingKind, Expr, ListMethod, Literal, Program, Stmt, TypeName, UnaryOp,
+};
 use crate::diagnostic::CompilerError;
 use crate::settings::CompilerSettings;
 use crate::source::Span;
 
 /// 表示语义分析阶段内部使用的值类型。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ValueType {
     Int,
     Float,
     Bool,
     String,
+    List(Box<ValueType>),
     Unit,
 }
 
 impl ValueType {
-    /// 把显式类型标注转换为语义阶段的值类型枚举。
-    pub fn from_annotation(annotation: TypeName) -> Self {
-        match annotation {
-            TypeName::Int => Self::Int,
-            TypeName::Float => Self::Float,
-            TypeName::Bool => Self::Bool,
-            TypeName::String => Self::String,
-        }
-    }
-
     /// 返回类型在诊断信息中使用的稳定名称。
-    pub fn display_name(self) -> &'static str {
+    pub fn display_name(&self) -> String {
         match self {
-            Self::Int => "int",
-            Self::Float => "float",
-            Self::Bool => "bool",
-            Self::String => "string",
-            Self::Unit => "unit",
+            Self::Int => "int".to_string(),
+            Self::Float => "float".to_string(),
+            Self::Bool => "bool".to_string(),
+            Self::String => "string".to_string(),
+            Self::List(element) => format!("list<{}>", element.display_name()),
+            Self::Unit => "unit".to_string(),
         }
     }
 }
@@ -47,7 +41,7 @@ pub struct FunctionSignature {
 }
 
 /// 保存当前作用域中单个名称的类型与可变性元数据。
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct SymbolInfo {
     value_type: ValueType,
     is_mutable: bool,
@@ -122,9 +116,9 @@ impl<'a> SemanticAnalyzer<'a> {
                 continue;
             };
 
-            if name == "print" {
+            if name == "print" || name == "len" {
                 return Err(CompilerError::semantic_message(
-                    "用户函数不能覆盖内建函数 `print`",
+                    format!("用户函数不能覆盖内建函数 `{name}`"),
                     *span,
                 ));
             }
@@ -136,13 +130,16 @@ impl<'a> SemanticAnalyzer<'a> {
                 ));
             }
 
-            let parameter_types = parameters
-                .iter()
-                .map(|parameter| ValueType::from_annotation(parameter.type_name))
-                .collect();
-            let return_type = return_type
-                .map(ValueType::from_annotation)
-                .unwrap_or(ValueType::Unit);
+            let mut parameter_types = Vec::with_capacity(parameters.len());
+            for parameter in parameters {
+                parameter_types
+                    .push(self.value_type_from_annotation(&parameter.type_name, parameter.span)?);
+            }
+            let return_type = if let Some(annotation) = return_type {
+                self.value_type_from_annotation(annotation, *span)?
+            } else {
+                ValueType::Unit
+            };
 
             self.functions.insert(
                 name.clone(),
@@ -195,21 +192,20 @@ impl<'a> SemanticAnalyzer<'a> {
                     parameter.span,
                 ));
             }
+            let parameter_type =
+                self.value_type_from_annotation(&parameter.type_name, parameter.span)?;
             self.current_scope_mut().insert(
                 parameter.name.clone(),
-                SymbolInfo::new(
-                    ValueType::from_annotation(parameter.type_name),
-                    BindingKind::Var,
-                ),
+                SymbolInfo::new(parameter_type, BindingKind::Var),
             );
         }
 
-        let previous_return_type = self.current_return_type;
-        self.current_return_type = Some(
-            return_type
-                .map(ValueType::from_annotation)
-                .unwrap_or(ValueType::Unit),
-        );
+        let previous_return_type = self.current_return_type.clone();
+        self.current_return_type = Some(if let Some(annotation) = return_type {
+            self.value_type_from_annotation(annotation, *span)?
+        } else {
+            ValueType::Unit
+        });
 
         let mut result = Ok(());
         for nested in body {
@@ -248,7 +244,13 @@ impl<'a> SemanticAnalyzer<'a> {
                 initializer,
                 span,
             } => {
-                let value_type = self.infer_expression_type(initializer)?;
+                let expected = if let Some(annotation) = annotation {
+                    Some(self.value_type_from_annotation(annotation, *span)?)
+                } else {
+                    None
+                };
+                let value_type =
+                    self.infer_expression_type_with_hint(initializer, expected.as_ref())?;
                 if self.current_scope().contains_key(name) {
                     return Err(CompilerError::semantic_message(
                         format!("{} `{name}` 在当前作用域中重复声明", binding_kind.keyword()),
@@ -256,8 +258,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     ));
                 }
 
-                if let Some(annotation) = annotation {
-                    let expected = ValueType::from_annotation(*annotation);
+                if let Some(expected) = expected {
                     if expected != value_type {
                         return Err(CompilerError::semantic_message(
                             format!(
@@ -288,9 +289,9 @@ impl<'a> SemanticAnalyzer<'a> {
                         *span,
                     ));
                 }
-                let expected = symbol.value_type;
-                let actual = self.infer_expression_type(value)?;
-                let result = self.infer_assignment_type(expected, actual, *op, *span)?;
+                let expected = symbol.value_type.clone();
+                let actual = self.infer_expression_type_with_hint(value, Some(&expected))?;
+                let result = self.infer_assignment_type(&expected, &actual, *op, *span)?;
                 if expected != result {
                     return Err(CompilerError::semantic_message(
                         format!("变量 `{name}` 的赋值类型不匹配"),
@@ -359,6 +360,31 @@ impl<'a> SemanticAnalyzer<'a> {
                 self.loop_depth -= 1;
                 result
             }
+            Stmt::ForEach {
+                name,
+                iterable,
+                body,
+                span,
+            } => {
+                let iterable_type = self.infer_expression_type(iterable)?;
+                let ValueType::List(element_type) = iterable_type else {
+                    return Err(CompilerError::semantic_message(
+                        "for 遍历当前只支持列表类型",
+                        *span,
+                    ));
+                };
+
+                self.loop_depth += 1;
+                self.push_scope();
+                self.current_scope_mut().insert(
+                    name.clone(),
+                    SymbolInfo::new((*element_type).clone(), BindingKind::Var),
+                );
+                let result = self.analyze_statements(body);
+                self.pop_scope();
+                self.loop_depth -= 1;
+                result
+            }
             Stmt::Break { span } | Stmt::Continue { span } => {
                 if self.loop_depth == 0 {
                     return Err(CompilerError::semantic_message(
@@ -369,7 +395,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 Ok(())
             }
             Stmt::Return { value, span } => {
-                let Some(expected_return_type) = self.current_return_type else {
+                let Some(expected_return_type) = self.current_return_type.clone() else {
                     return Err(CompilerError::semantic_message(
                         "return 只能出现在函数体中",
                         *span,
@@ -387,7 +413,7 @@ impl<'a> SemanticAnalyzer<'a> {
                         *span,
                     )),
                     (expected, Some(expr)) => {
-                        let actual = self.infer_expression_type(expr)?;
+                        let actual = self.infer_expression_type_with_hint(expr, Some(&expected))?;
                         if expected != actual {
                             return Err(CompilerError::semantic_message("返回值类型不匹配", *span));
                         }
@@ -420,6 +446,15 @@ impl<'a> SemanticAnalyzer<'a> {
 
     /// 推导表达式类型，并在遇到不合法组合时抛出语义错误。
     fn infer_expression_type(&mut self, expression: &Expr) -> Result<ValueType, CompilerError> {
+        self.infer_expression_type_with_hint(expression, None)
+    }
+
+    /// 在可用时利用期望类型提示表达式类型推导，主要用于空列表字面量。
+    fn infer_expression_type_with_hint(
+        &mut self,
+        expression: &Expr,
+        hint: Option<&ValueType>,
+    ) -> Result<ValueType, CompilerError> {
         match expression {
             Expr::Literal { value, .. } => Ok(match value {
                 Literal::Int(_) => ValueType::Int,
@@ -429,9 +464,9 @@ impl<'a> SemanticAnalyzer<'a> {
             }),
             Expr::Identifier { name, span } => self
                 .lookup(name)
-                .map(|symbol| symbol.value_type)
+                .map(|symbol| symbol.value_type.clone())
                 .ok_or_else(|| CompilerError::semantic_message(format!("未声明变量 `{name}`"), *span)),
-            Expr::Grouped { expression, .. } => self.infer_expression_type(expression),
+            Expr::Grouped { expression, .. } => self.infer_expression_type_with_hint(expression, hint),
             Expr::Unary { op, operand, span } => self.infer_unary_type(*op, operand, *span),
             Expr::Binary {
                 left,
@@ -444,19 +479,214 @@ impl<'a> SemanticAnalyzer<'a> {
                 arguments,
                 span,
             } => self.infer_call_type(callee, arguments, *span),
+            Expr::ListLiteral { elements, span } => {
+                self.infer_list_literal_type(elements, hint, *span)
+            }
+            Expr::Index {
+                target,
+                index,
+                span,
+            } => self.infer_index_type(target, index, *span),
+            Expr::Slice {
+                target,
+                start,
+                end,
+                span,
+            } => self.infer_slice_type(target, start.as_deref(), end.as_deref(), *span),
+            Expr::ListMethodCall {
+                target,
+                method,
+                arguments,
+                span,
+            } => self.infer_list_method_type(target, *method, arguments, *span),
+        }
+    }
+
+    /// 把语法树中的类型标注转换为语义阶段使用的值类型。
+    fn value_type_from_annotation(
+        &self,
+        annotation: &TypeName,
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        match annotation {
+            TypeName::Int => Ok(ValueType::Int),
+            TypeName::Float => Ok(ValueType::Float),
+            TypeName::Bool => Ok(ValueType::Bool),
+            TypeName::String => Ok(ValueType::String),
+            TypeName::List(element) => match element.as_ref() {
+                TypeName::Int => Ok(ValueType::List(Box::new(ValueType::Int))),
+                TypeName::Float => Ok(ValueType::List(Box::new(ValueType::Float))),
+                TypeName::Bool => Ok(ValueType::List(Box::new(ValueType::Bool))),
+                TypeName::String => Ok(ValueType::List(Box::new(ValueType::String))),
+                TypeName::List(_) => Err(CompilerError::semantic_message(
+                    "当前阶段列表元素只支持基础类型",
+                    span,
+                )),
+            },
+        }
+    }
+
+    /// 推导列表字面量的元素类型，并校验元素必须同构。
+    fn infer_list_literal_type(
+        &mut self,
+        elements: &[Expr],
+        hint: Option<&ValueType>,
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        if elements.is_empty() {
+            return match hint {
+                Some(ValueType::List(element)) => {
+                    Ok(ValueType::List(Box::new((**element).clone())))
+                }
+                _ => Err(CompilerError::semantic_message(
+                    "空列表字面量必须放在显式 `list<T>` 类型上下文中",
+                    span,
+                )),
+            };
+        }
+
+        let hinted_element = match hint {
+            Some(ValueType::List(element)) => Some(element.as_ref()),
+            _ => None,
+        };
+        let first_type = self.infer_expression_type_with_hint(&elements[0], hinted_element)?;
+        if matches!(first_type, ValueType::List(_)) {
+            return Err(CompilerError::semantic_message(
+                "当前阶段列表元素只支持基础类型",
+                span,
+            ));
+        }
+
+        for element in &elements[1..] {
+            let element_type = self.infer_expression_type_with_hint(element, Some(&first_type))?;
+            if element_type != first_type {
+                return Err(CompilerError::semantic_message(
+                    "列表字面量中的元素类型必须保持一致",
+                    element.span(),
+                ));
+            }
+        }
+
+        Ok(ValueType::List(Box::new(first_type)))
+    }
+
+    /// 推导列表索引表达式的返回值类型。
+    fn infer_index_type(
+        &mut self,
+        target: &Expr,
+        index: &Expr,
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        let target_type = self.infer_expression_type(target)?;
+        let index_type = self.infer_expression_type(index)?;
+        if index_type != ValueType::Int {
+            return Err(CompilerError::semantic_message("列表索引必须是整数", index.span()));
+        }
+        match target_type {
+            ValueType::List(element) => Ok((*element).clone()),
+            _ => Err(CompilerError::semantic_message("索引访问当前只支持列表类型", span)),
+        }
+    }
+
+    /// 推导列表切片表达式的返回值类型。
+    fn infer_slice_type(
+        &mut self,
+        target: &Expr,
+        start: Option<&Expr>,
+        end: Option<&Expr>,
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        let target_type = self.infer_expression_type(target)?;
+        if let Some(start) = start {
+            if self.infer_expression_type(start)? != ValueType::Int {
+                return Err(CompilerError::semantic_message("切片起始下标必须是整数", start.span()));
+            }
+        }
+        if let Some(end) = end {
+            if self.infer_expression_type(end)? != ValueType::Int {
+                return Err(CompilerError::semantic_message("切片结束下标必须是整数", end.span()));
+            }
+        }
+        match target_type {
+            ValueType::List(element) => Ok(ValueType::List(element)),
+            _ => Err(CompilerError::semantic_message("切片当前只支持列表类型", span)),
+        }
+    }
+
+    /// 推导列表方法调用的返回值类型，并校验方法参数规则。
+    fn infer_list_method_type(
+        &mut self,
+        target: &Expr,
+        method: ListMethod,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        let target_type = self.infer_expression_type(target)?;
+        let ValueType::List(element_type) = target_type else {
+            return Err(CompilerError::semantic_message("当前方法只能用于列表类型", span));
+        };
+
+        match method {
+            ListMethod::Append | ListMethod::Remove | ListMethod::Index | ListMethod::Contains => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        format!("列表方法 `{}` 需要且只接受一个参数", method.display_name()),
+                        span,
+                    ));
+                }
+                let argument_type =
+                    self.infer_expression_type_with_hint(&arguments[0], Some(element_type.as_ref()))?;
+                if argument_type != *element_type {
+                    return Err(CompilerError::semantic_message(
+                        format!("列表方法 `{}` 的参数类型不匹配", method.display_name()),
+                        arguments[0].span(),
+                    ));
+                }
+                Ok(match method {
+                    ListMethod::Append | ListMethod::Remove => ValueType::Unit,
+                    ListMethod::Index => ValueType::Int,
+                    ListMethod::Contains => ValueType::Bool,
+                    _ => unreachable!(),
+                })
+            }
+            ListMethod::Pop => match arguments.len() {
+                0 => Ok((*element_type).clone()),
+                1 => {
+                    if self.infer_expression_type(&arguments[0])? != ValueType::Int {
+                        return Err(CompilerError::semantic_message(
+                            "列表方法 `pop` 的索引参数必须是整数",
+                            arguments[0].span(),
+                        ));
+                    }
+                    Ok((*element_type).clone())
+                }
+                _ => Err(CompilerError::semantic_message(
+                    "列表方法 `pop` 最多接受一个参数",
+                    span,
+                )),
+            },
+            ListMethod::Sort | ListMethod::Reverse => {
+                if !arguments.is_empty() {
+                    return Err(CompilerError::semantic_message(
+                        format!("列表方法 `{}` 不接受参数", method.display_name()),
+                        span,
+                    ));
+                }
+                Ok(ValueType::Unit)
+            }
         }
     }
 
     /// 校验赋值语句或复合赋值语句的结果类型是否合法。
     fn infer_assignment_type(
         &self,
-        left: ValueType,
-        right: ValueType,
+        left: &ValueType,
+        right: &ValueType,
         op: AssignOp,
         span: Span,
     ) -> Result<ValueType, CompilerError> {
         match op {
-            AssignOp::Assign => Ok(right),
+            AssignOp::Assign => Ok(right.clone()),
             AssignOp::AddAssign => self.infer_binary_value_type(BinaryOp::Add, left, right, span),
             AssignOp::SubtractAssign => {
                 self.infer_binary_value_type(BinaryOp::Subtract, left, right, span)
@@ -481,20 +711,20 @@ impl<'a> SemanticAnalyzer<'a> {
     ) -> Result<ValueType, CompilerError> {
         let left_type = self.infer_expression_type(left)?;
         let right_type = self.infer_expression_type(right)?;
-        self.infer_binary_value_type(op, left_type, right_type, span)
+        self.infer_binary_value_type(op, &left_type, &right_type, span)
     }
 
     /// 在已知左右值类型的前提下，推导二元表达式的结果类型。
     fn infer_binary_value_type(
         &self,
         op: BinaryOp,
-        left: ValueType,
-        right: ValueType,
+        left: &ValueType,
+        right: &ValueType,
         span: Span,
     ) -> Result<ValueType, CompilerError> {
         match op {
             BinaryOp::And | BinaryOp::Or => {
-                if left == ValueType::Bool && right == ValueType::Bool {
+                if left == &ValueType::Bool && right == &ValueType::Bool {
                     Ok(ValueType::Bool)
                 } else {
                     Err(CompilerError::semantic_message("逻辑运算只支持布尔值", span))
@@ -523,18 +753,18 @@ impl<'a> SemanticAnalyzer<'a> {
                 _ => Err(CompilerError::semantic_message("当前类型不支持除法运算", span)),
             },
             BinaryOp::Modulo | BinaryOp::IntDivide => {
-                if left == ValueType::Int && right == ValueType::Int {
+                if left == &ValueType::Int && right == &ValueType::Int {
                     Ok(ValueType::Int)
                 } else {
                     Err(CompilerError::semantic_message("取模和整数除法只支持整数", span))
                 }
             }
             BinaryOp::Equal | BinaryOp::NotEqual => {
-                if left == right && left != ValueType::Unit {
+                if left == right && left != &ValueType::Unit && !matches!(left, ValueType::List(_)) {
                     Ok(ValueType::Bool)
                 } else {
                     Err(CompilerError::semantic_message(
-                        "相等比较要求两侧类型一致且不能为空类型",
+                        "相等比较要求两侧类型一致且不能为空类型或列表类型",
                         span,
                     ))
                 }
@@ -590,8 +820,31 @@ impl<'a> SemanticAnalyzer<'a> {
                     span,
                 ));
             }
-            self.infer_expression_type(&arguments[0])?;
+            let argument_type = self.infer_expression_type(&arguments[0])?;
+            if matches!(argument_type, ValueType::Unit | ValueType::List(_)) {
+                return Err(CompilerError::semantic_message(
+                    "当前阶段 `print` 只支持打印基础类型",
+                    arguments[0].span(),
+                ));
+            }
             return Ok(ValueType::Unit);
+        }
+
+        if name == "len" {
+            if arguments.len() != 1 {
+                return Err(CompilerError::semantic_message(
+                    "内建函数 `len` 需要且只接受一个参数",
+                    span,
+                ));
+            }
+            let argument_type = self.infer_expression_type(&arguments[0])?;
+            if !matches!(argument_type, ValueType::List(_)) {
+                return Err(CompilerError::semantic_message(
+                    "当前阶段 `len` 只支持列表类型",
+                    arguments[0].span(),
+                ));
+            }
+            return Ok(ValueType::Int);
         }
 
         let signature = self.functions.get(name).cloned().ok_or_else(|| {
@@ -615,7 +868,7 @@ impl<'a> SemanticAnalyzer<'a> {
             .zip(arguments.iter())
             .enumerate()
         {
-            let actual = self.infer_expression_type(argument)?;
+            let actual = self.infer_expression_type_with_hint(argument, Some(expected))?;
             if *expected != actual {
                 return Err(CompilerError::semantic_message(
                     format!("函数 `{name}` 的第 {} 个参数类型不匹配", index + 1),
@@ -683,17 +936,17 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    /// 在当前帧和全局作用域中按可见性顺序查找变量类型。
-    fn lookup(&self, name: &str) -> Option<SymbolInfo> {
+    /// 在当前帧和全局作用域中按可见性顺序查找变量。
+    fn lookup(&self, name: &str) -> Option<&SymbolInfo> {
         let frame_start = *self.frame_starts.last().expect("帧栈至少包含顶层帧");
         for scope in self.scopes[frame_start..].iter().rev() {
             if let Some(symbol) = scope.get(name) {
-                return Some(*symbol);
+                return Some(symbol);
             }
         }
 
         if frame_start > 0 {
-            return self.scopes[0].get(name).copied();
+            return self.scopes[0].get(name);
         }
 
         None
@@ -772,5 +1025,32 @@ mod tests {
     fn should_reject_const_reassignment() {
         let error = analyze("const answer = 42\nanswer = 1\n").unwrap_err();
         assert!(error.contains("常量 `answer` 不能重新赋值"));
+    }
+
+    /// 校验非同构列表字面量会在语义阶段被拒绝。
+    #[test]
+    fn should_reject_mixed_list_literal() {
+        let error = analyze("var items = [1, true]\n").unwrap_err();
+        assert!(error.contains("列表字面量中的元素类型必须保持一致"));
+    }
+
+    /// 校验空列表字面量必须带有显式类型上下文。
+    #[test]
+    fn should_reject_empty_list_without_annotation() {
+        let error = analyze("var items = []\n").unwrap_err();
+        assert!(error.contains("空列表字面量必须放在显式 `list<T>` 类型上下文中"));
+    }
+
+    /// 校验列表遍历会把循环变量绑定为元素类型。
+    #[test]
+    fn should_accept_for_each_on_list() {
+        analyze("var items:list<int> = [1, 2]\nfor item in items:\n    print(item)\n").unwrap();
+    }
+
+    /// 校验列表方法调用的参数类型需要和元素类型一致。
+    #[test]
+    fn should_reject_invalid_list_method_argument_type() {
+        let error = analyze("var items:list<int> = [1]\nitems.append(true)\n").unwrap_err();
+        assert!(error.contains("参数类型不匹配"));
     }
 }

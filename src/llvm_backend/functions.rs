@@ -21,12 +21,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             let parameter_types = parameters
                 .iter()
                 .map(|parameter| {
-                    self.basic_metadata_type_for(value_type_from_annotation(parameter.type_name))
+                    self.basic_metadata_type_for(&value_type_from_annotation(&parameter.type_name))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let function_type = match return_type.map(value_type_from_annotation) {
+            let function_type = match return_type.as_ref().map(value_type_from_annotation) {
                 Some(value_type) => self
-                    .basic_type_for(value_type)?
+                    .basic_type_for(&value_type)?
                     .fn_type(&parameter_types, false),
                 None => self.context.void_type().fn_type(&parameter_types, false),
             };
@@ -38,6 +38,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 UserFunctionInfo {
                     function,
                     return_type: return_type
+                        .as_ref()
                         .map(value_type_from_annotation)
                         .unwrap_or(ValueType::Unit),
                 },
@@ -87,6 +88,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.current_function = Some(info.function);
         self.current_return_type = return_type
+            .as_ref()
             .map(value_type_from_annotation)
             .unwrap_or(ValueType::Unit);
         self.scopes = vec![HashMap::new()];
@@ -99,8 +101,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     parameter.span,
                 )
             })?;
-            let value_type = value_type_from_annotation(parameter.type_name);
-            let pointer = self.allocate_local(value_type, &parameter.name)?;
+            let value_type = value_type_from_annotation(&parameter.type_name);
+            let pointer = self.allocate_local(&value_type, &parameter.name)?;
             self.map_builder(self.builder.build_store(pointer, value))?;
             self.current_scope_mut().insert(
                 parameter.name.clone(),
@@ -114,7 +116,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         let terminated = self.compile_statements(body)?;
         if !terminated {
-            match self.current_return_type {
+            match self.current_return_type.clone() {
                 ValueType::Unit => {
                     self.map_builder(self.builder.build_return(None))?;
                 }

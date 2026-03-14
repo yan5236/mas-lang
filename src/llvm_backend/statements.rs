@@ -33,24 +33,40 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 initializer,
                 span,
             } => {
-                let compiled = self.compile_expr(initializer)?;
-                let value = self.expect_value(compiled)?;
                 let expected = annotation
                     .as_ref()
-                    .map(|annotation| value_type_from_annotation(*annotation))
-                    .unwrap_or(value.value_type);
+                    .map(value_type_from_annotation);
+                let value = match (initializer, expected.as_ref()) {
+                    (Expr::ListLiteral { elements, .. }, Some(ValueType::List(element_type)))
+                        if elements.is_empty() =>
+                    {
+                        TypedValue {
+                            value_type: ValueType::List(element_type.clone()),
+                            value: self.build_empty_list(element_type)?.into(),
+                        }
+                    }
+                    _ => {
+                        let compiled = self.compile_expr(initializer)?;
+                        self.expect_value(compiled)?
+                    }
+                };
+                let expected = expected.unwrap_or_else(|| value.value_type.clone());
                 if expected != value.value_type {
                     return Err(CompilerError::build_message(
-                        format!("变量 `{name}` 的初始化值无法按 `{}` 落地", expected.display_name()),
+                        format!(
+                            "变量 `{name}` 的初始化值无法按 `{}` 落地",
+                            expected.display_name()
+                        ),
                         *span,
                     ));
                 }
 
                 if self.is_top_level_scope() {
-                    let variable = self.declare_global(name, expected, binding_kind.is_mutable())?;
+                    let variable =
+                        self.declare_global(name, expected.clone(), binding_kind.is_mutable())?;
                     self.store_variable(variable, value.value)?;
                 } else {
-                    let pointer = self.allocate_local(expected, name)?;
+                    let pointer = self.allocate_local(&expected, name)?;
                     self.map_builder(self.builder.build_store(pointer, value.value))?;
                     self.current_scope_mut().insert(
                         name.clone(),
@@ -86,7 +102,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         self.expect_value(compiled)?
                     }
                     _ => {
-                        let current = self.load_variable(variable)?;
+                        let current = self.load_variable(variable.clone())?;
                         let compiled = self.compile_expr(value)?;
                         let right = self.expect_value(compiled)?;
                         let binary_op = match op {
@@ -122,6 +138,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 body,
                 span,
             } => self.compile_for_range(name, start, end, body, *span),
+            Stmt::ForEach {
+                name,
+                iterable,
+                body,
+                span,
+            } => self.compile_for_each(name, iterable, body, *span),
             Stmt::Break { span } => {
                 let loop_context = self.loop_stack.last().ok_or_else(|| {
                     CompilerError::build_message("代码生成阶段遇到了非法的 break", *span)
@@ -159,7 +181,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         value: Option<&Expr>,
         span: Span,
     ) -> Result<(), CompilerError> {
-        match (self.current_return_type, value) {
+        match (self.current_return_type.clone(), value) {
             (ValueType::Unit, None) => self.map_builder(self.builder.build_return(None)).map(|_| ()),
             (ValueType::Unit, Some(_)) => Err(CompilerError::build_message(
                 "当前函数没有返回值，return 后不能跟表达式",
@@ -300,8 +322,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
 
         self.push_scope();
-        let iter_pointer = self.allocate_local(ValueType::Int, &format!("{name}.iter"))?;
-        let end_pointer = self.allocate_local(ValueType::Int, &format!("{name}.end"))?;
+        let iter_pointer = self.allocate_local(&ValueType::Int, &format!("{name}.iter"))?;
+        let end_pointer = self.allocate_local(&ValueType::Int, &format!("{name}.end"))?;
         self.map_builder(self.builder.build_store(iter_pointer, start_value.value))?;
         self.map_builder(self.builder.build_store(end_pointer, end_value.value))?;
         self.current_scope_mut().insert(
@@ -366,6 +388,99 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             iter_now,
             self.context.i64_type().const_int(1, false),
             "for.next",
+        ))?;
+        self.map_builder(self.builder.build_store(iter_pointer, next))?;
+        self.map_builder(self.builder.build_unconditional_branch(header_block))?;
+
+        self.builder.position_at_end(exit_block);
+        self.pop_scope();
+        Ok(false)
+    }
+
+    /// 编译 `for item in list` 形式的列表遍历循环。
+    pub(super) fn compile_for_each(
+        &mut self,
+        name: &str,
+        iterable: &Expr,
+        body: &[Stmt],
+        span: Span,
+    ) -> Result<bool, CompilerError> {
+        let function = self.current_function.expect("当前必须处于函数编译上下文");
+        let compiled_iterable = self.compile_expr(iterable)?;
+        let iterable_value = self.expect_value(compiled_iterable)?;
+        let (list_value, element_type) = self.expect_list_value(iterable_value, span)?;
+
+        self.push_scope();
+        let iter_pointer = self.allocate_local(&ValueType::Int, &format!("{name}.iter"))?;
+        let item_pointer = self.allocate_local(&element_type, name)?;
+        self.map_builder(self.builder.build_store(
+            iter_pointer,
+            self.context.i64_type().const_zero(),
+        ))?;
+        self.current_scope_mut().insert(
+            name.to_string(),
+            VariableInfo {
+                value_type: element_type.clone(),
+                pointer: item_pointer,
+                is_mutable: true,
+            },
+        );
+
+        let header_block = self.context.append_basic_block(function, "foreach.header");
+        let body_block = self.context.append_basic_block(function, "foreach.body");
+        let continue_block = self.context.append_basic_block(function, "foreach.continue");
+        let exit_block = self.context.append_basic_block(function, "foreach.exit");
+
+        self.map_builder(self.builder.build_unconditional_branch(header_block))?;
+        self.builder.position_at_end(header_block);
+        let current = self
+            .map_builder(
+                self.builder
+                    .build_load(self.context.i64_type(), iter_pointer, "foreach.current"),
+            )?
+            .into_int_value();
+        let len_call = self.map_builder(self.builder.build_call(
+            self.runtime.list_len,
+            &[list_value.into()],
+            "foreach.len",
+        ))?;
+        let len_value = len_call.try_as_basic_value().unwrap_basic().into_int_value();
+        let condition = self.map_builder(self.builder.build_int_compare(
+            IntPredicate::SLT,
+            current,
+            len_value,
+            "foreach.cond",
+        ))?;
+        self.map_builder(self.builder.build_conditional_branch(
+            condition,
+            body_block,
+            exit_block,
+        ))?;
+
+        self.builder.position_at_end(body_block);
+        let item_value = self.build_list_get(list_value, &element_type, current, span)?;
+        self.map_builder(self.builder.build_store(item_pointer, item_value.value))?;
+        self.loop_stack.push(LoopContext {
+            break_block: exit_block,
+            continue_block,
+        });
+        let terminated = self.compile_statements(body)?;
+        self.loop_stack.pop();
+        if !terminated && !self.current_block_has_terminator() {
+            self.map_builder(self.builder.build_unconditional_branch(continue_block))?;
+        }
+
+        self.builder.position_at_end(continue_block);
+        let iter_now = self
+            .map_builder(
+                self.builder
+                    .build_load(self.context.i64_type(), iter_pointer, "foreach.next.load"),
+            )?
+            .into_int_value();
+        let next = self.map_builder(self.builder.build_int_add(
+            iter_now,
+            self.context.i64_type().const_int(1, false),
+            "foreach.next",
         ))?;
         self.map_builder(self.builder.build_store(iter_pointer, next))?;
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;

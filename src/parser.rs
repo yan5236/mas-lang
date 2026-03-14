@@ -1,13 +1,13 @@
 use crate::ast::{
-    AssignOp, BinaryOp, BindingKind, ConditionalBranch, Expr, Literal, Parameter, Program, Stmt,
-    TypeName, UnaryOp,
+    AssignOp, BinaryOp, BindingKind, ConditionalBranch, Expr, ListMethod, Literal, Parameter,
+    Program, Stmt, TypeName, UnaryOp,
 };
 use crate::diagnostic::CompilerError;
 use crate::settings::CompilerSettings;
 use crate::source::Span;
 use crate::token::{Token, TokenKind, TokenTag};
 
-/// 根据词法单元序列构建第二阶段使用的抽象语法树。
+/// 根据词法单元序列构建第三阶段列表能力所需的抽象语法树。
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     current: usize,
@@ -215,20 +215,29 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析 `for i in start..end :` 形式的范围循环语句。
+    /// 解析范围循环或列表遍历循环。
     fn parse_for_statement(&mut self) -> Result<Stmt, CompilerError> {
         let start = self.previous().span;
         let (name, _) = self.consume_identifier("for 循环缺少循环变量名")?;
         self.consume(TokenTag::In, "for 循环缺少 `in` 关键字")?;
-        let range_start = self.parse_expression()?;
-        self.consume(TokenTag::DotDot, "for 循环范围缺少 `..`")?;
-        let range_end = self.parse_expression()?;
-        let (body, body_span) = self.parse_suite("for 循环缺少代码块")?;
+        let iterable_or_start = self.parse_expression()?;
 
-        Ok(Stmt::ForRange {
+        if self.match_tag(TokenTag::DotDot) {
+            let range_end = self.parse_expression()?;
+            let (body, body_span) = self.parse_suite("for 循环缺少代码块")?;
+            return Ok(Stmt::ForRange {
+                name,
+                start: iterable_or_start,
+                end: range_end,
+                body,
+                span: Span::merge(start, body_span),
+            });
+        }
+
+        let (body, body_span) = self.parse_suite("for 循环缺少代码块")?;
+        Ok(Stmt::ForEach {
             name,
-            start: range_start,
-            end: range_end,
+            iterable: iterable_or_start,
             body,
             span: Span::merge(start, body_span),
         })
@@ -251,7 +260,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析普通表达式语句，例如函数调用。
+    /// 解析普通表达式语句，例如函数调用或列表方法调用。
     fn parse_expression_statement(&mut self) -> Result<Stmt, CompilerError> {
         let expr = self.parse_expression()?;
         Ok(Stmt::ExprStmt {
@@ -436,38 +445,128 @@ impl<'a> Parser<'a> {
             });
         }
 
-        self.parse_call()
+        self.parse_postfix()
     }
 
-    /// 解析函数调用后缀，支持 `callee(arg1, arg2)` 形式。
-    fn parse_call(&mut self) -> Result<Expr, CompilerError> {
+    /// 解析函数调用、索引、切片和列表方法调用等后缀表达式。
+    fn parse_postfix(&mut self) -> Result<Expr, CompilerError> {
         let mut expr = self.parse_primary()?;
 
-        while self.match_tag(TokenTag::LeftParen) {
-            let open_span = self.previous().span;
-            let mut arguments = Vec::new();
-
-            if !self.check(TokenTag::RightParen) {
-                loop {
-                    arguments.push(self.parse_expression()?);
-                    if !self.match_tag(TokenTag::Comma) {
-                        break;
-                    }
-                }
+        loop {
+            if self.match_tag(TokenTag::LeftParen) {
+                expr = self.finish_call(expr)?;
+                continue;
             }
-
-            let close = self.consume(TokenTag::RightParen, "函数调用缺少右括号 `)`")?;
-            expr = Expr::Call {
-                callee: Box::new(expr),
-                arguments,
-                span: Span::merge(open_span, close.span),
-            };
+            if self.match_tag(TokenTag::LeftBracket) {
+                expr = self.finish_index_or_slice(expr)?;
+                continue;
+            }
+            if self.match_tag(TokenTag::Dot) {
+                expr = self.finish_list_method_call(expr)?;
+                continue;
+            }
+            break;
         }
 
         Ok(expr)
     }
 
-    /// 解析字面量、标识符和分组表达式等基础节点。
+    /// 解析函数调用参数列表并生成调用表达式。
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, CompilerError> {
+        let open_span = self.previous().span;
+        let mut arguments = Vec::new();
+
+        if !self.check(TokenTag::RightParen) {
+            loop {
+                arguments.push(self.parse_expression()?);
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
+                }
+            }
+        }
+
+        let close = self.consume(TokenTag::RightParen, "函数调用缺少右括号 `)`")?;
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            arguments,
+            span: Span::merge(open_span, close.span),
+        })
+    }
+
+    /// 解析索引访问或切片表达式。
+    fn finish_index_or_slice(&mut self, target: Expr) -> Result<Expr, CompilerError> {
+        let open_span = self.previous().span;
+        if self.match_tag(TokenTag::Colon) {
+            let end = if self.check(TokenTag::RightBracket) {
+                None
+            } else {
+                Some(Box::new(self.parse_expression()?))
+            };
+            let close = self.consume(TokenTag::RightBracket, "切片表达式缺少右方括号 `]`")?;
+            return Ok(Expr::Slice {
+                target: Box::new(target),
+                start: None,
+                end,
+                span: Span::merge(open_span, close.span),
+            });
+        }
+
+        let first = self.parse_expression()?;
+        if self.match_tag(TokenTag::Colon) {
+            let end = if self.check(TokenTag::RightBracket) {
+                None
+            } else {
+                Some(Box::new(self.parse_expression()?))
+            };
+            let close = self.consume(TokenTag::RightBracket, "切片表达式缺少右方括号 `]`")?;
+            return Ok(Expr::Slice {
+                target: Box::new(target),
+                start: Some(Box::new(first)),
+                end,
+                span: Span::merge(open_span, close.span),
+            });
+        }
+
+        let close = self.consume(TokenTag::RightBracket, "索引表达式缺少右方括号 `]`")?;
+        Ok(Expr::Index {
+            target: Box::new(target),
+            index: Box::new(first),
+            span: Span::merge(open_span, close.span),
+        })
+    }
+
+    /// 解析列表方法调用，不引入通用成员访问语义。
+    fn finish_list_method_call(&mut self, target: Expr) -> Result<Expr, CompilerError> {
+        let dot_span = self.previous().span;
+        let (method_name, method_span) = self.consume_identifier("列表方法调用缺少方法名")?;
+        let method = ListMethod::parse(&method_name).ok_or_else(|| {
+            CompilerError::syntax_message(
+                format!("当前阶段不支持列表方法 `{method_name}`"),
+                method_span,
+            )
+        })?;
+        self.consume(TokenTag::LeftParen, "列表方法调用缺少左括号 `(`")?;
+        let mut arguments = Vec::new();
+
+        if !self.check(TokenTag::RightParen) {
+            loop {
+                arguments.push(self.parse_expression()?);
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
+                }
+            }
+        }
+
+        let close = self.consume(TokenTag::RightParen, "列表方法调用缺少右括号 `)`")?;
+        Ok(Expr::ListMethodCall {
+            target: Box::new(target),
+            method,
+            arguments,
+            span: Span::merge(dot_span, close.span),
+        })
+    }
+
+    /// 解析字面量、标识符、列表字面量和分组表达式等基础节点。
     fn parse_primary(&mut self) -> Result<Expr, CompilerError> {
         let token = self.advance().clone();
 
@@ -500,15 +599,47 @@ impl<'a> Parser<'a> {
                     span: Span::merge(token.span, close.span),
                 })
             }
+            TokenKind::LeftBracket => self.parse_list_literal(token.span),
             _ => Err(CompilerError::syntax_message("这里需要一个表达式", token.span)),
         }
     }
 
-    /// 解析显式类型标注中的内建类型名称。
+    /// 解析列表字面量。
+    fn parse_list_literal(&mut self, start: Span) -> Result<Expr, CompilerError> {
+        let mut elements = Vec::new();
+
+        if !self.check(TokenTag::RightBracket) {
+            loop {
+                elements.push(self.parse_expression()?);
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
+                }
+            }
+        }
+
+        let close = self.consume(TokenTag::RightBracket, "列表字面量缺少右方括号 `]`")?;
+        Ok(Expr::ListLiteral {
+            elements,
+            span: Span::merge(start, close.span),
+        })
+    }
+
+    /// 解析显式类型标注中的内建类型名称或 `list<T>` 类型。
     fn parse_type_name(&mut self) -> Result<TypeName, CompilerError> {
         let (name, span) = self.consume_identifier("类型标注缺少类型名")?;
-        TypeName::parse(&name)
-            .ok_or_else(|| CompilerError::syntax_message(format!("未知的内建类型 `{name}`"), span))
+        match name.as_str() {
+            "int" => Ok(TypeName::Int),
+            "float" => Ok(TypeName::Float),
+            "bool" => Ok(TypeName::Bool),
+            "string" => Ok(TypeName::String),
+            "list" => {
+                self.consume(TokenTag::Less, "`list` 类型缺少左尖括号 `<`")?;
+                let element_type = self.parse_type_name()?;
+                self.consume(TokenTag::Greater, "`list` 类型缺少右尖括号 `>`")?;
+                Ok(TypeName::List(Box::new(element_type)))
+            }
+            _ => Err(CompilerError::syntax_message(format!("未知的内建类型 `{name}`"), span)),
+        }
     }
 
     /// 解析赋值运算符，并转换为语法树内部的赋值类型枚举。
@@ -660,7 +791,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::Parser;
-    use crate::ast::{AssignOp, BinaryOp, BindingKind, Expr, Stmt, UnaryOp};
+    use crate::ast::{AssignOp, BinaryOp, BindingKind, Expr, ListMethod, Stmt, TypeName, UnaryOp};
     use crate::lexer::Lexer;
     use crate::settings::{CompilerSettings, UiLanguage};
     use crate::source::SourceFile;
@@ -706,6 +837,13 @@ mod tests {
         assert!(matches!(program.statements[0], Stmt::ForRange { .. }));
     }
 
+    /// 校验列表遍历循环会被解析为独立语句节点。
+    #[test]
+    fn should_parse_for_each_statement() {
+        let program = parse("for item in items:\n    print(item)\n");
+        assert!(matches!(program.statements[0], Stmt::ForEach { .. }));
+    }
+
     /// 校验复合赋值运算符能够被解析为独立赋值类型。
     #[test]
     fn should_parse_compound_assignment() {
@@ -749,5 +887,24 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// 校验列表字面量、索引、切片和方法调用能够被正确解析。
+    #[test]
+    fn should_parse_list_expressions() {
+        let program = parse("var items:list<int> = [1, 2, 3]\nprint(items[1])\nprint(items[1:3])\nitems.append(4)\n");
+        let Stmt::VarDecl { annotation, initializer, .. } = &program.statements[0] else {
+            panic!("首条语句不是绑定声明");
+        };
+        assert!(matches!(annotation, Some(TypeName::List(_))));
+        assert!(matches!(initializer, Expr::ListLiteral { .. }));
+
+        let Stmt::ExprStmt { expr, .. } = &program.statements[3] else {
+            panic!("第四条语句不是表达式语句");
+        };
+        let Expr::ListMethodCall { method, .. } = expr else {
+            panic!("第四条语句不是列表方法调用");
+        };
+        assert_eq!(*method, ListMethod::Append);
     }
 }

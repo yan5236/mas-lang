@@ -109,3 +109,30 @@ fn should_dispatch_print_runtime_by_value_type() {
     assert!(ir.contains("print_bool"));
     assert!(ir.contains("print_string"));
 }
+
+/// 校验列表操作会引用新增的列表运行时符号。
+#[test]
+fn should_emit_list_runtime_symbols() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var items:list<int> = [3, 1, 2]\n    items.append(4)\n    print(len(items))\n    print(items[1])\n    print(items[1:3][0])\n    print(items.contains(2))\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("list_create"));
+    assert!(ir.contains("list_append_int"));
+    assert!(ir.contains("list_len"));
+    assert!(ir.contains("list_get_int"));
+    assert!(ir.contains("list_slice"));
+    assert!(ir.contains("list_contains_int"));
+}
+
+/// 校验 `for item in list` 会生成独立的遍历控制流块。
+#[test]
+fn should_emit_for_each_blocks() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var items:list<int> = [1, 2, 3]\n    for item in items:\n        print(item)\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("foreach.header"));
+    assert!(ir.contains("foreach.continue"));
+    assert!(ir.contains("foreach.exit"));
+}

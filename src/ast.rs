@@ -84,6 +84,12 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    ForEach {
+        name: String,
+        iterable: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     Break {
         span: Span,
     },
@@ -110,6 +116,7 @@ impl Stmt {
             | Self::If { span, .. }
             | Self::While { span, .. }
             | Self::ForRange { span, .. }
+            | Self::ForEach { span, .. }
             | Self::Break { span }
             | Self::Continue { span }
             | Self::Return { span, .. }
@@ -145,6 +152,27 @@ pub enum Expr {
         arguments: Vec<Expr>,
         span: Span,
     },
+    ListLiteral {
+        elements: Vec<Expr>,
+        span: Span,
+    },
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
+    Slice {
+        target: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        span: Span,
+    },
+    ListMethodCall {
+        target: Box<Expr>,
+        method: ListMethod,
+        arguments: Vec<Expr>,
+        span: Span,
+    },
     Grouped {
         expression: Box<Expr>,
         span: Span,
@@ -160,7 +188,52 @@ impl Expr {
             | Self::Binary { span, .. }
             | Self::Unary { span, .. }
             | Self::Call { span, .. }
+            | Self::ListLiteral { span, .. }
+            | Self::Index { span, .. }
+            | Self::Slice { span, .. }
+            | Self::ListMethodCall { span, .. }
             | Self::Grouped { span, .. } => *span,
+        }
+    }
+}
+
+/// 表示列表对象当前阶段支持的方法名称。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ListMethod {
+    Append,
+    Remove,
+    Pop,
+    Sort,
+    Reverse,
+    Index,
+    Contains,
+}
+
+impl ListMethod {
+    /// 根据源码中的方法名文本解析出对应的列表方法枚举。
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "append" => Some(Self::Append),
+            "remove" => Some(Self::Remove),
+            "pop" => Some(Self::Pop),
+            "sort" => Some(Self::Sort),
+            "reverse" => Some(Self::Reverse),
+            "index" => Some(Self::Index),
+            "contains" => Some(Self::Contains),
+            _ => None,
+        }
+    }
+
+    /// 返回方法在错误消息中使用的稳定文本。
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Append => "append",
+            Self::Remove => "remove",
+            Self::Pop => "pop",
+            Self::Sort => "sort",
+            Self::Reverse => "reverse",
+            Self::Index => "index",
+            Self::Contains => "contains",
         }
     }
 }
@@ -212,12 +285,13 @@ pub enum UnaryOp {
 }
 
 /// 表示显式类型标注中允许出现的内建类型。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypeName {
     Int,
     Float,
     Bool,
     String,
+    List(Box<TypeName>),
 }
 
 impl TypeName {

@@ -34,7 +34,7 @@ pub struct GeneratedObject {
 }
 
 /// 保存单个变量的类型、指针位置和可变性信息。
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct VariableInfo<'ctx> {
     value_type: ValueType,
     pointer: PointerValue<'ctx>,
@@ -42,7 +42,7 @@ struct VariableInfo<'ctx> {
 }
 
 /// 保存表达式在 LLVM 中的值和静态类型。
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TypedValue<'ctx> {
     value_type: ValueType,
     value: BasicValueEnum<'ctx>,
@@ -69,6 +69,10 @@ struct RuntimeFunctions<'ctx> {
     print_string: FunctionValue<'ctx>,
     string_concat: FunctionValue<'ctx>,
     string_equals: FunctionValue<'ctx>,
+    list_create: FunctionValue<'ctx>,
+    list_len: FunctionValue<'ctx>,
+    list_slice: FunctionValue<'ctx>,
+    list_reverse: FunctionValue<'ctx>,
 }
 
 /// 保存循环内 `break` 与 `continue` 的目标基本块。
@@ -156,7 +160,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             } = statement
             {
-                self.compile_user_function(name, parameters, *return_type, body, *span)?;
+                self.compile_user_function(name, parameters, return_type.clone(), body, *span)?;
             }
         }
 
@@ -196,12 +200,13 @@ fn create_target_machine(
 }
 
 /// 把语法树中的类型标注转换为代码生成阶段复用的静态类型。
-fn value_type_from_annotation(annotation: TypeName) -> ValueType {
+fn value_type_from_annotation(annotation: &TypeName) -> ValueType {
     match annotation {
         TypeName::Int => ValueType::Int,
         TypeName::Float => ValueType::Float,
         TypeName::Bool => ValueType::Bool,
         TypeName::String => ValueType::String,
+        TypeName::List(element) => ValueType::List(Box::new(value_type_from_annotation(element))),
     }
 }
 

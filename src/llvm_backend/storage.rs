@@ -14,30 +14,33 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         value_type: ValueType,
         is_mutable: bool,
     ) -> Result<VariableInfo<'ctx>, CompilerError> {
-        if let Some(variable) = self.globals.get(name).copied() {
+        if let Some(variable) = self.globals.get(name).cloned() {
             return Ok(variable);
         }
 
         let symbol = format!("__ms_global_{}_{}", name, self.global_index);
         self.global_index += 1;
-        let global = self.module.add_global(self.basic_type_for(value_type)?, None, &symbol);
-        self.initialize_global(&global, value_type);
+        let global = self
+            .module
+            .add_global(self.basic_type_for(&value_type)?, None, &symbol);
+        self.initialize_global(&global, &value_type);
         let variable = VariableInfo {
             value_type,
             pointer: global.as_pointer_value(),
             is_mutable,
         };
-        self.globals.insert(name.to_string(), variable);
+        self.globals.insert(name.to_string(), variable.clone());
         Ok(variable)
     }
 
     /// 为全局变量写入零值初始化器，确保在入口执行前内存布局稳定。
-    pub(super) fn initialize_global(&self, global: &GlobalValue<'ctx>, value_type: ValueType) {
+    pub(super) fn initialize_global(&self, global: &GlobalValue<'ctx>, value_type: &ValueType) {
         match value_type {
             ValueType::Int => global.set_initializer(&self.context.i64_type().const_zero()),
             ValueType::Float => global.set_initializer(&self.context.f64_type().const_zero()),
             ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
             ValueType::String => global.set_initializer(&self.string_type.const_zero()),
+            ValueType::List(_) => global.set_initializer(&self.list_pointer_type().const_null()),
             ValueType::Unit => {}
         }
     }
@@ -45,7 +48,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 为局部变量创建栈内存槽位。
     pub(super) fn allocate_local(
         &self,
-        value_type: ValueType,
+        value_type: &ValueType,
         name: &str,
     ) -> Result<PointerValue<'ctx>, CompilerError> {
         self.map_builder(
@@ -60,7 +63,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         variable: VariableInfo<'ctx>,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         let value = self.map_builder(self.builder.build_load(
-            self.basic_type_for(variable.value_type)?,
+            self.basic_type_for(&variable.value_type)?,
             variable.pointer,
             "load.var",
         ))?;
@@ -83,13 +86,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 返回指定语义类型在 LLVM 中对应的基础类型对象。
     pub(super) fn basic_type_for(
         &self,
-        value_type: ValueType,
+        value_type: &ValueType,
     ) -> Result<BasicTypeEnum<'ctx>, CompilerError> {
         Ok(match value_type {
             ValueType::Int => self.context.i64_type().into(),
             ValueType::Float => self.context.f64_type().into(),
             ValueType::Bool => self.context.bool_type().into(),
             ValueType::String => self.string_type.into(),
+            ValueType::List(_) => self.list_pointer_type().into(),
             ValueType::Unit => {
                 return Err(CompilerError::build_message(
                     "unit 不应该被映射为可存储的基础类型",
@@ -102,9 +106,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 把基础类型转换为函数签名所需的元数据类型。
     pub(super) fn basic_metadata_type_for(
         &self,
-        value_type: ValueType,
+        value_type: &ValueType,
     ) -> Result<BasicMetadataTypeEnum<'ctx>, CompilerError> {
         Ok(self.basic_type_for(value_type)?.into())
+    }
+
+    /// 返回后端中统一使用的列表句柄指针类型。
+    pub(super) fn list_pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
+        self.context.ptr_type(inkwell::AddressSpace::default())
     }
 
     /// 统一包装所有 Inkwell 构建器错误，转换成内部构建诊断。
@@ -144,8 +153,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(name).copied())
-            .or_else(|| self.globals.get(name).copied())
+            .find_map(|scope| scope.get(name).cloned())
+            .or_else(|| self.globals.get(name).cloned())
     }
 
     /// 压入一个新的块级作用域。
