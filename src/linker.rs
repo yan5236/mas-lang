@@ -248,4 +248,14 @@ mod tests {
         );
         assert_eq!(output, "3\n3\n4\n1\n2\ntrue\n3\n3\n4\n1\n3\n3\n2\n3\n1\n");
     }
+
+    /// 校验递归函数结合 `if / else` 全分支返回时，仍能通过 LLVM 后端完整编译并运行。
+    #[test]
+    fn should_build_and_run_recursive_program() {
+        let output = build_and_run(
+            "recursive",
+            "func factorial(n:int) -> int:\n    if n <= 1:\n        return 1\n    else:\n        return n * factorial(n - 1)\nfunc main():\n    print(factorial(5))\n",
+        );
+        assert_eq!(output, "120\n");
+    }
 }

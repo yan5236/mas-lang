@@ -156,6 +156,15 @@ unsafe fn get_value<T: Copy>(list: *const MsList, index: u64) -> T {
     read_value::<T>(list_bytes(list), index as usize)
 }
 
+/// 把字符串值拆成 ABI 稳定的指针返回值与长度输出参数。
+unsafe fn write_string_result(value: MsString, out_len: *mut u64) -> *const u8 {
+    if out_len.is_null() {
+        panic_runtime("字符串返回长度输出指针不能为空");
+    }
+    *out_len = value.len;
+    value.ptr
+}
+
 unsafe fn remove_at(list: *mut MsList, index: u64) {
     with_list_bytes_mut(list, |list, buffer| {
         if index >= list.len {
@@ -267,8 +276,9 @@ pub extern "C" fn list_get_bool(list: *const MsList, index: u64) -> u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn list_get_string(list: *const MsList, index: u64) -> MsString {
-    unsafe { get_value::<MsString>(list, index) }
+pub extern "C" fn list_get_string(list: *const MsList, index: u64, out_len: *mut u64) -> *const u8 {
+    let value = unsafe { get_value::<MsString>(list, index) };
+    unsafe { write_string_result(value, out_len) }
 }
 
 #[unsafe(no_mangle)]
@@ -340,8 +350,8 @@ pub extern "C" fn list_pop_bool(list: *mut MsList) -> u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn list_pop_string(list: *mut MsList) -> MsString {
-    list_pop_at_string(list, unsafe { (*list).len.saturating_sub(1) })
+pub extern "C" fn list_pop_string(list: *mut MsList, out_len: *mut u64) -> *const u8 {
+    list_pop_at_string(list, unsafe { (*list).len.saturating_sub(1) }, out_len)
 }
 
 #[unsafe(no_mangle)]
@@ -366,10 +376,10 @@ pub extern "C" fn list_pop_at_bool(list: *mut MsList, index: u64) -> u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn list_pop_at_string(list: *mut MsList, index: u64) -> MsString {
+pub extern "C" fn list_pop_at_string(list: *mut MsList, index: u64, out_len: *mut u64) -> *const u8 {
     let value = unsafe { get_value::<MsString>(list, index) };
     unsafe { remove_at(list, index) };
-    value
+    unsafe { write_string_result(value, out_len) }
 }
 
 #[unsafe(no_mangle)]

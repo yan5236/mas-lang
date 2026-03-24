@@ -210,7 +210,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         else_branch: Option<&Vec<Stmt>>,
     ) -> Result<bool, CompilerError> {
         let function = self.current_function.expect("当前必须处于函数编译上下文");
-        let after_block = self.context.append_basic_block(function, "if.after");
+        let mut after_block = None;
         let mut next_test_block = None;
         let mut has_fallthrough = else_branch.is_none();
 
@@ -227,7 +227,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 next_test_block = Some(block);
                 block
             } else {
-                after_block
+                *after_block
+                    .get_or_insert_with(|| self.context.append_basic_block(function, "if.after"))
             };
 
             self.map_builder(self.builder.build_conditional_branch(
@@ -240,7 +241,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             let terminated = self.compile_statements(&branch.body)?;
             self.pop_scope();
             if !terminated && !self.current_block_has_terminator() {
-                self.map_builder(self.builder.build_unconditional_branch(after_block))?;
+                let target = *after_block
+                    .get_or_insert_with(|| self.context.append_basic_block(function, "if.after"));
+                self.map_builder(self.builder.build_unconditional_branch(target))?;
                 has_fallthrough = true;
             }
         }
@@ -252,12 +255,16 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             let terminated = self.compile_statements(else_branch)?;
             self.pop_scope();
             if !terminated && !self.current_block_has_terminator() {
-                self.map_builder(self.builder.build_unconditional_branch(after_block))?;
+                let target = *after_block
+                    .get_or_insert_with(|| self.context.append_basic_block(function, "if.after"));
+                self.map_builder(self.builder.build_unconditional_branch(target))?;
                 has_fallthrough = true;
             }
         }
 
         if has_fallthrough {
+            let after_block = *after_block
+                .get_or_insert_with(|| self.context.append_basic_block(function, "if.after"));
             self.builder.position_at_end(after_block);
             Ok(false)
         } else {

@@ -83,7 +83,6 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ),
         };
 
-        let string_struct = context.struct_type(&[ptr_type.into(), i64_type.into()], false);
         let add_void = |name: &str, args: &[inkwell::types::BasicMetadataTypeEnum<'ctx>]| {
             module.add_function(name, void_type.fn_type(args, false), None);
         };
@@ -100,7 +99,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         add_value("list_get_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
         add_value("list_get_float", f64_type.into(), &[ptr_type.into(), i64_type.into()]);
         add_value("list_get_bool", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_get_string", string_struct.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value(
+            "list_get_string",
+            ptr_type.into(),
+            &[ptr_type.into(), i64_type.into(), ptr_type.into()],
+        );
         add_void("list_remove_int", &[ptr_type.into(), i64_type.into()]);
         add_void("list_remove_float", &[ptr_type.into(), f64_type.into()]);
         add_void("list_remove_bool", &[ptr_type.into(), i8_type.into()]);
@@ -108,11 +111,15 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         add_value("list_pop_int", i64_type.into(), &[ptr_type.into()]);
         add_value("list_pop_float", f64_type.into(), &[ptr_type.into()]);
         add_value("list_pop_bool", i8_type.into(), &[ptr_type.into()]);
-        add_value("list_pop_string", string_struct.into(), &[ptr_type.into()]);
+        add_value("list_pop_string", ptr_type.into(), &[ptr_type.into(), ptr_type.into()]);
         add_value("list_pop_at_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
         add_value("list_pop_at_float", f64_type.into(), &[ptr_type.into(), i64_type.into()]);
         add_value("list_pop_at_bool", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_pop_at_string", string_struct.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value(
+            "list_pop_at_string",
+            ptr_type.into(),
+            &[ptr_type.into(), i64_type.into(), ptr_type.into()],
+        );
         add_void("list_sort_int", &[ptr_type.into()]);
         add_void("list_sort_float", &[ptr_type.into()]);
         add_void("list_sort_bool", &[ptr_type.into()]);

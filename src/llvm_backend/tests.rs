@@ -125,6 +125,17 @@ fn should_emit_list_runtime_symbols() {
     assert!(ir.contains("list_contains_int"));
 }
 
+/// 校验字符串列表读取与弹出会改用指针返回加长度输出参数，避免 Windows ABI 结构体返回崩溃。
+#[test]
+fn should_emit_string_list_calls_with_out_len() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var items:list<string> = [\"a\", \"b\"]\n    print(items[0])\n    print(items.pop())\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("call ptr @list_get_string("));
+    assert!(ir.contains("call ptr @list_pop_string("));
+}
+
 /// 校验 `for item in list` 会生成独立的遍历控制流块。
 #[test]
 fn should_emit_for_each_blocks() {
@@ -135,4 +146,14 @@ fn should_emit_for_each_blocks() {
     assert!(ir.contains("foreach.header"));
     assert!(ir.contains("foreach.continue"));
     assert!(ir.contains("foreach.exit"));
+}
+
+/// 校验所有 `if / else` 分支都 `return` 时，后端不会再留下无终结器的悬空汇合块。
+#[test]
+fn should_compile_if_when_all_branches_return() {
+    let (source, program, _) = parse_program(
+        "func choose(value:int) -> int:\n    if value > 0:\n        return 1\n    else:\n        return 0\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("ms_user_choose"));
 }

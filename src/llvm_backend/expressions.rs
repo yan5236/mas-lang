@@ -467,6 +467,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         element_type: &ValueType,
         call_name: &str,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
+        if matches!(element_type, ValueType::String) {
+            return self.build_string_list_result_from_call(function, args, call_name);
+        }
+
         let call = self.map_builder(self.builder.build_call(function, args, call_name))?;
         let raw = call.try_as_basic_value().unwrap_basic();
         match element_type {
@@ -487,6 +491,36 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 value: raw,
             }),
         }
+    }
+
+    /// 处理字符串列表读取与弹出调用，使用额外长度输出参数重建内部字符串值。
+    pub(super) fn build_string_list_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_len_ptr = self.allocate_local(&ValueType::Int, "list.string.out_len")?;
+        self.map_builder(
+            self.builder
+                .build_store(out_len_ptr, self.context.i64_type().const_zero()),
+        )?;
+
+        let mut call_args = args.to_vec();
+        call_args.push(out_len_ptr.into());
+        let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
+        let pointer = call.try_as_basic_value().unwrap_basic().into_pointer_value();
+        let length = self
+            .map_builder(
+                self.builder
+                    .build_load(self.context.i64_type(), out_len_ptr, "load.list.string.len"),
+            )?
+            .into_int_value();
+
+        Ok(TypedValue {
+            value_type: ValueType::String,
+            value: self.build_runtime_string(pointer, length)?.into(),
+        })
     }
 
     /// 校验表达式结果是否为列表值，并拆出句柄和元素类型。
