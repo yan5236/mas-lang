@@ -1,6 +1,6 @@
 use inkwell::AddressSpace;
-use inkwell::types::BasicType;
 use inkwell::module::Module;
+use inkwell::types::BasicType;
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
 
 use super::*;
@@ -70,7 +70,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ptr_type.fn_type(&[i8_type.into()], false),
                 None,
             ),
-            list_len: module.add_function("list_len", i64_type.fn_type(&[ptr_type.into()], false), None),
+            list_len: module.add_function(
+                "list_len",
+                i64_type.fn_type(&[ptr_type.into()], false),
+                None,
+            ),
             list_slice: module.add_function(
                 "list_slice",
                 ptr_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
@@ -86,19 +90,35 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let add_void = |name: &str, args: &[inkwell::types::BasicMetadataTypeEnum<'ctx>]| {
             module.add_function(name, void_type.fn_type(args, false), None);
         };
-        let add_value = |name: &str,
-                         return_type: inkwell::types::BasicTypeEnum<'ctx>,
-                         args: &[inkwell::types::BasicMetadataTypeEnum<'ctx>]| {
-            module.add_function(name, return_type.fn_type(args, false), None);
-        };
+        let add_value =
+            |name: &str,
+             return_type: inkwell::types::BasicTypeEnum<'ctx>,
+             args: &[inkwell::types::BasicMetadataTypeEnum<'ctx>]| {
+                module.add_function(name, return_type.fn_type(args, false), None);
+            };
 
         add_void("list_append_int", &[ptr_type.into(), i64_type.into()]);
         add_void("list_append_float", &[ptr_type.into(), f64_type.into()]);
         add_void("list_append_bool", &[ptr_type.into(), i8_type.into()]);
-        add_void("list_append_string", &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
-        add_value("list_get_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_get_float", f64_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_get_bool", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_void(
+            "list_append_string",
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_get_int",
+            i64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_get_float",
+            f64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_get_bool",
+            i8_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
         add_value(
             "list_get_string",
             ptr_type.into(),
@@ -107,14 +127,33 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         add_void("list_remove_int", &[ptr_type.into(), i64_type.into()]);
         add_void("list_remove_float", &[ptr_type.into(), f64_type.into()]);
         add_void("list_remove_bool", &[ptr_type.into(), i8_type.into()]);
-        add_void("list_remove_string", &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
+        add_void(
+            "list_remove_string",
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
         add_value("list_pop_int", i64_type.into(), &[ptr_type.into()]);
         add_value("list_pop_float", f64_type.into(), &[ptr_type.into()]);
         add_value("list_pop_bool", i8_type.into(), &[ptr_type.into()]);
-        add_value("list_pop_string", ptr_type.into(), &[ptr_type.into(), ptr_type.into()]);
-        add_value("list_pop_at_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_pop_at_float", f64_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_pop_at_bool", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
+        add_value(
+            "list_pop_string",
+            ptr_type.into(),
+            &[ptr_type.into(), ptr_type.into()],
+        );
+        add_value(
+            "list_pop_at_int",
+            i64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_pop_at_float",
+            f64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_pop_at_bool",
+            i8_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
         add_value(
             "list_pop_at_string",
             ptr_type.into(),
@@ -124,14 +163,46 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         add_void("list_sort_float", &[ptr_type.into()]);
         add_void("list_sort_bool", &[ptr_type.into()]);
         add_void("list_sort_string", &[ptr_type.into()]);
-        add_value("list_index_int", i64_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_index_float", i64_type.into(), &[ptr_type.into(), f64_type.into()]);
-        add_value("list_index_bool", i64_type.into(), &[ptr_type.into(), i8_type.into()]);
-        add_value("list_index_string", i64_type.into(), &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
-        add_value("list_contains_int", i8_type.into(), &[ptr_type.into(), i64_type.into()]);
-        add_value("list_contains_float", i8_type.into(), &[ptr_type.into(), f64_type.into()]);
-        add_value("list_contains_bool", i8_type.into(), &[ptr_type.into(), i8_type.into()]);
-        add_value("list_contains_string", i8_type.into(), &[ptr_type.into(), ptr_type.into(), i64_type.into()]);
+        add_value(
+            "list_index_int",
+            i64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_index_float",
+            i64_type.into(),
+            &[ptr_type.into(), f64_type.into()],
+        );
+        add_value(
+            "list_index_bool",
+            i64_type.into(),
+            &[ptr_type.into(), i8_type.into()],
+        );
+        add_value(
+            "list_index_string",
+            i64_type.into(),
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_contains_int",
+            i8_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "list_contains_float",
+            i8_type.into(),
+            &[ptr_type.into(), f64_type.into()],
+        );
+        add_value(
+            "list_contains_bool",
+            i8_type.into(),
+            &[ptr_type.into(), i8_type.into()],
+        );
+        add_value(
+            "list_contains_string",
+            i8_type.into(),
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
 
         runtime
     }
@@ -199,7 +270,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 把列表元素类型转换为运行时函数名使用的后缀。
-    pub(super) fn list_type_suffix(&self, value_type: &ValueType) -> Result<&'static str, CompilerError> {
+    pub(super) fn list_type_suffix(
+        &self,
+        value_type: &ValueType,
+    ) -> Result<&'static str, CompilerError> {
         match value_type {
             ValueType::Int => Ok("int"),
             ValueType::Float => Ok("float"),

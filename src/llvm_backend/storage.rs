@@ -98,7 +98,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 return Err(CompilerError::build_message(
                     "unit 不应该被映射为可存储的基础类型",
                     Span::new(0, self.source.text().len()),
-                ))
+                ));
             }
         })
     }
@@ -117,7 +117,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 统一包装所有 Inkwell 构建器错误，转换成内部构建诊断。
-    pub(super) fn map_builder<T>(&self, value: Result<T, BuilderError>) -> Result<T, CompilerError> {
+    pub(super) fn map_builder<T>(
+        &self,
+        value: Result<T, BuilderError>,
+    ) -> Result<T, CompilerError> {
         value.map_err(|error| {
             CompilerError::build(
                 MessageId::BuildWriteIrFailed,

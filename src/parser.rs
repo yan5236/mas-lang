@@ -600,7 +600,10 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::LeftBracket => self.parse_list_literal(token.span),
-            _ => Err(CompilerError::syntax_message("这里需要一个表达式", token.span)),
+            _ => Err(CompilerError::syntax_message(
+                "这里需要一个表达式",
+                token.span,
+            )),
         }
     }
 
@@ -638,7 +641,10 @@ impl<'a> Parser<'a> {
                 self.consume(TokenTag::Greater, "`list` 类型缺少右尖括号 `>`")?;
                 Ok(TypeName::List(Box::new(element_type)))
             }
-            _ => Err(CompilerError::syntax_message(format!("未知的内建类型 `{name}`"), span)),
+            _ => Err(CompilerError::syntax_message(
+                format!("未知的内建类型 `{name}`"),
+                span,
+            )),
         }
     }
 
@@ -652,7 +658,10 @@ impl<'a> Parser<'a> {
             TokenKind::StarEqual => Ok(AssignOp::MultiplyAssign),
             TokenKind::SlashEqual => Ok(AssignOp::DivideAssign),
             TokenKind::PercentEqual => Ok(AssignOp::ModAssign),
-            _ => Err(CompilerError::syntax_message("这里需要一个赋值运算符", token.span)),
+            _ => Err(CompilerError::syntax_message(
+                "这里需要一个赋值运算符",
+                token.span,
+            )),
         }
     }
 
@@ -824,9 +833,8 @@ mod tests {
     /// 校验 `if / elif / else` 链能够被解析为统一条件分支节点。
     #[test]
     fn should_parse_if_statement() {
-        let program = parse(
-            "if true:\n    print(1)\nelif false:\n    print(2)\nelse:\n    print(3)\n",
-        );
+        let program =
+            parse("if true:\n    print(1)\nelif false:\n    print(2)\nelse:\n    print(3)\n");
         assert!(matches!(program.statements[0], Stmt::If { .. }));
     }
 
@@ -892,8 +900,15 @@ mod tests {
     /// 校验列表字面量、索引、切片和方法调用能够被正确解析。
     #[test]
     fn should_parse_list_expressions() {
-        let program = parse("var items:list<int> = [1, 2, 3]\nprint(items[1])\nprint(items[1:3])\nitems.append(4)\n");
-        let Stmt::VarDecl { annotation, initializer, .. } = &program.statements[0] else {
+        let program = parse(
+            "var items:list<int> = [1, 2, 3]\nprint(items[1])\nprint(items[1:3])\nitems.append(4)\n",
+        );
+        let Stmt::VarDecl {
+            annotation,
+            initializer,
+            ..
+        } = &program.statements[0]
+        else {
             panic!("首条语句不是绑定声明");
         };
         assert!(matches!(annotation, Some(TypeName::List(_))));

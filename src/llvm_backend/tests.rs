@@ -59,9 +59,8 @@ fn should_keep_top_level_and_local_storage_separate() {
 /// 校验 `if / elif / else` 仍会生成条件分支与汇合块。
 #[test]
 fn should_emit_if_blocks() {
-    let (source, program, _) = parse_program(
-        "if true:\n    print(1)\nelif false:\n    print(2)\nelse:\n    print(3)\n",
-    );
+    let (source, program, _) =
+        parse_program("if true:\n    print(1)\nelif false:\n    print(2)\nelse:\n    print(3)\n");
     let ir = compile_program_to_ir(&source, &program).unwrap();
     assert!(ir.contains("if.then"));
     assert!(ir.contains("if.after"));

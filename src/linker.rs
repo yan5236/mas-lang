@@ -188,9 +188,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::CompileOptions;
-    use crate::compile_to_executable;
     use crate::settings::{CompilerSettings, UiLanguage};
     use crate::source::SourceFile;
+    use crate::{analyze_source, compile_to_executable};
 
     /// 编译源码并立即运行产物，返回收集到的标准输出文本。
     fn build_and_run(name: &str, text: &str) -> String {
@@ -204,6 +204,44 @@ mod tests {
         let source = SourceFile::new(source_path.display().to_string(), text.to_string());
         let settings = CompilerSettings::new(UiLanguage::ZhCn);
 
+        let binary =
+            compile_to_executable(&source, &settings, &CompileOptions::new(Some(output_path)))
+                .unwrap();
+        let output = Command::new(binary).output().unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// 返回 `msceshi` 压力样例对应的源码文本。
+    ///
+    /// `cargo test` 在当前环境里会把 crate 放进独立沙盒目录，因此这里内嵌同内容样例，
+    /// 同时仓库中的 `msceshi/compiler-stress/*.ms` 继续保留，方便人工查看和单独手跑。
+    fn msceshi_fixture_source(name: &str) -> &'static str {
+        match name {
+            "branch-return-matrix.ms" => include_str!("testdata/branch-return-matrix.ms.txt"),
+            "string-list-matrix.ms" => include_str!("testdata/string-list-matrix.ms.txt"),
+            "short-circuit-guard.ms" => include_str!("testdata/short-circuit-guard.ms.txt"),
+            other => panic!("未知的 msceshi 样例 `{other}`"),
+        }
+    }
+
+    /// 读取内嵌的 `msceshi` 样例源码，先做前端分析再编译运行，最终返回标准输出文本。
+    fn build_and_run_msceshi_fixture(name: &str) -> String {
+        let source = SourceFile::new(
+            format!("<msceshi/compiler-stress/{name}>"),
+            msceshi_fixture_source(name).to_string(),
+        );
+        let settings = CompilerSettings::new(UiLanguage::ZhCn);
+
+        analyze_source(&source, &settings).unwrap();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let output_path = std::env::temp_dir()
+            .join(format!("mascript-llvm-msceshi-{unique}"))
+            .join(name.replace(".ms", ".exe"));
         let binary =
             compile_to_executable(&source, &settings, &CompileOptions::new(Some(output_path)))
                 .unwrap();
@@ -257,5 +295,29 @@ mod tests {
             "func factorial(n:int) -> int:\n    if n <= 1:\n        return 1\n    else:\n        return n * factorial(n - 1)\nfunc main():\n    print(factorial(5))\n",
         );
         assert_eq!(output, "120\n");
+    }
+
+    /// 校验 `msceshi` 中专门构造的分支返回矩阵样例能够稳定编译运行，避免 `if/return` 回归。
+    #[test]
+    fn should_build_and_run_msceshi_branch_return_matrix() {
+        let output = build_and_run_msceshi_fixture("branch-return-matrix.ms");
+        assert_eq!(output, "-1\n0\n1\n10\n11\n20\n21\n30\n999\n300\n");
+    }
+
+    /// 校验 `msceshi` 中字符串列表压力样例能够稳定运行，避免字符串列表再次出现类型错乱或空指针。
+    #[test]
+    fn should_build_and_run_msceshi_string_list_matrix() {
+        let output = build_and_run_msceshi_fixture("string-list-matrix.ms");
+        assert_eq!(
+            output,
+            "3\ngamma\ntrue\n2\nalpha\nbeta\nbeta\n2\ndelta\ngamma\ngamma\ndelta\ngamma\n"
+        );
+    }
+
+    /// 校验 `msceshi` 中短路保护样例运行时不会错误求值右侧危险表达式，避免隐藏的越界/空指针回归。
+    #[test]
+    fn should_build_and_run_msceshi_short_circuit_guard() {
+        let output = build_and_run_msceshi_fixture("short-circuit-guard.ms");
+        assert_eq!(output, "false\ntrue\n1\n7\n8\n");
     }
 }

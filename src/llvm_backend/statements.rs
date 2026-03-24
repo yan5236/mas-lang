@@ -20,10 +20,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 编译单条语句，并返回当前基本块是否已经结束。
-    pub(super) fn compile_statement(
-        &mut self,
-        statement: &Stmt,
-    ) -> Result<bool, CompilerError> {
+    pub(super) fn compile_statement(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
         match statement {
             Stmt::FunctionDecl { .. } => Ok(false),
             Stmt::VarDecl {
@@ -33,9 +30,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 initializer,
                 span,
             } => {
-                let expected = annotation
-                    .as_ref()
-                    .map(value_type_from_annotation);
+                let expected = annotation.as_ref().map(value_type_from_annotation);
                 let value = match (initializer, expected.as_ref()) {
                     (Expr::ListLiteral { elements, .. }, Some(ValueType::List(element_type)))
                         if elements.is_empty() =>
@@ -118,7 +113,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 };
 
                 if assigned.value_type != variable.value_type {
-                    return Err(CompilerError::build_message("赋值类型无法写入目标变量", *span));
+                    return Err(CompilerError::build_message(
+                        "赋值类型无法写入目标变量",
+                        *span,
+                    ));
                 }
                 self.store_variable(variable, assigned.value)?;
                 Ok(false)
@@ -182,7 +180,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         span: Span,
     ) -> Result<(), CompilerError> {
         match (self.current_return_type.clone(), value) {
-            (ValueType::Unit, None) => self.map_builder(self.builder.build_return(None)).map(|_| ()),
+            (ValueType::Unit, None) => self
+                .map_builder(self.builder.build_return(None))
+                .map(|_| ()),
             (ValueType::Unit, Some(_)) => Err(CompilerError::build_message(
                 "当前函数没有返回值，return 后不能跟表达式",
                 span,
@@ -350,10 +350,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
         self.builder.position_at_end(header_block);
         let current = self
-            .map_builder(
-                self.builder
-                    .build_load(self.context.i64_type(), iter_pointer, "for.current"),
-            )?
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                iter_pointer,
+                "for.current",
+            ))?
             .into_int_value();
         let end_loaded = self
             .map_builder(
@@ -367,11 +368,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             end_loaded,
             "for.cond",
         ))?;
-        self.map_builder(self.builder.build_conditional_branch(
-            condition,
-            body_block,
-            exit_block,
-        ))?;
+        self.map_builder(
+            self.builder
+                .build_conditional_branch(condition, body_block, exit_block),
+        )?;
 
         self.builder.position_at_end(body_block);
         self.loop_stack.push(LoopContext {
@@ -386,10 +386,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.builder.position_at_end(continue_block);
         let iter_now = self
-            .map_builder(
-                self.builder
-                    .build_load(self.context.i64_type(), iter_pointer, "for.next.load"),
-            )?
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                iter_pointer,
+                "for.next.load",
+            ))?
             .into_int_value();
         let next = self.map_builder(self.builder.build_int_add(
             iter_now,
@@ -420,10 +421,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.push_scope();
         let iter_pointer = self.allocate_local(&ValueType::Int, &format!("{name}.iter"))?;
         let item_pointer = self.allocate_local(&element_type, name)?;
-        self.map_builder(self.builder.build_store(
-            iter_pointer,
-            self.context.i64_type().const_zero(),
-        ))?;
+        self.map_builder(
+            self.builder
+                .build_store(iter_pointer, self.context.i64_type().const_zero()),
+        )?;
         self.current_scope_mut().insert(
             name.to_string(),
             VariableInfo {
@@ -435,34 +436,39 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         let header_block = self.context.append_basic_block(function, "foreach.header");
         let body_block = self.context.append_basic_block(function, "foreach.body");
-        let continue_block = self.context.append_basic_block(function, "foreach.continue");
+        let continue_block = self
+            .context
+            .append_basic_block(function, "foreach.continue");
         let exit_block = self.context.append_basic_block(function, "foreach.exit");
 
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
         self.builder.position_at_end(header_block);
         let current = self
-            .map_builder(
-                self.builder
-                    .build_load(self.context.i64_type(), iter_pointer, "foreach.current"),
-            )?
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                iter_pointer,
+                "foreach.current",
+            ))?
             .into_int_value();
         let len_call = self.map_builder(self.builder.build_call(
             self.runtime.list_len,
             &[list_value.into()],
             "foreach.len",
         ))?;
-        let len_value = len_call.try_as_basic_value().unwrap_basic().into_int_value();
+        let len_value = len_call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_int_value();
         let condition = self.map_builder(self.builder.build_int_compare(
             IntPredicate::SLT,
             current,
             len_value,
             "foreach.cond",
         ))?;
-        self.map_builder(self.builder.build_conditional_branch(
-            condition,
-            body_block,
-            exit_block,
-        ))?;
+        self.map_builder(
+            self.builder
+                .build_conditional_branch(condition, body_block, exit_block),
+        )?;
 
         self.builder.position_at_end(body_block);
         let item_value = self.build_list_get(list_value, &element_type, current, span)?;
@@ -479,10 +485,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.builder.position_at_end(continue_block);
         let iter_now = self
-            .map_builder(
-                self.builder
-                    .build_load(self.context.i64_type(), iter_pointer, "foreach.next.load"),
-            )?
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                iter_pointer,
+                "foreach.next.load",
+            ))?
             .into_int_value();
         let next = self.map_builder(self.builder.build_int_add(
             iter_now,

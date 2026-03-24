@@ -323,10 +323,16 @@ impl<'a> SemanticAnalyzer<'a> {
                 Ok(())
             }
             Stmt::While {
-                condition, body, span, ..
+                condition,
+                body,
+                span,
+                ..
             } => {
                 if self.infer_expression_type(condition)? != ValueType::Bool {
-                    return Err(CompilerError::semantic_message("条件表达式必须是布尔值", *span));
+                    return Err(CompilerError::semantic_message(
+                        "条件表达式必须是布尔值",
+                        *span,
+                    ));
                 }
                 self.loop_depth += 1;
                 let result = self.analyze_block(body);
@@ -465,8 +471,12 @@ impl<'a> SemanticAnalyzer<'a> {
             Expr::Identifier { name, span } => self
                 .lookup(name)
                 .map(|symbol| symbol.value_type.clone())
-                .ok_or_else(|| CompilerError::semantic_message(format!("未声明变量 `{name}`"), *span)),
-            Expr::Grouped { expression, .. } => self.infer_expression_type_with_hint(expression, hint),
+                .ok_or_else(|| {
+                    CompilerError::semantic_message(format!("未声明变量 `{name}`"), *span)
+                }),
+            Expr::Grouped { expression, .. } => {
+                self.infer_expression_type_with_hint(expression, hint)
+            }
             Expr::Unary { op, operand, span } => self.infer_unary_type(*op, operand, *span),
             Expr::Binary {
                 left,
@@ -580,11 +590,17 @@ impl<'a> SemanticAnalyzer<'a> {
         let target_type = self.infer_expression_type(target)?;
         let index_type = self.infer_expression_type(index)?;
         if index_type != ValueType::Int {
-            return Err(CompilerError::semantic_message("列表索引必须是整数", index.span()));
+            return Err(CompilerError::semantic_message(
+                "列表索引必须是整数",
+                index.span(),
+            ));
         }
         match target_type {
             ValueType::List(element) => Ok((*element).clone()),
-            _ => Err(CompilerError::semantic_message("索引访问当前只支持列表类型", span)),
+            _ => Err(CompilerError::semantic_message(
+                "索引访问当前只支持列表类型",
+                span,
+            )),
         }
     }
 
@@ -599,17 +615,26 @@ impl<'a> SemanticAnalyzer<'a> {
         let target_type = self.infer_expression_type(target)?;
         if let Some(start) = start {
             if self.infer_expression_type(start)? != ValueType::Int {
-                return Err(CompilerError::semantic_message("切片起始下标必须是整数", start.span()));
+                return Err(CompilerError::semantic_message(
+                    "切片起始下标必须是整数",
+                    start.span(),
+                ));
             }
         }
         if let Some(end) = end {
             if self.infer_expression_type(end)? != ValueType::Int {
-                return Err(CompilerError::semantic_message("切片结束下标必须是整数", end.span()));
+                return Err(CompilerError::semantic_message(
+                    "切片结束下标必须是整数",
+                    end.span(),
+                ));
             }
         }
         match target_type {
             ValueType::List(element) => Ok(ValueType::List(element)),
-            _ => Err(CompilerError::semantic_message("切片当前只支持列表类型", span)),
+            _ => Err(CompilerError::semantic_message(
+                "切片当前只支持列表类型",
+                span,
+            )),
         }
     }
 
@@ -623,7 +648,10 @@ impl<'a> SemanticAnalyzer<'a> {
     ) -> Result<ValueType, CompilerError> {
         let target_type = self.infer_expression_type(target)?;
         let ValueType::List(element_type) = target_type else {
-            return Err(CompilerError::semantic_message("当前方法只能用于列表类型", span));
+            return Err(CompilerError::semantic_message(
+                "当前方法只能用于列表类型",
+                span,
+            ));
         };
 
         match method {
@@ -634,8 +662,8 @@ impl<'a> SemanticAnalyzer<'a> {
                         span,
                     ));
                 }
-                let argument_type =
-                    self.infer_expression_type_with_hint(&arguments[0], Some(element_type.as_ref()))?;
+                let argument_type = self
+                    .infer_expression_type_with_hint(&arguments[0], Some(element_type.as_ref()))?;
                 if argument_type != *element_type {
                     return Err(CompilerError::semantic_message(
                         format!("列表方法 `{}` 的参数类型不匹配", method.display_name()),
@@ -697,7 +725,9 @@ impl<'a> SemanticAnalyzer<'a> {
             AssignOp::DivideAssign => {
                 self.infer_binary_value_type(BinaryOp::Divide, left, right, span)
             }
-            AssignOp::ModAssign => self.infer_binary_value_type(BinaryOp::Modulo, left, right, span),
+            AssignOp::ModAssign => {
+                self.infer_binary_value_type(BinaryOp::Modulo, left, right, span)
+            }
         }
     }
 
@@ -727,7 +757,10 @@ impl<'a> SemanticAnalyzer<'a> {
                 if left == &ValueType::Bool && right == &ValueType::Bool {
                     Ok(ValueType::Bool)
                 } else {
-                    Err(CompilerError::semantic_message("逻辑运算只支持布尔值", span))
+                    Err(CompilerError::semantic_message(
+                        "逻辑运算只支持布尔值",
+                        span,
+                    ))
                 }
             }
             BinaryOp::Add => match (left, right) {
@@ -736,31 +769,44 @@ impl<'a> SemanticAnalyzer<'a> {
                 | (ValueType::Float, ValueType::Int)
                 | (ValueType::Int, ValueType::Float) => Ok(ValueType::Float),
                 (ValueType::String, ValueType::String) => Ok(ValueType::String),
-                _ => Err(CompilerError::semantic_message("当前类型不支持加法运算", span)),
+                _ => Err(CompilerError::semantic_message(
+                    "当前类型不支持加法运算",
+                    span,
+                )),
             },
             BinaryOp::Subtract | BinaryOp::Multiply => match (left, right) {
                 (ValueType::Int, ValueType::Int) => Ok(ValueType::Int),
                 (ValueType::Float, ValueType::Float)
                 | (ValueType::Float, ValueType::Int)
                 | (ValueType::Int, ValueType::Float) => Ok(ValueType::Float),
-                _ => Err(CompilerError::semantic_message("当前类型不支持数值运算", span)),
+                _ => Err(CompilerError::semantic_message(
+                    "当前类型不支持数值运算",
+                    span,
+                )),
             },
             BinaryOp::Divide => match (left, right) {
                 (ValueType::Int, ValueType::Int)
                 | (ValueType::Float, ValueType::Float)
                 | (ValueType::Float, ValueType::Int)
                 | (ValueType::Int, ValueType::Float) => Ok(ValueType::Float),
-                _ => Err(CompilerError::semantic_message("当前类型不支持除法运算", span)),
+                _ => Err(CompilerError::semantic_message(
+                    "当前类型不支持除法运算",
+                    span,
+                )),
             },
             BinaryOp::Modulo | BinaryOp::IntDivide => {
                 if left == &ValueType::Int && right == &ValueType::Int {
                     Ok(ValueType::Int)
                 } else {
-                    Err(CompilerError::semantic_message("取模和整数除法只支持整数", span))
+                    Err(CompilerError::semantic_message(
+                        "取模和整数除法只支持整数",
+                        span,
+                    ))
                 }
             }
             BinaryOp::Equal | BinaryOp::NotEqual => {
-                if left == right && left != &ValueType::Unit && !matches!(left, ValueType::List(_)) {
+                if left == right && left != &ValueType::Unit && !matches!(left, ValueType::List(_))
+                {
                     Ok(ValueType::Bool)
                 } else {
                     Err(CompilerError::semantic_message(
@@ -769,16 +815,18 @@ impl<'a> SemanticAnalyzer<'a> {
                     ))
                 }
             }
-            BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual => match (left, right) {
-                (ValueType::Int, ValueType::Int)
-                | (ValueType::Float, ValueType::Float)
-                | (ValueType::Float, ValueType::Int)
-                | (ValueType::Int, ValueType::Float) => Ok(ValueType::Bool),
-                _ => Err(CompilerError::semantic_message("大小比较只支持数值类型", span)),
-            },
+            BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
+                match (left, right) {
+                    (ValueType::Int, ValueType::Int)
+                    | (ValueType::Float, ValueType::Float)
+                    | (ValueType::Float, ValueType::Int)
+                    | (ValueType::Int, ValueType::Float) => Ok(ValueType::Bool),
+                    _ => Err(CompilerError::semantic_message(
+                        "大小比较只支持数值类型",
+                        span,
+                    )),
+                }
+            }
         }
     }
 
@@ -810,7 +858,10 @@ impl<'a> SemanticAnalyzer<'a> {
         span: Span,
     ) -> Result<ValueType, CompilerError> {
         let Expr::Identifier { name, .. } = callee else {
-            return Err(CompilerError::semantic_message("当前阶段只支持调用具名函数", span));
+            return Err(CompilerError::semantic_message(
+                "当前阶段只支持调用具名函数",
+                span,
+            ));
         };
 
         if name == "print" {
@@ -927,10 +978,7 @@ impl<'a> SemanticAnalyzer<'a> {
 
     /// 销毁当前函数分析帧及其所有局部作用域。
     fn pop_frame(&mut self) {
-        let frame_start = self
-            .frame_starts
-            .pop()
-            .expect("函数帧栈至少包含顶层帧");
+        let frame_start = self.frame_starts.pop().expect("函数帧栈至少包含顶层帧");
         while self.scopes.len() > frame_start {
             self.scopes.pop();
         }
@@ -959,9 +1007,7 @@ impl<'a> SemanticAnalyzer<'a> {
 
     /// 返回当前最内层作用域的可变引用。
     fn current_scope_mut(&mut self) -> &mut HashMap<String, SymbolInfo> {
-        self.scopes
-            .last_mut()
-            .expect("作用域栈至少包含全局作用域")
+        self.scopes.last_mut().expect("作用域栈至少包含全局作用域")
     }
 }
 

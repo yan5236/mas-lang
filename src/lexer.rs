@@ -454,7 +454,9 @@ mod tests {
     /// 校验第二阶段新增运算符能够被正确识别。
     #[test]
     fn should_tokenize_phase2_operators() {
-        let kinds = lex("func add(a:int) -> int:\n    a += 1\n    return a %/% 2\nfor i in 0..5:\n    print(i % 2)\n");
+        let kinds = lex(
+            "func add(a:int) -> int:\n    a += 1\n    return a %/% 2\nfor i in 0..5:\n    print(i % 2)\n",
+        );
         assert!(kinds.contains(&TokenKind::Arrow));
         assert!(kinds.contains(&TokenKind::PlusEqual));
         assert!(kinds.contains(&TokenKind::IntDivide));
@@ -478,11 +480,12 @@ mod tests {
     fn should_tokenize_range_without_float_conflict() {
         let kinds = lex("for i in 0..5:\n    print(i)\n");
         assert!(kinds.windows(3).any(|window| {
-            window == [
-                TokenKind::IntLiteral(0),
-                TokenKind::DotDot,
-                TokenKind::IntLiteral(5),
-            ]
+            window
+                == [
+                    TokenKind::IntLiteral(0),
+                    TokenKind::DotDot,
+                    TokenKind::IntLiteral(5),
+                ]
         }));
     }
 

@@ -92,8 +92,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(self.builder.build_unconditional_branch(merge_block))?;
 
         self.builder.position_at_end(merge_block);
-        let result = self
-            .map_builder(self.builder.build_load(self.context.bool_type(), slot, "logic.result"))?;
+        let result = self.map_builder(self.builder.build_load(
+            self.context.bool_type(),
+            slot,
+            "logic.result",
+        ))?;
         Ok(CodegenValue::Value(TypedValue {
             value_type: ValueType::Bool,
             value: result,
@@ -134,12 +137,16 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ],
                 "concat.string",
             ))?;
-            let ptr_value = call.try_as_basic_value().unwrap_basic().into_pointer_value();
+            let ptr_value = call
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
             let len_value = self
-                .map_builder(
-                    self.builder
-                        .build_load(self.context.i64_type(), out_len_ptr, "concat.len"),
-                )?
+                .map_builder(self.builder.build_load(
+                    self.context.i64_type(),
+                    out_len_ptr,
+                    "concat.len",
+                ))?
                 .into_int_value();
             return Ok(TypedValue {
                 value_type: ValueType::String,
@@ -162,24 +169,27 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply => {
                 if left.value_type == ValueType::Int && right.value_type == ValueType::Int {
                     let value = match op {
-                        BinaryOp::Add => self.map_builder(self.builder.build_int_add(
-                            left.value.into_int_value(),
-                            right.value.into_int_value(),
-                            "add.int",
-                        ))?
-                        .into(),
-                        BinaryOp::Subtract => self.map_builder(self.builder.build_int_sub(
-                            left.value.into_int_value(),
-                            right.value.into_int_value(),
-                            "sub.int",
-                        ))?
-                        .into(),
-                        BinaryOp::Multiply => self.map_builder(self.builder.build_int_mul(
-                            left.value.into_int_value(),
-                            right.value.into_int_value(),
-                            "mul.int",
-                        ))?
-                        .into(),
+                        BinaryOp::Add => self
+                            .map_builder(self.builder.build_int_add(
+                                left.value.into_int_value(),
+                                right.value.into_int_value(),
+                                "add.int",
+                            ))?
+                            .into(),
+                        BinaryOp::Subtract => self
+                            .map_builder(self.builder.build_int_sub(
+                                left.value.into_int_value(),
+                                right.value.into_int_value(),
+                                "sub.int",
+                            ))?
+                            .into(),
+                        BinaryOp::Multiply => self
+                            .map_builder(self.builder.build_int_mul(
+                                left.value.into_int_value(),
+                                right.value.into_int_value(),
+                                "mul.int",
+                            ))?
+                            .into(),
                         _ => unreachable!(),
                     };
                     return Ok(TypedValue {
@@ -195,16 +205,28 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let (left_float, right_float) = self.coerce_to_float_pair(left, right, span)?;
         let value = match op {
             BinaryOp::Add => self
-                .map_builder(self.builder.build_float_add(left_float, right_float, "add.float"))?
+                .map_builder(
+                    self.builder
+                        .build_float_add(left_float, right_float, "add.float"),
+                )?
                 .into(),
             BinaryOp::Subtract => self
-                .map_builder(self.builder.build_float_sub(left_float, right_float, "sub.float"))?
+                .map_builder(
+                    self.builder
+                        .build_float_sub(left_float, right_float, "sub.float"),
+                )?
                 .into(),
             BinaryOp::Multiply => self
-                .map_builder(self.builder.build_float_mul(left_float, right_float, "mul.float"))?
+                .map_builder(
+                    self.builder
+                        .build_float_mul(left_float, right_float, "mul.float"),
+                )?
                 .into(),
             BinaryOp::Divide => self
-                .map_builder(self.builder.build_float_div(left_float, right_float, "div.float"))?
+                .map_builder(
+                    self.builder
+                        .build_float_div(left_float, right_float, "div.float"),
+                )?
                 .into(),
             _ => unreachable!(),
         };
@@ -223,7 +245,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         if left.value_type != ValueType::Int || right.value_type != ValueType::Int {
-            return Err(CompilerError::build_message("取模和整数除法只支持整数", span));
+            return Err(CompilerError::build_message(
+                "取模和整数除法只支持整数",
+                span,
+            ));
         }
         let left = left.value.into_int_value();
         let right = right.value.into_int_value();
@@ -309,7 +334,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 return Err(CompilerError::build_message(
                     "当前相等比较无法生成目标代码",
                     span,
-                ))
+                ));
             }
         };
 

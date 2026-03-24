@@ -56,7 +56,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(match literal {
             Literal::Int(value) => TypedValue {
                 value_type: ValueType::Int,
-                value: self.context.i64_type().const_int(*value as u64, true).into(),
+                value: self
+                    .context
+                    .i64_type()
+                    .const_int(*value as u64, true)
+                    .into(),
             },
             Literal::Float(value) => TypedValue {
                 value_type: ValueType::Float,
@@ -102,26 +106,35 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             (UnaryOp::Negate, ValueType::Int) => TypedValue {
                 value_type: ValueType::Int,
                 value: self
-                    .map_builder(self.builder.build_int_neg(value.value.into_int_value(), "neg.int"))?
+                    .map_builder(
+                        self.builder
+                            .build_int_neg(value.value.into_int_value(), "neg.int"),
+                    )?
                     .into(),
             },
             (UnaryOp::Negate, ValueType::Float) => TypedValue {
                 value_type: ValueType::Float,
                 value: self
-                    .map_builder(self.builder.build_float_neg(value.value.into_float_value(), "neg.float"))?
+                    .map_builder(
+                        self.builder
+                            .build_float_neg(value.value.into_float_value(), "neg.float"),
+                    )?
                     .into(),
             },
             (UnaryOp::Not, ValueType::Bool) => TypedValue {
                 value_type: ValueType::Bool,
                 value: self
-                    .map_builder(self.builder.build_not(value.value.into_int_value(), "not.bool"))?
+                    .map_builder(
+                        self.builder
+                            .build_not(value.value.into_int_value(), "not.bool"),
+                    )?
                     .into(),
             },
             _ => {
                 return Err(CompilerError::build_message(
                     "当前一元表达式无法生成目标代码",
                     span,
-                ))
+                ));
             }
         };
         Ok(CodegenValue::Value(result))
@@ -135,7 +148,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         span: Span,
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
         let Expr::Identifier { name, .. } = callee else {
-            return Err(CompilerError::build_message("当前阶段只支持具名函数调用", span));
+            return Err(CompilerError::build_message(
+                "当前阶段只支持具名函数调用",
+                span,
+            ));
         };
 
         if name == "print" {
@@ -285,7 +301,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 &[list_value.into()],
                 "slice.len",
             ))?;
-            len_call.try_as_basic_value().unwrap_basic().into_int_value()
+            len_call
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value()
         };
         let call = self.map_builder(self.builder.build_call(
             self.runtime.list_slice,
@@ -347,7 +366,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             }
             ListMethod::Sort => {
                 let function = self.list_runtime_function("list_sort", &element_type)?;
-                self.map_builder(self.builder.build_call(function, &[list_value.into()], "call.list_sort"))?;
+                self.map_builder(self.builder.build_call(
+                    function,
+                    &[list_value.into()],
+                    "call.list_sort",
+                ))?;
                 Ok(CodegenValue::Unit)
             }
             ListMethod::Reverse => {
@@ -364,7 +387,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 let function = self.list_runtime_function("list_index", &element_type)?;
                 let mut args = vec![list_value.into()];
                 args.extend(self.build_list_value_arguments(argument, span)?);
-                let call = self.map_builder(self.builder.build_call(function, &args, "call.list_index"))?;
+                let call =
+                    self.map_builder(self.builder.build_call(function, &args, "call.list_index"))?;
                 Ok(CodegenValue::Value(TypedValue {
                     value_type: ValueType::Int,
                     value: call.try_as_basic_value().unwrap_basic(),
@@ -376,7 +400,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 let function = self.list_runtime_function("list_contains", &element_type)?;
                 let mut args = vec![list_value.into()];
                 args.extend(self.build_list_value_arguments(argument, span)?);
-                let call = self.map_builder(self.builder.build_call(function, &args, "call.list_contains"))?;
+                let call = self.map_builder(self.builder.build_call(
+                    function,
+                    &args,
+                    "call.list_contains",
+                ))?;
                 let raw = call.try_as_basic_value().unwrap_basic().into_int_value();
                 let value = self.map_builder(self.builder.build_int_compare(
                     inkwell::IntPredicate::NE,
@@ -403,7 +431,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             &[self.context.i8_type().const_int(tag as u64, false).into()],
             "call.list_create",
         ))?;
-        Ok(call.try_as_basic_value().unwrap_basic().into_pointer_value())
+        Ok(call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value())
     }
 
     /// 向列表对象追加一个元素。
@@ -430,7 +461,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         _span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         let function = self.list_runtime_function("list_get", element_type)?;
-        self.build_list_result_from_call(function, &[list_value.into(), index_value.into()], element_type, "call.list_get")
+        self.build_list_result_from_call(
+            function,
+            &[list_value.into(), index_value.into()],
+            element_type,
+            "call.list_get",
+        )
     }
 
     /// 根据元素类型把值拆成运行时函数需要的参数列表。
@@ -455,7 +491,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 let len = self.extract_string_part(string_value, 1, "list.string.len")?;
                 Ok(vec![ptr.into(), len.into()])
             }
-            _ => Err(CompilerError::build_message("当前值不能作为列表元素写入运行时", span)),
+            _ => Err(CompilerError::build_message(
+                "当前值不能作为列表元素写入运行时",
+                span,
+            )),
         }
     }
 
@@ -509,12 +548,16 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let mut call_args = args.to_vec();
         call_args.push(out_len_ptr.into());
         let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
-        let pointer = call.try_as_basic_value().unwrap_basic().into_pointer_value();
+        let pointer = call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
         let length = self
-            .map_builder(
-                self.builder
-                    .build_load(self.context.i64_type(), out_len_ptr, "load.list.string.len"),
-            )?
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                out_len_ptr,
+                "load.list.string.len",
+            ))?
             .into_int_value();
 
         Ok(TypedValue {
@@ -542,8 +585,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         span: Span,
     ) -> Result<ValueType, CompilerError> {
         match value_type {
-            ValueType::Int | ValueType::Float | ValueType::Bool | ValueType::String => Ok(value_type),
-            _ => Err(CompilerError::build_message("当前阶段列表元素只支持基础类型", span)),
+            ValueType::Int | ValueType::Float | ValueType::Bool | ValueType::String => {
+                Ok(value_type)
+            }
+            _ => Err(CompilerError::build_message(
+                "当前阶段列表元素只支持基础类型",
+                span,
+            )),
         }
     }
 
