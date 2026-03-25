@@ -207,6 +207,9 @@ fn value_type_from_annotation(annotation: &TypeName) -> ValueType {
         TypeName::Bool => ValueType::Bool,
         TypeName::String => ValueType::String,
         TypeName::List(element) => ValueType::List(Box::new(value_type_from_annotation(element))),
+        TypeName::Array(element, size) => {
+            ValueType::Array(Box::new(value_type_from_annotation(element)), *size)
+        }
     }
 }
 

@@ -58,7 +58,7 @@ pub enum Stmt {
         binding_kind: BindingKind,
         name: String,
         annotation: Option<TypeName>,
-        initializer: Expr,
+        initializer: Option<Expr>,
         span: Span,
     },
     Assign {
@@ -156,6 +156,12 @@ pub enum Expr {
         elements: Vec<Expr>,
         span: Span,
     },
+    ArrayInitializer {
+        element_type: TypeName,
+        size: usize,
+        elements: Vec<Expr>,
+        span: Span,
+    },
     Index {
         target: Box<Expr>,
         index: Box<Expr>,
@@ -189,6 +195,7 @@ impl Expr {
             | Self::Unary { span, .. }
             | Self::Call { span, .. }
             | Self::ListLiteral { span, .. }
+            | Self::ArrayInitializer { span, .. }
             | Self::Index { span, .. }
             | Self::Slice { span, .. }
             | Self::ListMethodCall { span, .. }
@@ -292,6 +299,7 @@ pub enum TypeName {
     Bool,
     String,
     List(Box<TypeName>),
+    Array(Box<TypeName>, usize),
 }
 
 impl TypeName {

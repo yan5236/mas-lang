@@ -31,8 +31,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             } => {
                 let expected = annotation.as_ref().map(value_type_from_annotation);
-                let value = match (initializer, expected.as_ref()) {
-                    (Expr::ListLiteral { elements, .. }, Some(ValueType::List(element_type)))
+                let value = match (initializer.as_ref(), expected.as_ref()) {
+                    (Some(Expr::ListLiteral { elements, .. }), Some(ValueType::List(element_type)))
                         if elements.is_empty() =>
                     {
                         TypedValue {
@@ -40,9 +40,21 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                             value: self.build_empty_list(element_type)?.into(),
                         }
                     }
-                    _ => {
+                    (Some(initializer), _) => {
                         let compiled = self.compile_expr(initializer)?;
                         self.expect_value(compiled)?
+                    }
+                    (None, Some(ValueType::Array(_, _))) => TypedValue {
+                        value_type: expected
+                            .clone()
+                            .expect("前一分支已经确认数组期望类型存在"),
+                        value: self.basic_type_for(expected.as_ref().expect("数组类型存在"))?.const_zero(),
+                    },
+                    (None, _) => {
+                        return Err(CompilerError::build_message(
+                            "当前声明缺少可落地的初始化值",
+                            *span,
+                        ));
                     }
                 };
                 let expected = expected.unwrap_or_else(|| value.value_type.clone());

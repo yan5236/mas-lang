@@ -1,7 +1,7 @@
 use inkwell::values::{BasicMetadataValueEnum, FloatValue, FunctionValue, PointerValue};
 
 use super::*;
-use crate::ast::{Expr, ListMethod, Literal, UnaryOp};
+use crate::ast::{Expr, ListMethod, Literal, TypeName, UnaryOp};
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 编译表达式，并把 LLVM 值与静态类型一起返回给调用方。
@@ -28,6 +28,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             } => self.compile_call(callee, arguments, *span),
             Expr::ListLiteral { elements, span } => self.compile_list_literal(elements, *span),
+            Expr::ArrayInitializer {
+                element_type,
+                size,
+                elements,
+                span,
+            } => self.compile_array_initializer(element_type, *size, elements, *span),
             Expr::Index {
                 target,
                 index,
@@ -175,7 +181,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         let len = self.extract_string_part(string_value, 1, "print.len")?;
                         (self.runtime.print_string, vec![ptr.into(), len.into()])
                     }
-                    ValueType::Unit | ValueType::List(_) => {
+                    ValueType::Unit | ValueType::List(_) | ValueType::Array(_, _) => {
                         return Err(CompilerError::build_message(
                             "print 不能打印当前值类型",
                             span,
@@ -252,7 +258,63 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }))
     }
 
-    /// 编译列表索引访问。
+    /// 编译固定长度数组初始化表达式，并把结果组装为 LLVM 原生数组值。
+    pub(super) fn compile_array_initializer(
+        &mut self,
+        element_type: &TypeName,
+        size: usize,
+        elements: &[Expr],
+        span: Span,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        let element_value_type = value_type_from_annotation(element_type);
+        if !matches!(
+            element_value_type,
+            ValueType::Int | ValueType::Float | ValueType::Bool | ValueType::String
+        ) {
+            return Err(CompilerError::build_message(
+                "当前阶段数组元素只支持基础类型",
+                span,
+            ));
+        }
+        if elements.len() != size {
+            return Err(CompilerError::build_message(
+                format!("数组初始化需要 {size} 个元素，但实际提供了 {} 个", elements.len()),
+                span,
+            ));
+        }
+
+        let array_value_type = ValueType::Array(Box::new(element_value_type.clone()), size);
+        let array_pointer = self.allocate_local(&array_value_type, "array.init")?;
+        for (index, element) in elements.iter().enumerate() {
+            let compiled = self.compile_expr(element)?;
+            let value = self.expect_value(compiled)?;
+            if value.value_type != element_value_type {
+                return Err(CompilerError::build_message(
+                    "数组初始化中的元素类型必须与声明类型一致",
+                    element.span(),
+                ));
+            }
+            self.build_array_store(
+                array_pointer,
+                &element_value_type,
+                size,
+                self.context.i64_type().const_int(index as u64, false),
+                value.value,
+            )?;
+        }
+
+        let array_value = self.map_builder(self.builder.build_load(
+            self.array_type_for(&element_value_type, size)?,
+            array_pointer,
+            "load.array.init",
+        ))?;
+        Ok(CodegenValue::Value(TypedValue {
+            value_type: array_value_type,
+            value: array_value,
+        }))
+    }
+
+    /// 编译列表或数组索引访问。
     pub(super) fn compile_index(
         &mut self,
         target: &Expr,
@@ -261,18 +323,35 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
         let compiled_target = self.compile_expr(target)?;
         let target_value = self.expect_value(compiled_target)?;
-        let (list_value, element_type) = self.expect_list_value(target_value, span)?;
         let compiled_index = self.compile_expr(index)?;
         let index_value = self.expect_value(compiled_index)?;
         if index_value.value_type != ValueType::Int {
-            return Err(CompilerError::build_message("列表索引必须是整数", span));
+            return Err(CompilerError::build_message("索引必须是整数", span));
         }
-        Ok(CodegenValue::Value(self.build_list_get(
-            list_value,
-            &element_type,
-            index_value.value.into_int_value(),
-            span,
-        )?))
+        match target_value.value_type.clone() {
+            ValueType::List(element_type) => {
+                let (list_value, _) = self.expect_list_value(target_value, span)?;
+                Ok(CodegenValue::Value(self.build_list_get(
+                    list_value,
+                    &element_type,
+                    index_value.value.into_int_value(),
+                    span,
+                )?))
+            }
+            ValueType::Array(element_type, size) => {
+                let array_pointer = self.resolve_array_pointer(target, target_value)?;
+                Ok(CodegenValue::Value(self.build_array_get(
+                    array_pointer,
+                    element_type.as_ref(),
+                    size,
+                    index_value.value.into_int_value(),
+                )?))
+            }
+            _ => Err(CompilerError::build_message(
+                "索引访问当前只支持列表或数组类型",
+                span,
+            )),
+        }
     }
 
     /// 编译列表切片表达式。
@@ -593,6 +672,75 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             )),
         }
+    }
+
+    /// 把数组表达式解析为可索引的内存地址，必要时先落到临时栈槽。
+    pub(super) fn resolve_array_pointer(
+        &mut self,
+        target: &Expr,
+        value: TypedValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, CompilerError> {
+        if let Expr::Identifier { name, .. } = target {
+            if let Some(variable) = self.lookup_variable(name) {
+                if variable.value_type == value.value_type {
+                    return Ok(variable.pointer);
+                }
+            }
+        }
+
+        let pointer = self.allocate_local(&value.value_type, "array.index.temp")?;
+        self.map_builder(self.builder.build_store(pointer, value.value))?;
+        Ok(pointer)
+    }
+
+    /// 把单个数组元素写入指定下标位置。
+    pub(super) fn build_array_store(
+        &mut self,
+        array_pointer: PointerValue<'ctx>,
+        element_type: &ValueType,
+        size: usize,
+        index_value: inkwell::values::IntValue<'ctx>,
+        value: inkwell::values::BasicValueEnum<'ctx>,
+    ) -> Result<(), CompilerError> {
+        let zero = self.context.i64_type().const_zero();
+        let element_pointer = unsafe {
+            self.map_builder(self.builder.build_in_bounds_gep(
+                self.array_type_for(element_type, size)?,
+                array_pointer,
+                &[zero, index_value],
+                "array.element.ptr",
+            ))?
+        };
+        self.map_builder(self.builder.build_store(element_pointer, value))?;
+        Ok(())
+    }
+
+    /// 从固定长度数组指定下标读取单个元素。
+    pub(super) fn build_array_get(
+        &mut self,
+        array_pointer: PointerValue<'ctx>,
+        element_type: &ValueType,
+        size: usize,
+        index_value: inkwell::values::IntValue<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let zero = self.context.i64_type().const_zero();
+        let element_pointer = unsafe {
+            self.map_builder(self.builder.build_in_bounds_gep(
+                self.array_type_for(element_type, size)?,
+                array_pointer,
+                &[zero, index_value],
+                "array.index.ptr",
+            ))?
+        };
+        let value = self.map_builder(self.builder.build_load(
+            self.basic_type_for(element_type)?,
+            element_pointer,
+            "load.array.item",
+        ))?;
+        Ok(TypedValue {
+            value_type: element_type.clone(),
+            value,
+        })
     }
 
     /// 把两个数值表达式统一提升为浮点值。

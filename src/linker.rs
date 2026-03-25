@@ -219,6 +219,7 @@ mod tests {
     fn msceshi_fixture_source(name: &str) -> &'static str {
         match name {
             "branch-return-matrix.ms" => include_str!("testdata/branch-return-matrix.ms.txt"),
+            "array-matrix.ms" => include_str!("testdata/array-matrix.ms.txt"),
             "string-list-matrix.ms" => include_str!("testdata/string-list-matrix.ms.txt"),
             "short-circuit-guard.ms" => include_str!("testdata/short-circuit-guard.ms.txt"),
             other => panic!("未知的 msceshi 样例 `{other}`"),
@@ -287,6 +288,16 @@ mod tests {
         assert_eq!(output, "3\n3\n4\n1\n2\ntrue\n3\n3\n4\n1\n3\n3\n2\n3\n1\n");
     }
 
+    /// 校验固定长度数组的默认声明、初始化和元素访问能够通过 LLVM 后端完整运行。
+    #[test]
+    fn should_build_and_run_array_program() {
+        let output = build_and_run(
+            "array",
+            "func main():\n    var fixed:array<int,3>\n    var values = array<int,3>(7, 8, 9)\n    print(fixed[0])\n    print(values[0])\n    print(values[1])\n    print(values[2])\n",
+        );
+        assert_eq!(output, "0\n7\n8\n9\n");
+    }
+
     /// 校验递归函数结合 `if / else` 全分支返回时，仍能通过 LLVM 后端完整编译并运行。
     #[test]
     fn should_build_and_run_recursive_program() {
@@ -302,6 +313,13 @@ mod tests {
     fn should_build_and_run_msceshi_branch_return_matrix() {
         let output = build_and_run_msceshi_fixture("branch-return-matrix.ms");
         assert_eq!(output, "-1\n0\n1\n10\n11\n20\n21\n30\n999\n300\n");
+    }
+
+    /// 校验 `msceshi` 中数组压力样例能够稳定运行，避免固定长度数组的零值声明或索引回归。
+    #[test]
+    fn should_build_and_run_msceshi_array_matrix() {
+        let output = build_and_run_msceshi_fixture("array-matrix.ms");
+        assert_eq!(output, "0\n0\n11\n22\n33\n55\n");
     }
 
     /// 校验 `msceshi` 中字符串列表压力样例能够稳定运行，避免字符串列表再次出现类型错乱或空指针。

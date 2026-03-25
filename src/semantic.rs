@@ -15,6 +15,7 @@ pub enum ValueType {
     Bool,
     String,
     List(Box<ValueType>),
+    Array(Box<ValueType>, usize),
     Unit,
 }
 
@@ -27,6 +28,7 @@ impl ValueType {
             Self::Bool => "bool".to_string(),
             Self::String => "string".to_string(),
             Self::List(element) => format!("list<{}>", element.display_name()),
+            Self::Array(element, size) => format!("array<{},{}>", element.display_name(), size),
             Self::Unit => "unit".to_string(),
         }
     }
@@ -249,8 +251,33 @@ impl<'a> SemanticAnalyzer<'a> {
                 } else {
                     None
                 };
-                let value_type =
-                    self.infer_expression_type_with_hint(initializer, expected.as_ref())?;
+                let value_type = if let Some(initializer) = initializer {
+                    self.infer_expression_type_with_hint(initializer, expected.as_ref())?
+                } else {
+                    if *binding_kind == BindingKind::Const {
+                        return Err(CompilerError::semantic_message(
+                            "常量声明必须提供初始化表达式",
+                            *span,
+                        ));
+                    }
+                    match expected.clone() {
+                        Some(ValueType::Array(_, _)) => expected
+                            .clone()
+                            .expect("前一分支已经确认数组类型存在"),
+                        Some(_) => {
+                            return Err(CompilerError::semantic_message(
+                                "当前只有数组类型允许省略初始化表达式",
+                                *span,
+                            ));
+                        }
+                        None => {
+                            return Err(CompilerError::semantic_message(
+                                "省略初始化表达式时必须提供数组类型标注",
+                                *span,
+                            ));
+                        }
+                    }
+                };
                 if self.current_scope().contains_key(name) {
                     return Err(CompilerError::semantic_message(
                         format!("{} `{name}` 在当前作用域中重复声明", binding_kind.keyword()),
@@ -492,6 +519,12 @@ impl<'a> SemanticAnalyzer<'a> {
             Expr::ListLiteral { elements, span } => {
                 self.infer_list_literal_type(elements, hint, *span)
             }
+            Expr::ArrayInitializer {
+                element_type,
+                size,
+                elements,
+                span,
+            } => self.infer_array_initializer_type(element_type, *size, elements, *span),
             Expr::Index {
                 target,
                 index,
@@ -528,8 +561,18 @@ impl<'a> SemanticAnalyzer<'a> {
                 TypeName::Float => Ok(ValueType::List(Box::new(ValueType::Float))),
                 TypeName::Bool => Ok(ValueType::List(Box::new(ValueType::Bool))),
                 TypeName::String => Ok(ValueType::List(Box::new(ValueType::String))),
-                TypeName::List(_) => Err(CompilerError::semantic_message(
+                TypeName::List(_) | TypeName::Array(_, _) => Err(CompilerError::semantic_message(
                     "当前阶段列表元素只支持基础类型",
+                    span,
+                )),
+            },
+            TypeName::Array(element, size) => match element.as_ref() {
+                TypeName::Int => Ok(ValueType::Array(Box::new(ValueType::Int), *size)),
+                TypeName::Float => Ok(ValueType::Array(Box::new(ValueType::Float), *size)),
+                TypeName::Bool => Ok(ValueType::Array(Box::new(ValueType::Bool), *size)),
+                TypeName::String => Ok(ValueType::Array(Box::new(ValueType::String), *size)),
+                TypeName::List(_) | TypeName::Array(_, _) => Err(CompilerError::semantic_message(
+                    "当前阶段数组元素只支持基础类型",
                     span,
                 )),
             },
@@ -560,7 +603,7 @@ impl<'a> SemanticAnalyzer<'a> {
             _ => None,
         };
         let first_type = self.infer_expression_type_with_hint(&elements[0], hinted_element)?;
-        if matches!(first_type, ValueType::List(_)) {
+        if matches!(first_type, ValueType::List(_) | ValueType::Array(_, _)) {
             return Err(CompilerError::semantic_message(
                 "当前阶段列表元素只支持基础类型",
                 span,
@@ -580,7 +623,46 @@ impl<'a> SemanticAnalyzer<'a> {
         Ok(ValueType::List(Box::new(first_type)))
     }
 
-    /// 推导列表索引表达式的返回值类型。
+    /// 推导固定长度数组初始化表达式的类型，并校验元素数量和元素类型。
+    fn infer_array_initializer_type(
+        &mut self,
+        element_type: &TypeName,
+        size: usize,
+        elements: &[Expr],
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        let expected_element = self.value_type_from_annotation(element_type, span)?;
+        if !matches!(
+            expected_element,
+            ValueType::Int | ValueType::Float | ValueType::Bool | ValueType::String
+        ) {
+            return Err(CompilerError::semantic_message(
+                "当前阶段数组元素只支持基础类型",
+                span,
+            ));
+        }
+
+        if elements.len() != size {
+            return Err(CompilerError::semantic_message(
+                format!("数组初始化需要 {size} 个元素，但实际提供了 {} 个", elements.len()),
+                span,
+            ));
+        }
+
+        for element in elements {
+            let actual = self.infer_expression_type_with_hint(element, Some(&expected_element))?;
+            if actual != expected_element {
+                return Err(CompilerError::semantic_message(
+                    "数组初始化中的元素类型必须与声明类型一致",
+                    element.span(),
+                ));
+            }
+        }
+
+        Ok(ValueType::Array(Box::new(expected_element), size))
+    }
+
+    /// 推导列表或数组索引表达式的返回值类型。
     fn infer_index_type(
         &mut self,
         target: &Expr,
@@ -591,14 +673,15 @@ impl<'a> SemanticAnalyzer<'a> {
         let index_type = self.infer_expression_type(index)?;
         if index_type != ValueType::Int {
             return Err(CompilerError::semantic_message(
-                "列表索引必须是整数",
+                "索引必须是整数",
                 index.span(),
             ));
         }
         match target_type {
             ValueType::List(element) => Ok((*element).clone()),
+            ValueType::Array(element, _) => Ok((*element).clone()),
             _ => Err(CompilerError::semantic_message(
-                "索引访问当前只支持列表类型",
+                "索引访问当前只支持列表或数组类型",
                 span,
             )),
         }
@@ -805,12 +888,14 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
             }
             BinaryOp::Equal | BinaryOp::NotEqual => {
-                if left == right && left != &ValueType::Unit && !matches!(left, ValueType::List(_))
+                if left == right
+                    && left != &ValueType::Unit
+                    && !matches!(left, ValueType::List(_) | ValueType::Array(_, _))
                 {
                     Ok(ValueType::Bool)
                 } else {
                     Err(CompilerError::semantic_message(
-                        "相等比较要求两侧类型一致且不能为空类型或列表类型",
+                        "相等比较要求两侧类型一致且不能为空类型、列表类型或数组类型",
                         span,
                     ))
                 }
@@ -872,7 +957,10 @@ impl<'a> SemanticAnalyzer<'a> {
                 ));
             }
             let argument_type = self.infer_expression_type(&arguments[0])?;
-            if matches!(argument_type, ValueType::Unit | ValueType::List(_)) {
+            if matches!(
+                argument_type,
+                ValueType::Unit | ValueType::List(_) | ValueType::Array(_, _)
+            ) {
                 return Err(CompilerError::semantic_message(
                     "当前阶段 `print` 只支持打印基础类型",
                     arguments[0].span(),
@@ -1098,5 +1186,21 @@ mod tests {
     fn should_reject_invalid_list_method_argument_type() {
         let error = analyze("var items:list<int> = [1]\nitems.append(true)\n").unwrap_err();
         assert!(error.contains("参数类型不匹配"));
+    }
+
+    /// 校验数组默认声明和元素访问能够通过语义分析。
+    #[test]
+    fn should_accept_array_declaration_and_index() {
+        analyze(
+            "var fixed:array<int,3>\nvar values = array<int,3>(1, 2, 3)\nprint(values[1])\n",
+        )
+        .unwrap();
+    }
+
+    /// 校验数组初始化的元素数量必须和固定长度完全一致。
+    #[test]
+    fn should_reject_array_initializer_length_mismatch() {
+        let error = analyze("var values = array<int,3>(1, 2)\n").unwrap_err();
+        assert!(error.contains("数组初始化需要 3 个元素"));
     }
 }

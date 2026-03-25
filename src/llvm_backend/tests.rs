@@ -147,6 +147,17 @@ fn should_emit_for_each_blocks() {
     assert!(ir.contains("foreach.exit"));
 }
 
+/// 校验固定长度数组会生成 LLVM 原生数组存储和元素地址计算指令。
+#[test]
+fn should_emit_array_storage_and_gep() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var fixed:array<int,3>\n    var values = array<int,3>(1, 2, 3)\n    print(values[1])\n    print(fixed[0])\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("[3 x i64]"));
+    assert!(ir.contains("getelementptr inbounds [3 x i64]"));
+}
+
 /// 校验所有 `if / else` 分支都 `return` 时，后端不会再留下无终结器的悬空汇合块。
 #[test]
 fn should_compile_if_when_all_branches_return() {

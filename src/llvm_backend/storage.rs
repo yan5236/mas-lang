@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use inkwell::builder::BuilderError;
-use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::types::{ArrayType, BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, GlobalValue, PointerValue};
 
 use super::*;
@@ -23,7 +23,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let global = self
             .module
             .add_global(self.basic_type_for(&value_type)?, None, &symbol);
-        self.initialize_global(&global, &value_type);
+        self.initialize_global(&global, &value_type)?;
         let variable = VariableInfo {
             value_type,
             pointer: global.as_pointer_value(),
@@ -34,15 +34,23 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 为全局变量写入零值初始化器，确保在入口执行前内存布局稳定。
-    pub(super) fn initialize_global(&self, global: &GlobalValue<'ctx>, value_type: &ValueType) {
+    pub(super) fn initialize_global(
+        &self,
+        global: &GlobalValue<'ctx>,
+        value_type: &ValueType,
+    ) -> Result<(), CompilerError> {
         match value_type {
             ValueType::Int => global.set_initializer(&self.context.i64_type().const_zero()),
             ValueType::Float => global.set_initializer(&self.context.f64_type().const_zero()),
             ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
             ValueType::String => global.set_initializer(&self.string_type.const_zero()),
             ValueType::List(_) => global.set_initializer(&self.list_pointer_type().const_null()),
+            ValueType::Array(element, size) => {
+                global.set_initializer(&self.array_type_for(element.as_ref(), *size)?.const_zero())
+            }
             ValueType::Unit => {}
         }
+        Ok(())
     }
 
     /// 为局部变量创建栈内存槽位。
@@ -94,6 +102,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Bool => self.context.bool_type().into(),
             ValueType::String => self.string_type.into(),
             ValueType::List(_) => self.list_pointer_type().into(),
+            ValueType::Array(element, size) => self.array_type_for(element.as_ref(), *size)?.into(),
             ValueType::Unit => {
                 return Err(CompilerError::build_message(
                     "unit 不应该被映射为可存储的基础类型",
@@ -109,6 +118,22 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         value_type: &ValueType,
     ) -> Result<BasicMetadataTypeEnum<'ctx>, CompilerError> {
         Ok(self.basic_type_for(value_type)?.into())
+    }
+
+    /// 根据元素类型和固定长度构造 LLVM 数组类型。
+    pub(super) fn array_type_for(
+        &self,
+        element_type: &ValueType,
+        size: usize,
+    ) -> Result<ArrayType<'ctx>, CompilerError> {
+        Ok(self
+            .basic_type_for(element_type)?
+            .array_type(size.try_into().map_err(|_| {
+                CompilerError::build_message(
+                    "数组长度超出了 LLVM 支持的范围",
+                    Span::new(0, self.source.text().len()),
+                )
+            })?))
     }
 
     /// 返回后端中统一使用的列表句柄指针类型。

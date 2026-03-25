@@ -132,11 +132,24 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        let initializer = if self.match_tag(TokenTag::Equal) {
+            Some(self.parse_expression()?)
+        } else if binding_kind == BindingKind::Var
+            && matches!(annotation.as_ref(), Some(TypeName::Array(_, _)))
+            && self.is_statement_end()
+        {
+            None
+        } else {
+            return Err(CompilerError::syntax_message(
+                "声明缺少 `=` 初始化符号",
+                self.peek().span,
+            ));
+        };
 
-        self.consume(TokenTag::Equal, "声明缺少 `=` 初始化符号")?;
-        let initializer = self.parse_expression()?;
-
-        let span = Span::merge(start, initializer.span());
+        let span = initializer
+            .as_ref()
+            .map(|expr| Span::merge(start, expr.span()))
+            .unwrap_or_else(|| Span::merge(start, self.previous().span));
         Ok(Stmt::VarDecl {
             binding_kind,
             name,
@@ -587,10 +600,15 @@ impl<'a> Parser<'a> {
                 value: Literal::String(value),
                 span: token.span,
             }),
-            TokenKind::Identifier(name) => Ok(Expr::Identifier {
-                name,
-                span: token.span,
-            }),
+            TokenKind::Identifier(name) => {
+                if name == "array" && self.check(TokenTag::Less) {
+                    return self.parse_array_initializer(token.span);
+                }
+                Ok(Expr::Identifier {
+                    name,
+                    span: token.span,
+                })
+            }
             TokenKind::LeftParen => {
                 let expression = self.parse_expression()?;
                 let close = self.consume(TokenTag::RightParen, "分组表达式缺少右括号 `)`")?;
@@ -627,7 +645,35 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析显式类型标注中的内建类型名称或 `list<T>` 类型。
+    /// 解析 `array<T,N>(...)` 形式的固定长度数组初始化表达式。
+    fn parse_array_initializer(&mut self, start: Span) -> Result<Expr, CompilerError> {
+        self.consume(TokenTag::Less, "`array` 初始化缺少左尖括号 `<`")?;
+        let element_type = self.parse_type_name()?;
+        self.consume(TokenTag::Comma, "`array` 初始化缺少元素类型与长度之间的逗号 `,`")?;
+        let size = self.parse_array_size()?;
+        self.consume(TokenTag::Greater, "`array` 初始化缺少右尖括号 `>`")?;
+        self.consume(TokenTag::LeftParen, "`array` 初始化缺少左括号 `(`")?;
+
+        let mut elements = Vec::new();
+        if !self.check(TokenTag::RightParen) {
+            loop {
+                elements.push(self.parse_expression()?);
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
+                }
+            }
+        }
+
+        let close = self.consume(TokenTag::RightParen, "`array` 初始化缺少右括号 `)`")?;
+        Ok(Expr::ArrayInitializer {
+            element_type,
+            size,
+            elements,
+            span: Span::merge(start, close.span),
+        })
+    }
+
+    /// 解析显式类型标注中的内建类型名称、`list<T>` 或 `array<T,N>` 类型。
     fn parse_type_name(&mut self) -> Result<TypeName, CompilerError> {
         let (name, span) = self.consume_identifier("类型标注缺少类型名")?;
         match name.as_str() {
@@ -641,9 +687,33 @@ impl<'a> Parser<'a> {
                 self.consume(TokenTag::Greater, "`list` 类型缺少右尖括号 `>`")?;
                 Ok(TypeName::List(Box::new(element_type)))
             }
+            "array" => {
+                self.consume(TokenTag::Less, "`array` 类型缺少左尖括号 `<`")?;
+                let element_type = self.parse_type_name()?;
+                self.consume(TokenTag::Comma, "`array` 类型缺少元素类型与长度之间的逗号 `,`")?;
+                let size = self.parse_array_size()?;
+                self.consume(TokenTag::Greater, "`array` 类型缺少右尖括号 `>`")?;
+                Ok(TypeName::Array(Box::new(element_type), size))
+            }
             _ => Err(CompilerError::syntax_message(
                 format!("未知的内建类型 `{name}`"),
                 span,
+            )),
+        }
+    }
+
+    /// 解析数组类型和初始化中的固定长度常量。
+    fn parse_array_size(&mut self) -> Result<usize, CompilerError> {
+        let token = self.advance().clone();
+        match token.kind {
+            TokenKind::IntLiteral(value) if value > 0 => Ok(value as usize),
+            TokenKind::IntLiteral(_) => Err(CompilerError::syntax_message(
+                "数组长度必须是大于 0 的整数",
+                token.span,
+            )),
+            _ => Err(CompilerError::syntax_message(
+                "数组长度必须是整数常量",
+                token.span,
             )),
         }
     }
@@ -800,7 +870,9 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::Parser;
-    use crate::ast::{AssignOp, BinaryOp, BindingKind, Expr, ListMethod, Stmt, TypeName, UnaryOp};
+    use crate::ast::{
+        AssignOp, BinaryOp, BindingKind, Expr, ListMethod, Stmt, TypeName, UnaryOp,
+    };
     use crate::lexer::Lexer;
     use crate::settings::{CompilerSettings, UiLanguage};
     use crate::source::SourceFile;
@@ -912,7 +984,7 @@ mod tests {
             panic!("首条语句不是绑定声明");
         };
         assert!(matches!(annotation, Some(TypeName::List(_))));
-        assert!(matches!(initializer, Expr::ListLiteral { .. }));
+        assert!(matches!(initializer, Some(Expr::ListLiteral { .. })));
 
         let Stmt::ExprStmt { expr, .. } = &program.statements[3] else {
             panic!("第四条语句不是表达式语句");
@@ -921,5 +993,28 @@ mod tests {
             panic!("第四条语句不是列表方法调用");
         };
         assert_eq!(*method, ListMethod::Append);
+    }
+
+    /// 校验数组类型、默认声明和初始化表达式能够被正确解析。
+    #[test]
+    fn should_parse_array_expressions() {
+        let program = parse(
+            "var fixed:array<int, 3>\nvar values = array<int, 3>(1, 2, 3)\nprint(values[1])\n",
+        );
+        let Stmt::VarDecl {
+            annotation,
+            initializer,
+            ..
+        } = &program.statements[0]
+        else {
+            panic!("首条语句不是绑定声明");
+        };
+        assert!(matches!(annotation, Some(TypeName::Array(_, 3))));
+        assert!(initializer.is_none());
+
+        let Stmt::VarDecl { initializer, .. } = &program.statements[1] else {
+            panic!("第二条语句不是绑定声明");
+        };
+        assert!(matches!(initializer, Some(Expr::ArrayInitializer { size: 3, .. })));
     }
 }
