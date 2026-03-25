@@ -1,6 +1,6 @@
 use crate::ast::{
-    AssignOp, BinaryOp, BindingKind, ConditionalBranch, Expr, ListMethod, Literal, Parameter,
-    Program, Stmt, TypeName, UnaryOp,
+    AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, Expr, Literal, MapEntry,
+    MethodName, Parameter, Program, Stmt, TypeName, UnaryOp,
 };
 use crate::diagnostic::CompilerError;
 use crate::settings::CompilerSettings;
@@ -162,12 +162,35 @@ impl<'a> Parser<'a> {
     /// 解析 `name = expr` 或复合赋值形式的赋值语句。
     fn parse_assignment(&mut self) -> Result<Stmt, CompilerError> {
         let (name, start) = self.consume_identifier("赋值语句缺少变量名")?;
+        if self.match_tag(TokenTag::LeftBracket) {
+            let index = self.parse_expression()?;
+            let close = self.consume(TokenTag::RightBracket, "下标赋值缺少右方括号 `]`")?;
+            let op = self.parse_assign_operator()?;
+            if op != AssignOp::Assign {
+                return Err(CompilerError::syntax_message(
+                    "当前阶段下标赋值只支持 `=`",
+                    close.span,
+                ));
+            }
+            let value = self.parse_expression()?;
+            return Ok(Stmt::Assign {
+                target: AssignTarget::Index {
+                    target: Box::new(Expr::Identifier { name, span: start }),
+                    index: Box::new(index),
+                    span: Span::merge(start, close.span),
+                },
+                op,
+                value: value.clone(),
+                span: Span::merge(start, value.span()),
+            });
+        }
+
         let op = self.parse_assign_operator()?;
         let value = self.parse_expression()?;
 
         let span = Span::merge(start, value.span());
         Ok(Stmt::Assign {
-            name,
+            target: AssignTarget::Identifier { name, span: start },
             op,
             value,
             span,
@@ -231,15 +254,26 @@ impl<'a> Parser<'a> {
     /// 解析范围循环或列表遍历循环。
     fn parse_for_statement(&mut self) -> Result<Stmt, CompilerError> {
         let start = self.previous().span;
-        let (name, _) = self.consume_identifier("for 循环缺少循环变量名")?;
+        let (key_name, first_span) = self.consume_identifier("for 循环缺少循环变量名")?;
+        let value_name = if self.match_tag(TokenTag::Comma) {
+            Some(self.consume_identifier("for 字典遍历缺少值变量名")?.0)
+        } else {
+            None
+        };
         self.consume(TokenTag::In, "for 循环缺少 `in` 关键字")?;
         let iterable_or_start = self.parse_expression()?;
 
         if self.match_tag(TokenTag::DotDot) {
+            if value_name.is_some() {
+                return Err(CompilerError::syntax_message(
+                    "范围 for 不能同时声明键和值变量",
+                    first_span,
+                ));
+            }
             let range_end = self.parse_expression()?;
             let (body, body_span) = self.parse_suite("for 循环缺少代码块")?;
             return Ok(Stmt::ForRange {
-                name,
+                name: key_name,
                 start: iterable_or_start,
                 end: range_end,
                 body,
@@ -249,7 +283,8 @@ impl<'a> Parser<'a> {
 
         let (body, body_span) = self.parse_suite("for 循环缺少代码块")?;
         Ok(Stmt::ForEach {
-            name,
+            key_name,
+            value_name,
             iterable: iterable_or_start,
             body,
             span: Span::merge(start, body_span),
@@ -461,7 +496,7 @@ impl<'a> Parser<'a> {
         self.parse_postfix()
     }
 
-    /// 解析函数调用、索引、切片和列表方法调用等后缀表达式。
+    /// 解析函数调用、索引、切片和对象方法调用等后缀表达式。
     fn parse_postfix(&mut self) -> Result<Expr, CompilerError> {
         let mut expr = self.parse_primary()?;
 
@@ -475,7 +510,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_tag(TokenTag::Dot) {
-                expr = self.finish_list_method_call(expr)?;
+                expr = self.finish_method_call(expr)?;
                 continue;
             }
             break;
@@ -548,17 +583,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析列表方法调用，不引入通用成员访问语义。
-    fn finish_list_method_call(&mut self, target: Expr) -> Result<Expr, CompilerError> {
+    /// 解析对象方法调用，不引入通用成员访问语义。
+    fn finish_method_call(&mut self, target: Expr) -> Result<Expr, CompilerError> {
         let dot_span = self.previous().span;
-        let (method_name, method_span) = self.consume_identifier("列表方法调用缺少方法名")?;
-        let method = ListMethod::parse(&method_name).ok_or_else(|| {
+        let (method_name, method_span) = self.consume_identifier("方法调用缺少方法名")?;
+        let method = MethodName::parse(&method_name).ok_or_else(|| {
             CompilerError::syntax_message(
-                format!("当前阶段不支持列表方法 `{method_name}`"),
+                format!("当前阶段不支持对象方法 `{method_name}`"),
                 method_span,
             )
         })?;
-        self.consume(TokenTag::LeftParen, "列表方法调用缺少左括号 `(`")?;
+        self.consume(TokenTag::LeftParen, "方法调用缺少左括号 `(`")?;
         let mut arguments = Vec::new();
 
         if !self.check(TokenTag::RightParen) {
@@ -570,8 +605,8 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let close = self.consume(TokenTag::RightParen, "列表方法调用缺少右括号 `)`")?;
-        Ok(Expr::ListMethodCall {
+        let close = self.consume(TokenTag::RightParen, "方法调用缺少右括号 `)`")?;
+        Ok(Expr::MethodCall {
             target: Box::new(target),
             method,
             arguments,
@@ -618,6 +653,7 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::LeftBracket => self.parse_list_literal(token.span),
+            TokenKind::LeftBrace => self.parse_map_literal(token.span),
             _ => Err(CompilerError::syntax_message(
                 "这里需要一个表达式",
                 token.span,
@@ -645,11 +681,47 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// 解析字典字面量。
+    fn parse_map_literal(&mut self, start: Span) -> Result<Expr, CompilerError> {
+        let mut entries = Vec::new();
+        self.skip_literal_layout();
+
+        if !self.check(TokenTag::RightBrace) {
+            loop {
+                let key = self.parse_expression()?;
+                self.consume(TokenTag::Colon, "字典字面量中的键和值之间缺少冒号 `:`")?;
+                let value = self.parse_expression()?;
+                entries.push(MapEntry {
+                    span: Span::merge(key.span(), value.span()),
+                    key,
+                    value,
+                });
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
+                }
+                self.skip_literal_layout();
+                if self.check(TokenTag::RightBrace) {
+                    break;
+                }
+            }
+        }
+
+        self.skip_literal_layout();
+        let close = self.consume(TokenTag::RightBrace, "字典字面量缺少右花括号 `}`")?;
+        Ok(Expr::MapLiteral {
+            entries,
+            span: Span::merge(start, close.span),
+        })
+    }
+
     /// 解析 `array<T,N>(...)` 形式的固定长度数组初始化表达式。
     fn parse_array_initializer(&mut self, start: Span) -> Result<Expr, CompilerError> {
         self.consume(TokenTag::Less, "`array` 初始化缺少左尖括号 `<`")?;
         let element_type = self.parse_type_name()?;
-        self.consume(TokenTag::Comma, "`array` 初始化缺少元素类型与长度之间的逗号 `,`")?;
+        self.consume(
+            TokenTag::Comma,
+            "`array` 初始化缺少元素类型与长度之间的逗号 `,`",
+        )?;
         let size = self.parse_array_size()?;
         self.consume(TokenTag::Greater, "`array` 初始化缺少右尖括号 `>`")?;
         self.consume(TokenTag::LeftParen, "`array` 初始化缺少左括号 `(`")?;
@@ -687,10 +759,24 @@ impl<'a> Parser<'a> {
                 self.consume(TokenTag::Greater, "`list` 类型缺少右尖括号 `>`")?;
                 Ok(TypeName::List(Box::new(element_type)))
             }
+            "map" => {
+                self.consume(TokenTag::Less, "`map` 类型缺少左尖括号 `<`")?;
+                let key_type = self.parse_type_name()?;
+                self.consume(
+                    TokenTag::Comma,
+                    "`map` 类型缺少键类型与值类型之间的逗号 `,`",
+                )?;
+                let value_type = self.parse_type_name()?;
+                self.consume(TokenTag::Greater, "`map` 类型缺少右尖括号 `>`")?;
+                Ok(TypeName::Map(Box::new(key_type), Box::new(value_type)))
+            }
             "array" => {
                 self.consume(TokenTag::Less, "`array` 类型缺少左尖括号 `<`")?;
                 let element_type = self.parse_type_name()?;
-                self.consume(TokenTag::Comma, "`array` 类型缺少元素类型与长度之间的逗号 `,`")?;
+                self.consume(
+                    TokenTag::Comma,
+                    "`array` 类型缺少元素类型与长度之间的逗号 `,`",
+                )?;
                 let size = self.parse_array_size()?;
                 self.consume(TokenTag::Greater, "`array` 类型缺少右尖括号 `>`")?;
                 Ok(TypeName::Array(Box::new(element_type), size))
@@ -766,6 +852,11 @@ impl<'a> Parser<'a> {
 
     /// 判断当前位置是否符合赋值语句的开头模式。
     fn is_assignment_start(&self) -> bool {
+        self.is_identifier_assignment_start() || self.is_index_assignment_start()
+    }
+
+    /// 判断当前位置是否符合普通变量赋值语句的开头模式。
+    fn is_identifier_assignment_start(&self) -> bool {
         self.check(TokenTag::Identifier)
             && matches!(
                 self.peek_next().kind.tag(),
@@ -776,6 +867,35 @@ impl<'a> Parser<'a> {
                     | TokenTag::SlashEqual
                     | TokenTag::PercentEqual
             )
+    }
+
+    /// 判断当前位置是否符合 `name[index] = value` 形式的下标赋值模式。
+    fn is_index_assignment_start(&self) -> bool {
+        if !(self.check(TokenTag::Identifier)
+            && self.peek_next().kind.tag() == TokenTag::LeftBracket)
+        {
+            return false;
+        }
+
+        let mut depth = 0usize;
+        for position in (self.current + 1)..self.tokens.len() {
+            match self.tokens[position].kind.tag() {
+                TokenTag::LeftBracket => depth += 1,
+                TokenTag::RightBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return self
+                            .tokens
+                            .get(position + 1)
+                            .is_some_and(|token| token.kind.tag() == TokenTag::Equal);
+                    }
+                }
+                TokenTag::Newline | TokenTag::Dedent | TokenTag::Eof if depth == 0 => return false,
+                _ => {}
+            }
+        }
+
+        false
     }
 
     /// 尝试匹配一个二元运算符，并转换为 AST 中的运算符枚举。
@@ -820,6 +940,16 @@ impl<'a> Parser<'a> {
     /// 跳过连续出现的换行分隔符。
     fn skip_newlines(&mut self) {
         while self.check(TokenTag::Newline) {
+            self.advance();
+        }
+    }
+
+    /// 跳过容器字面量内部仅用于排版的换行和缩进记号，避免多行写法被误判为语法错误。
+    fn skip_literal_layout(&mut self) {
+        while matches!(
+            self.peek().kind.tag(),
+            TokenTag::Newline | TokenTag::Indent | TokenTag::Dedent
+        ) {
             self.advance();
         }
     }
@@ -871,7 +1001,7 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::Parser;
     use crate::ast::{
-        AssignOp, BinaryOp, BindingKind, Expr, ListMethod, Stmt, TypeName, UnaryOp,
+        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, MethodName, Stmt, TypeName, UnaryOp,
     };
     use crate::lexer::Lexer;
     use crate::settings::{CompilerSettings, UiLanguage};
@@ -924,6 +1054,22 @@ mod tests {
         assert!(matches!(program.statements[0], Stmt::ForEach { .. }));
     }
 
+    /// 校验字典遍历会保留键和值两个循环变量名。
+    #[test]
+    fn should_parse_map_for_each_statement() {
+        let program = parse("for key, value in user:\n    print(key)\n");
+        let Stmt::ForEach {
+            key_name,
+            value_name,
+            ..
+        } = &program.statements[0]
+        else {
+            panic!("首条语句不是 for-each 语句");
+        };
+        assert_eq!(key_name, "key");
+        assert_eq!(value_name.as_deref(), Some("value"));
+    }
+
     /// 校验复合赋值运算符能够被解析为独立赋值类型。
     #[test]
     fn should_parse_compound_assignment() {
@@ -932,6 +1078,17 @@ mod tests {
             panic!("首条语句不是赋值语句");
         };
         assert_eq!(*op, AssignOp::AddAssign);
+    }
+
+    /// 校验字典下标赋值会被解析为独立的下标赋值目标。
+    #[test]
+    fn should_parse_index_assignment() {
+        let program = parse("user[\"name\"] = \"Mascript\"\n");
+        let Stmt::Assign { target, op, .. } = &program.statements[0] else {
+            panic!("首条语句不是赋值语句");
+        };
+        assert_eq!(*op, AssignOp::Assign);
+        assert!(matches!(target, AssignTarget::Index { .. }));
     }
 
     /// 校验比较运算和逻辑运算的优先级关系符合预期。
@@ -989,10 +1146,54 @@ mod tests {
         let Stmt::ExprStmt { expr, .. } = &program.statements[3] else {
             panic!("第四条语句不是表达式语句");
         };
-        let Expr::ListMethodCall { method, .. } = expr else {
-            panic!("第四条语句不是列表方法调用");
+        let Expr::MethodCall { method, .. } = expr else {
+            panic!("第四条语句不是方法调用");
         };
-        assert_eq!(*method, ListMethod::Append);
+        assert_eq!(*method, MethodName::Append);
+    }
+
+    /// 校验字典类型、字面量、索引和方法调用能够被正确解析。
+    #[test]
+    fn should_parse_map_expressions() {
+        let program = parse(
+            "var user:map<string,int> = {\"age\": 18}\nprint(user[\"age\"])\nuser.contains(\"age\")\n",
+        );
+        let Stmt::VarDecl {
+            annotation,
+            initializer,
+            ..
+        } = &program.statements[0]
+        else {
+            panic!("首条语句不是绑定声明");
+        };
+        assert!(matches!(annotation, Some(TypeName::Map(_, _))));
+        assert!(matches!(initializer, Some(Expr::MapLiteral { .. })));
+
+        let Stmt::ExprStmt { expr, .. } = &program.statements[2] else {
+            panic!("第三条语句不是表达式语句");
+        };
+        let Expr::MethodCall { method, .. } = expr else {
+            panic!("第三条语句不是方法调用");
+        };
+        assert_eq!(*method, MethodName::Contains);
+    }
+
+    /// 校验多行字典字面量中的换行不会被误判为缺少表达式。
+    #[test]
+    fn should_parse_multiline_map_literal() {
+        let program = parse(
+            "func main():\n    var user:map<string,int> = {\n        \"age\": 18,\n        \"score\": 99\n    }\n",
+        );
+        let Stmt::FunctionDecl { body, .. } = &program.statements[0] else {
+            panic!("首条语句不是函数声明");
+        };
+        let Stmt::VarDecl { initializer, .. } = &body[0] else {
+            panic!("函数体首条语句不是绑定声明");
+        };
+        let Some(Expr::MapLiteral { entries, .. }) = initializer else {
+            panic!("初始化值不是字典字面量");
+        };
+        assert_eq!(entries.len(), 2);
     }
 
     /// 校验数组类型、默认声明和初始化表达式能够被正确解析。
@@ -1015,6 +1216,9 @@ mod tests {
         let Stmt::VarDecl { initializer, .. } = &program.statements[1] else {
             panic!("第二条语句不是绑定声明");
         };
-        assert!(matches!(initializer, Some(Expr::ArrayInitializer { size: 3, .. })));
+        assert!(matches!(
+            initializer,
+            Some(Expr::ArrayInitializer { size: 3, .. })
+        ));
     }
 }

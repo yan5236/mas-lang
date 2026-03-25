@@ -158,6 +158,21 @@ fn should_emit_array_storage_and_gep() {
     assert!(ir.contains("getelementptr inbounds [3 x i64]"));
 }
 
+/// 校验字典操作会引用新增的字典运行时符号。
+#[test]
+fn should_emit_map_runtime_symbols() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var user:map<string,int> = {\"age\": 18}\n    user[\"score\"] = 99\n    print(len(user))\n    print(user[\"age\"])\n    print(user.contains(\"score\"))\n    for key, value in user:\n        print(key)\n        print(value)\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("map_create"));
+    assert!(ir.contains("map_set_string_int"));
+    assert!(ir.contains("map_len"));
+    assert!(ir.contains("map_get_string_int"));
+    assert!(ir.contains("map_contains_string"));
+    assert!(ir.contains("foreach.map.header"));
+}
+
 /// 校验所有 `if / else` 分支都 `return` 时，后端不会再留下无终结器的悬空汇合块。
 #[test]
 fn should_compile_if_when_all_branches_return() {

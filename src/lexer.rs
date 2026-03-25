@@ -400,6 +400,8 @@ impl<'a> Lexer<'a> {
             ')' => TokenKind::RightParen,
             '[' => TokenKind::LeftBracket,
             ']' => TokenKind::RightBracket,
+            '{' => TokenKind::LeftBrace,
+            '}' => TokenKind::RightBrace,
             ',' => TokenKind::Comma,
             _ => {
                 return Err(CompilerError::lexical(
@@ -471,6 +473,17 @@ mod tests {
         assert!(kinds.contains(&TokenKind::LeftBracket));
         assert!(kinds.contains(&TokenKind::RightBracket));
         assert!(kinds.contains(&TokenKind::Dot));
+        assert!(kinds.contains(&TokenKind::Less));
+        assert!(kinds.contains(&TokenKind::Greater));
+    }
+
+    /// 校验字典相关分隔符会被词法分析器正确识别。
+    #[test]
+    fn should_tokenize_map_tokens() {
+        let kinds = lex("var user:map<string,int> = {\"age\": 18}\nprint(user[\"age\"])\n");
+        assert!(kinds.contains(&TokenKind::LeftBrace));
+        assert!(kinds.contains(&TokenKind::RightBrace));
+        assert!(kinds.contains(&TokenKind::Colon));
         assert!(kinds.contains(&TokenKind::Less));
         assert!(kinds.contains(&TokenKind::Greater));
     }

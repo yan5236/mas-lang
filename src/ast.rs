@@ -62,7 +62,7 @@ pub enum Stmt {
         span: Span,
     },
     Assign {
-        name: String,
+        target: AssignTarget,
         op: AssignOp,
         value: Expr,
         span: Span,
@@ -85,7 +85,8 @@ pub enum Stmt {
         span: Span,
     },
     ForEach {
-        name: String,
+        key_name: String,
+        value_name: Option<String>,
         iterable: Expr,
         body: Vec<Stmt>,
         span: Span,
@@ -104,6 +105,29 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
+}
+
+/// 表示赋值语句左侧当前阶段允许出现的目标形式。
+#[derive(Clone, Debug, PartialEq)]
+pub enum AssignTarget {
+    Identifier {
+        name: String,
+        span: Span,
+    },
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
+}
+
+impl AssignTarget {
+    /// 返回赋值目标自身在源码中的覆盖区间。
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Identifier { span, .. } | Self::Index { span, .. } => *span,
+        }
+    }
 }
 
 impl Stmt {
@@ -156,6 +180,10 @@ pub enum Expr {
         elements: Vec<Expr>,
         span: Span,
     },
+    MapLiteral {
+        entries: Vec<MapEntry>,
+        span: Span,
+    },
     ArrayInitializer {
         element_type: TypeName,
         size: usize,
@@ -173,9 +201,9 @@ pub enum Expr {
         end: Option<Box<Expr>>,
         span: Span,
     },
-    ListMethodCall {
+    MethodCall {
         target: Box<Expr>,
-        method: ListMethod,
+        method: MethodName,
         arguments: Vec<Expr>,
         span: Span,
     },
@@ -195,18 +223,27 @@ impl Expr {
             | Self::Unary { span, .. }
             | Self::Call { span, .. }
             | Self::ListLiteral { span, .. }
+            | Self::MapLiteral { span, .. }
             | Self::ArrayInitializer { span, .. }
             | Self::Index { span, .. }
             | Self::Slice { span, .. }
-            | Self::ListMethodCall { span, .. }
+            | Self::MethodCall { span, .. }
             | Self::Grouped { span, .. } => *span,
         }
     }
 }
 
-/// 表示列表对象当前阶段支持的方法名称。
+/// 表示字典字面量中的单个键值对。
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapEntry {
+    pub key: Expr,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// 表示容器对象当前阶段支持的方法名称。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ListMethod {
+pub enum MethodName {
     Append,
     Remove,
     Pop,
@@ -214,10 +251,12 @@ pub enum ListMethod {
     Reverse,
     Index,
     Contains,
+    Keys,
+    Values,
 }
 
-impl ListMethod {
-    /// 根据源码中的方法名文本解析出对应的列表方法枚举。
+impl MethodName {
+    /// 根据源码中的方法名文本解析出对应的方法枚举。
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "append" => Some(Self::Append),
@@ -227,6 +266,8 @@ impl ListMethod {
             "reverse" => Some(Self::Reverse),
             "index" => Some(Self::Index),
             "contains" => Some(Self::Contains),
+            "keys" => Some(Self::Keys),
+            "values" => Some(Self::Values),
             _ => None,
         }
     }
@@ -241,6 +282,8 @@ impl ListMethod {
             Self::Reverse => "reverse",
             Self::Index => "index",
             Self::Contains => "contains",
+            Self::Keys => "keys",
+            Self::Values => "values",
         }
     }
 }
@@ -299,6 +342,7 @@ pub enum TypeName {
     Bool,
     String,
     List(Box<TypeName>),
+    Map(Box<TypeName>, Box<TypeName>),
     Array(Box<TypeName>, usize),
 }
 

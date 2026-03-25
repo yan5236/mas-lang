@@ -45,6 +45,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
             ValueType::String => global.set_initializer(&self.string_type.const_zero()),
             ValueType::List(_) => global.set_initializer(&self.list_pointer_type().const_null()),
+            ValueType::Map(_, _) => global.set_initializer(&self.map_pointer_type().const_null()),
             ValueType::Array(element, size) => {
                 global.set_initializer(&self.array_type_for(element.as_ref(), *size)?.const_zero())
             }
@@ -102,6 +103,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Bool => self.context.bool_type().into(),
             ValueType::String => self.string_type.into(),
             ValueType::List(_) => self.list_pointer_type().into(),
+            ValueType::Map(_, _) => self.map_pointer_type().into(),
             ValueType::Array(element, size) => self.array_type_for(element.as_ref(), *size)?.into(),
             ValueType::Unit => {
                 return Err(CompilerError::build_message(
@@ -138,6 +140,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
     /// 返回后端中统一使用的列表句柄指针类型。
     pub(super) fn list_pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
+        self.context.ptr_type(inkwell::AddressSpace::default())
+    }
+
+    /// 返回后端中统一使用的字典句柄指针类型。
+    pub(super) fn map_pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
         self.context.ptr_type(inkwell::AddressSpace::default())
     }
 

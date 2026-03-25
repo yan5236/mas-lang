@@ -6,7 +6,7 @@ use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue, Str
 use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 预声明运行时 ABI，供打印、字符串和列表相关能力直接调用。
+    /// 预声明运行时 ABI，供打印、字符串、列表和字典相关能力直接调用。
     pub(super) fn declare_runtime(
         context: &'ctx Context,
         module: &Module<'ctx>,
@@ -83,6 +83,26 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             list_reverse: module.add_function(
                 "list_reverse",
                 void_type.fn_type(&[ptr_type.into()], false),
+                None,
+            ),
+            map_create: module.add_function(
+                "map_create",
+                ptr_type.fn_type(&[i8_type.into(), i8_type.into()], false),
+                None,
+            ),
+            map_len: module.add_function(
+                "map_len",
+                i64_type.fn_type(&[ptr_type.into()], false),
+                None,
+            ),
+            map_keys: module.add_function(
+                "map_keys",
+                ptr_type.fn_type(&[ptr_type.into()], false),
+                None,
+            ),
+            map_values: module.add_function(
+                "map_values",
+                ptr_type.fn_type(&[ptr_type.into()], false),
                 None,
             ),
         };
@@ -203,6 +223,218 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             i8_type.into(),
             &[ptr_type.into(), ptr_type.into(), i64_type.into()],
         );
+        add_void("map_remove_int", &[ptr_type.into(), i64_type.into()]);
+        add_void("map_remove_float", &[ptr_type.into(), f64_type.into()]);
+        add_void("map_remove_bool", &[ptr_type.into(), i8_type.into()]);
+        add_void(
+            "map_remove_string",
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_contains_int",
+            i8_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_contains_float",
+            i8_type.into(),
+            &[ptr_type.into(), f64_type.into()],
+        );
+        add_value(
+            "map_contains_bool",
+            i8_type.into(),
+            &[ptr_type.into(), i8_type.into()],
+        );
+        add_value(
+            "map_contains_string",
+            i8_type.into(),
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_int_int",
+            i64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_int_float",
+            f64_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_int_bool",
+            i8_type.into(),
+            &[ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_int_string",
+            ptr_type.into(),
+            &[ptr_type.into(), i64_type.into(), ptr_type.into()],
+        );
+        add_value(
+            "map_get_float_int",
+            i64_type.into(),
+            &[ptr_type.into(), f64_type.into()],
+        );
+        add_value(
+            "map_get_float_float",
+            f64_type.into(),
+            &[ptr_type.into(), f64_type.into()],
+        );
+        add_value(
+            "map_get_float_bool",
+            i8_type.into(),
+            &[ptr_type.into(), f64_type.into()],
+        );
+        add_value(
+            "map_get_float_string",
+            ptr_type.into(),
+            &[ptr_type.into(), f64_type.into(), ptr_type.into()],
+        );
+        add_value(
+            "map_get_bool_int",
+            i64_type.into(),
+            &[ptr_type.into(), i8_type.into()],
+        );
+        add_value(
+            "map_get_bool_float",
+            f64_type.into(),
+            &[ptr_type.into(), i8_type.into()],
+        );
+        add_value(
+            "map_get_bool_bool",
+            i8_type.into(),
+            &[ptr_type.into(), i8_type.into()],
+        );
+        add_value(
+            "map_get_bool_string",
+            ptr_type.into(),
+            &[ptr_type.into(), i8_type.into(), ptr_type.into()],
+        );
+        add_value(
+            "map_get_string_int",
+            i64_type.into(),
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_string_float",
+            f64_type.into(),
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_string_bool",
+            i8_type.into(),
+            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+        );
+        add_value(
+            "map_get_string_string",
+            ptr_type.into(),
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_int_int",
+            &[ptr_type.into(), i64_type.into(), i64_type.into()],
+        );
+        add_void(
+            "map_set_int_float",
+            &[ptr_type.into(), i64_type.into(), f64_type.into()],
+        );
+        add_void(
+            "map_set_int_bool",
+            &[ptr_type.into(), i64_type.into(), i8_type.into()],
+        );
+        add_void(
+            "map_set_int_string",
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_float_int",
+            &[ptr_type.into(), f64_type.into(), i64_type.into()],
+        );
+        add_void(
+            "map_set_float_float",
+            &[ptr_type.into(), f64_type.into(), f64_type.into()],
+        );
+        add_void(
+            "map_set_float_bool",
+            &[ptr_type.into(), f64_type.into(), i8_type.into()],
+        );
+        add_void(
+            "map_set_float_string",
+            &[
+                ptr_type.into(),
+                f64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_bool_int",
+            &[ptr_type.into(), i8_type.into(), i64_type.into()],
+        );
+        add_void(
+            "map_set_bool_float",
+            &[ptr_type.into(), i8_type.into(), f64_type.into()],
+        );
+        add_void(
+            "map_set_bool_bool",
+            &[ptr_type.into(), i8_type.into(), i8_type.into()],
+        );
+        add_void(
+            "map_set_bool_string",
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_string_int",
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_string_float",
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                f64_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_string_bool",
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i8_type.into(),
+            ],
+        );
+        add_void(
+            "map_set_string_string",
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+            ],
+        );
 
         runtime
     }
@@ -294,6 +526,28 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     ) -> Result<FunctionValue<'ctx>, CompilerError> {
         let suffix = self.list_type_suffix(value_type)?;
         let function_name = format!("{base_name}_{suffix}");
+        self.module.get_function(&function_name).ok_or_else(|| {
+            CompilerError::build_message(
+                format!("代码生成阶段找不到运行时函数 `{function_name}`"),
+                Span::new(0, self.source.text().len()),
+            )
+        })
+    }
+
+    /// 根据键类型和值类型查找已声明的字典运行时函数。
+    pub(super) fn map_runtime_function(
+        &self,
+        base_name: &str,
+        key_type: &ValueType,
+        value_type: Option<&ValueType>,
+    ) -> Result<FunctionValue<'ctx>, CompilerError> {
+        let key_suffix = self.list_type_suffix(key_type)?;
+        let function_name = if let Some(value_type) = value_type {
+            let value_suffix = self.list_type_suffix(value_type)?;
+            format!("{base_name}_{key_suffix}_{value_suffix}")
+        } else {
+            format!("{base_name}_{key_suffix}")
+        };
         self.module.get_function(&function_name).ok_or_else(|| {
             CompilerError::build_message(
                 format!("代码生成阶段找不到运行时函数 `{function_name}`"),

@@ -212,6 +212,26 @@ mod tests {
         String::from_utf8(output.stdout).unwrap()
     }
 
+    /// 编译源码并运行产物，返回失败进程的标准错误文本，用于断言运行时边界错误。
+    fn build_and_run_expect_failure(name: &str, text: &str) -> String {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!("mascript-llvm-e2e-{name}-{unique}"));
+        let source_path = temp_root.join(format!("{name}.ms"));
+        let output_path = temp_root.join(format!("{name}.exe"));
+        let source = SourceFile::new(source_path.display().to_string(), text.to_string());
+        let settings = CompilerSettings::new(UiLanguage::ZhCn);
+
+        let binary =
+            compile_to_executable(&source, &settings, &CompileOptions::new(Some(output_path)))
+                .unwrap();
+        let output = Command::new(binary).output().unwrap();
+        assert!(!output.status.success());
+        String::from_utf8(output.stderr).unwrap()
+    }
+
     /// 返回 `msceshi` 压力样例对应的源码文本。
     ///
     /// `cargo test` 在当前环境里会把 crate 放进独立沙盒目录，因此这里内嵌同内容样例，
@@ -296,6 +316,29 @@ mod tests {
             "func main():\n    var fixed:array<int,3>\n    var values = array<int,3>(7, 8, 9)\n    print(fixed[0])\n    print(values[0])\n    print(values[1])\n    print(values[2])\n",
         );
         assert_eq!(output, "0\n7\n8\n9\n");
+    }
+
+    /// 校验字典字面量、增删改查、keys/values 与遍历能够通过 LLVM 后端完整运行。
+    #[test]
+    fn should_build_and_run_map_program() {
+        let output = build_and_run(
+            "map",
+            "func main():\n    var user:map<string,int> = {\"alice\": 10, \"bob\": 20}\n    print(len(user))\n    print(user[\"alice\"])\n    user[\"alice\"] = 11\n    user[\"carol\"] = 30\n    print(user.contains(\"carol\"))\n    var keys = user.keys()\n    print(len(keys))\n    print(keys[0])\n    print(keys[1])\n    print(keys[2])\n    var values = user.values()\n    print(values[0])\n    print(values[1])\n    print(values[2])\n    user.remove(\"bob\")\n    print(len(user))\n    for key, value in user:\n        print(key)\n        print(value)\n",
+        );
+        assert_eq!(
+            output,
+            "2\n10\ntrue\n3\nalice\nbob\ncarol\n11\n20\n30\n2\nalice\n11\ncarol\n30\n"
+        );
+    }
+
+    /// 校验读取不存在的字典键时会触发明确的运行时失败，避免静默返回脏值。
+    #[test]
+    fn should_fail_when_map_key_is_missing() {
+        let error = build_and_run_expect_failure(
+            "map-missing-key",
+            "func main():\n    var user:map<string,int> = {\"age\": 18}\n    print(user[\"name\"])\n",
+        );
+        assert!(error.contains("字典中不存在目标键"));
     }
 
     /// 校验递归函数结合 `if / else` 全分支返回时，仍能通过 LLVM 后端完整编译并运行。

@@ -1,7 +1,7 @@
 use inkwell::values::{BasicMetadataValueEnum, FloatValue, FunctionValue, PointerValue};
 
 use super::*;
-use crate::ast::{Expr, ListMethod, Literal, TypeName, UnaryOp};
+use crate::ast::{Expr, Literal, MethodName, TypeName, UnaryOp};
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 编译表达式，并把 LLVM 值与静态类型一起返回给调用方。
@@ -28,6 +28,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             } => self.compile_call(callee, arguments, *span),
             Expr::ListLiteral { elements, span } => self.compile_list_literal(elements, *span),
+            Expr::MapLiteral { entries, span } => self.compile_map_literal(entries, *span),
             Expr::ArrayInitializer {
                 element_type,
                 size,
@@ -45,12 +46,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 end,
                 span,
             } => self.compile_slice(target, start.as_deref(), end.as_deref(), *span),
-            Expr::ListMethodCall {
+            Expr::MethodCall {
                 target,
                 method,
                 arguments,
                 span,
-            } => self.compile_list_method_call(target, *method, arguments, *span),
+            } => self.compile_method_call(target, *method, arguments, *span),
         }
     }
 
@@ -181,7 +182,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         let len = self.extract_string_part(string_value, 1, "print.len")?;
                         (self.runtime.print_string, vec![ptr.into(), len.into()])
                     }
-                    ValueType::Unit | ValueType::List(_) | ValueType::Array(_, _) => {
+                    ValueType::Unit
+                    | ValueType::List(_)
+                    | ValueType::Map(_, _)
+                    | ValueType::Array(_, _) => {
                         return Err(CompilerError::build_message(
                             "print 不能打印当前值类型",
                             span,
@@ -196,12 +200,31 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         if name == "len" {
             let compiled = self.compile_expr(&arguments[0])?;
             let argument = self.expect_value(compiled)?;
-            let (list_value, _) = self.expect_list_value(argument, span)?;
-            let call = self.map_builder(self.builder.build_call(
-                self.runtime.list_len,
-                &[list_value.into()],
-                "call.list_len",
-            ))?;
+            let (function, args, call_name): (
+                FunctionValue<'ctx>,
+                Vec<BasicMetadataValueEnum<'ctx>>,
+                &str,
+            ) = match argument.value_type {
+                ValueType::List(_) => {
+                    let (list_value, _) = self.expect_list_value(argument, span)?;
+                    (
+                        self.runtime.list_len,
+                        vec![list_value.into()],
+                        "call.list_len",
+                    )
+                }
+                ValueType::Map(_, _) => {
+                    let (map_value, _, _) = self.expect_map_value(argument, span)?;
+                    (self.runtime.map_len, vec![map_value.into()], "call.map_len")
+                }
+                _ => {
+                    return Err(CompilerError::build_message(
+                        "len 只支持列表或字典类型",
+                        span,
+                    ));
+                }
+            };
+            let call = self.map_builder(self.builder.build_call(function, &args, call_name))?;
             return Ok(CodegenValue::Value(TypedValue {
                 value_type: ValueType::Int,
                 value: call.try_as_basic_value().unwrap_basic(),
@@ -258,6 +281,63 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }))
     }
 
+    /// 编译字典字面量，并逐项调用运行时写入键值对。
+    pub(super) fn compile_map_literal(
+        &mut self,
+        entries: &[crate::ast::MapEntry],
+        span: Span,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        let Some(first_entry) = entries.first() else {
+            return Err(CompilerError::build_message(
+                "代码生成阶段无法直接编译缺少类型信息的空字典",
+                span,
+            ));
+        };
+
+        let first_key_compiled = self.compile_expr(&first_entry.key)?;
+        let first_key = self.expect_value(first_key_compiled)?;
+        let first_value_compiled = self.compile_expr(&first_entry.value)?;
+        let first_value = self.expect_value(first_value_compiled)?;
+        let key_type =
+            self.expect_list_element_type(first_key.value_type.clone(), first_entry.key.span())?;
+        let value_type = self
+            .expect_list_element_type(first_value.value_type.clone(), first_entry.value.span())?;
+        let map_value = self.build_empty_map(&key_type, &value_type)?;
+        self.build_map_set(
+            map_value,
+            &key_type,
+            &value_type,
+            first_key,
+            first_value,
+            span,
+        )?;
+
+        for entry in &entries[1..] {
+            let key_compiled = self.compile_expr(&entry.key)?;
+            let key = self.expect_value(key_compiled)?;
+            let value_compiled = self.compile_expr(&entry.value)?;
+            let value = self.expect_value(value_compiled)?;
+            if key.value_type != key_type {
+                return Err(CompilerError::build_message(
+                    "字典字面量中的键类型必须保持一致",
+                    entry.key.span(),
+                ));
+            }
+            if value.value_type != value_type {
+                return Err(CompilerError::build_message(
+                    "字典字面量中的值类型必须保持一致",
+                    entry.value.span(),
+                ));
+            }
+            self.build_map_set(map_value, &key_type, &value_type, key, value, entry.span)?;
+        }
+
+        Ok(CodegenValue::Value(TypedValue {
+            value_type: ValueType::Map(Box::new(key_type), Box::new(value_type)),
+            value: map_value.into(),
+        }))
+    }
+
     /// 编译固定长度数组初始化表达式，并把结果组装为 LLVM 原生数组值。
     pub(super) fn compile_array_initializer(
         &mut self,
@@ -278,7 +358,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
         if elements.len() != size {
             return Err(CompilerError::build_message(
-                format!("数组初始化需要 {size} 个元素，但实际提供了 {} 个", elements.len()),
+                format!(
+                    "数组初始化需要 {size} 个元素，但实际提供了 {} 个",
+                    elements.len()
+                ),
                 span,
             ));
         }
@@ -314,7 +397,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }))
     }
 
-    /// 编译列表或数组索引访问。
+    /// 编译列表、数组或字典索引访问。
     pub(super) fn compile_index(
         &mut self,
         target: &Expr,
@@ -323,13 +406,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
         let compiled_target = self.compile_expr(target)?;
         let target_value = self.expect_value(compiled_target)?;
-        let compiled_index = self.compile_expr(index)?;
-        let index_value = self.expect_value(compiled_index)?;
-        if index_value.value_type != ValueType::Int {
-            return Err(CompilerError::build_message("索引必须是整数", span));
-        }
         match target_value.value_type.clone() {
             ValueType::List(element_type) => {
+                let compiled_index = self.compile_expr(index)?;
+                let index_value = self.expect_value(compiled_index)?;
+                if index_value.value_type != ValueType::Int {
+                    return Err(CompilerError::build_message("索引必须是整数", span));
+                }
                 let (list_value, _) = self.expect_list_value(target_value, span)?;
                 Ok(CodegenValue::Value(self.build_list_get(
                     list_value,
@@ -339,6 +422,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 )?))
             }
             ValueType::Array(element_type, size) => {
+                let compiled_index = self.compile_expr(index)?;
+                let index_value = self.expect_value(compiled_index)?;
+                if index_value.value_type != ValueType::Int {
+                    return Err(CompilerError::build_message("索引必须是整数", span));
+                }
                 let array_pointer = self.resolve_array_pointer(target, target_value)?;
                 Ok(CodegenValue::Value(self.build_array_get(
                     array_pointer,
@@ -347,8 +435,23 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     index_value.value.into_int_value(),
                 )?))
             }
+            ValueType::Map(key_type, value_type) => {
+                let compiled_index = self.compile_expr(index)?;
+                let index_value = self.expect_value(compiled_index)?;
+                if index_value.value_type != *key_type {
+                    return Err(CompilerError::build_message("字典下标的键类型不匹配", span));
+                }
+                let (map_value, _, _) = self.expect_map_value(target_value, span)?;
+                Ok(CodegenValue::Value(self.build_map_get(
+                    map_value,
+                    key_type.as_ref(),
+                    value_type.as_ref(),
+                    index_value,
+                    span,
+                )?))
+            }
             _ => Err(CompilerError::build_message(
-                "索引访问当前只支持列表或数组类型",
+                "索引访问当前只支持列表、数组或字典类型",
                 span,
             )),
         }
@@ -396,26 +499,48 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }))
     }
 
-    /// 编译列表方法调用。
-    pub(super) fn compile_list_method_call(
+    /// 编译对象方法调用，并根据目标类型分派到列表或字典实现。
+    pub(super) fn compile_method_call(
         &mut self,
         target: &Expr,
-        method: ListMethod,
+        method: MethodName,
         arguments: &[Expr],
         span: Span,
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
         let compiled_target = self.compile_expr(target)?;
         let target_value = self.expect_value(compiled_target)?;
+        match target_value.value_type.clone() {
+            ValueType::List(_) => {
+                self.compile_list_method_call(target_value, method, arguments, span)
+            }
+            ValueType::Map(_, _) => {
+                self.compile_map_method_call(target_value, method, arguments, span)
+            }
+            _ => Err(CompilerError::build_message(
+                "当前方法只能用于列表或字典类型",
+                span,
+            )),
+        }
+    }
+
+    /// 编译列表方法调用。
+    pub(super) fn compile_list_method_call(
+        &mut self,
+        target_value: TypedValue<'ctx>,
+        method: MethodName,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
         let (list_value, element_type) = self.expect_list_value(target_value, span)?;
 
         match method {
-            ListMethod::Append => {
+            MethodName::Append => {
                 let compiled_argument = self.compile_expr(&arguments[0])?;
                 let argument = self.expect_value(compiled_argument)?;
                 self.build_list_append(list_value, &element_type, argument, span)?;
                 Ok(CodegenValue::Unit)
             }
-            ListMethod::Remove => {
+            MethodName::Remove => {
                 let compiled_argument = self.compile_expr(&arguments[0])?;
                 let argument = self.expect_value(compiled_argument)?;
                 let function = self.list_runtime_function("list_remove", &element_type)?;
@@ -424,7 +549,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 self.map_builder(self.builder.build_call(function, &args, "call.list_remove"))?;
                 Ok(CodegenValue::Unit)
             }
-            ListMethod::Pop => {
+            MethodName::Pop => {
                 let function = if arguments.is_empty() {
                     self.list_runtime_function("list_pop", &element_type)?
                 } else {
@@ -443,7 +568,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     "call.list_pop",
                 )?))
             }
-            ListMethod::Sort => {
+            MethodName::Sort => {
                 let function = self.list_runtime_function("list_sort", &element_type)?;
                 self.map_builder(self.builder.build_call(
                     function,
@@ -452,7 +577,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ))?;
                 Ok(CodegenValue::Unit)
             }
-            ListMethod::Reverse => {
+            MethodName::Reverse => {
                 self.map_builder(self.builder.build_call(
                     self.runtime.list_reverse,
                     &[list_value.into()],
@@ -460,7 +585,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ))?;
                 Ok(CodegenValue::Unit)
             }
-            ListMethod::Index => {
+            MethodName::Index => {
                 let compiled_argument = self.compile_expr(&arguments[0])?;
                 let argument = self.expect_value(compiled_argument)?;
                 let function = self.list_runtime_function("list_index", &element_type)?;
@@ -473,7 +598,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     value: call.try_as_basic_value().unwrap_basic(),
                 }))
             }
-            ListMethod::Contains => {
+            MethodName::Contains => {
                 let compiled_argument = self.compile_expr(&arguments[0])?;
                 let argument = self.expect_value(compiled_argument)?;
                 let function = self.list_runtime_function("list_contains", &element_type)?;
@@ -496,6 +621,85 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     value: value.into(),
                 }))
             }
+            MethodName::Keys | MethodName::Values => Err(CompilerError::build_message(
+                format!("列表类型不支持方法 `{}`", method.display_name()),
+                span,
+            )),
+        }
+    }
+
+    /// 编译字典方法调用。
+    pub(super) fn compile_map_method_call(
+        &mut self,
+        target_value: TypedValue<'ctx>,
+        method: MethodName,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        let (map_value, key_type, value_type) = self.expect_map_value(target_value, span)?;
+        match method {
+            MethodName::Remove => {
+                let key_compiled = self.compile_expr(&arguments[0])?;
+                let key = self.expect_value(key_compiled)?;
+                let function = self.map_runtime_function("map_remove", &key_type, None)?;
+                let mut args = vec![map_value.into()];
+                args.extend(self.build_list_value_arguments(key, span)?);
+                self.map_builder(self.builder.build_call(function, &args, "call.map_remove"))?;
+                Ok(CodegenValue::Unit)
+            }
+            MethodName::Contains => {
+                let key_compiled = self.compile_expr(&arguments[0])?;
+                let key = self.expect_value(key_compiled)?;
+                let function = self.map_runtime_function("map_contains", &key_type, None)?;
+                let mut args = vec![map_value.into()];
+                args.extend(self.build_list_value_arguments(key, span)?);
+                let call = self.map_builder(self.builder.build_call(
+                    function,
+                    &args,
+                    "call.map_contains",
+                ))?;
+                let raw = call.try_as_basic_value().unwrap_basic().into_int_value();
+                let value = self.map_builder(self.builder.build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    raw,
+                    self.context.i8_type().const_zero(),
+                    "map.contains.bool",
+                ))?;
+                Ok(CodegenValue::Value(TypedValue {
+                    value_type: ValueType::Bool,
+                    value: value.into(),
+                }))
+            }
+            MethodName::Keys => Ok(CodegenValue::Value(TypedValue {
+                value_type: ValueType::List(Box::new(key_type)),
+                value: self
+                    .map_builder(self.builder.build_call(
+                        self.runtime.map_keys,
+                        &[map_value.into()],
+                        "call.map_keys",
+                    ))?
+                    .try_as_basic_value()
+                    .unwrap_basic(),
+            })),
+            MethodName::Values => Ok(CodegenValue::Value(TypedValue {
+                value_type: ValueType::List(Box::new(value_type)),
+                value: self
+                    .map_builder(self.builder.build_call(
+                        self.runtime.map_values,
+                        &[map_value.into()],
+                        "call.map_values",
+                    ))?
+                    .try_as_basic_value()
+                    .unwrap_basic(),
+            })),
+            MethodName::Append
+            | MethodName::Pop
+            | MethodName::Sort
+            | MethodName::Reverse
+            | MethodName::Index => Err(CompilerError::build_message(
+                format!("字典类型不支持方法 `{}`", method.display_name()),
+                span,
+            )),
         }
     }
 
@@ -546,6 +750,69 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             element_type,
             "call.list_get",
         )
+    }
+
+    /// 创建一个带有键类型和值类型标记的空字典对象。
+    pub(super) fn build_empty_map(
+        &mut self,
+        key_type: &ValueType,
+        value_type: &ValueType,
+    ) -> Result<PointerValue<'ctx>, CompilerError> {
+        let key_tag = self.list_type_tag(key_type)?;
+        let value_tag = self.list_type_tag(value_type)?;
+        let call = self.map_builder(
+            self.builder.build_call(
+                self.runtime.map_create,
+                &[
+                    self.context
+                        .i8_type()
+                        .const_int(key_tag as u64, false)
+                        .into(),
+                    self.context
+                        .i8_type()
+                        .const_int(value_tag as u64, false)
+                        .into(),
+                ],
+                "call.map_create",
+            ),
+        )?;
+        Ok(call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value())
+    }
+
+    /// 向字典对象写入或更新一个键值对。
+    pub(super) fn build_map_set(
+        &mut self,
+        map_value: PointerValue<'ctx>,
+        key_type: &ValueType,
+        value_type: &ValueType,
+        key: TypedValue<'ctx>,
+        value: TypedValue<'ctx>,
+        span: Span,
+    ) -> Result<(), CompilerError> {
+        let function = self.map_runtime_function("map_set", key_type, Some(value_type))?;
+        let mut args = vec![map_value.into()];
+        args.extend(self.build_list_value_arguments(key, span)?);
+        args.extend(self.build_list_value_arguments(value, span)?);
+        self.map_builder(self.builder.build_call(function, &args, "call.map_set"))?;
+        Ok(())
+    }
+
+    /// 通过运行时调用读取字典中指定键对应的值。
+    pub(super) fn build_map_get(
+        &mut self,
+        map_value: PointerValue<'ctx>,
+        key_type: &ValueType,
+        value_type: &ValueType,
+        key: TypedValue<'ctx>,
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let function = self.map_runtime_function("map_get", key_type, Some(value_type))?;
+        let mut args = vec![map_value.into()];
+        args.extend(self.build_list_value_arguments(key, span)?);
+        self.build_map_result_from_call(function, &args, value_type, "call.map_get")
     }
 
     /// 根据元素类型把值拆成运行时函数需要的参数列表。
@@ -611,6 +878,40 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
+    /// 把字典运行时调用结果恢复为后端内部的带类型值。
+    pub(super) fn build_map_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        value_type: &ValueType,
+        call_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        if matches!(value_type, ValueType::String) {
+            return self.build_string_map_result_from_call(function, args, call_name);
+        }
+
+        let call = self.map_builder(self.builder.build_call(function, args, call_name))?;
+        let raw = call.try_as_basic_value().unwrap_basic();
+        match value_type {
+            ValueType::Bool => {
+                let value = self.map_builder(self.builder.build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    raw.into_int_value(),
+                    self.context.i8_type().const_zero(),
+                    "map.bool.result",
+                ))?;
+                Ok(TypedValue {
+                    value_type: ValueType::Bool,
+                    value: value.into(),
+                })
+            }
+            _ => Ok(TypedValue {
+                value_type: value_type.clone(),
+                value: raw,
+            }),
+        }
+    }
+
     /// 处理字符串列表读取与弹出调用，使用额外长度输出参数重建内部字符串值。
     pub(super) fn build_string_list_result_from_call(
         &mut self,
@@ -645,6 +946,40 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
+    /// 处理字符串字典读取调用，使用额外长度输出参数重建内部字符串值。
+    pub(super) fn build_string_map_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_len_ptr = self.allocate_local(&ValueType::Int, "map.string.out_len")?;
+        self.map_builder(
+            self.builder
+                .build_store(out_len_ptr, self.context.i64_type().const_zero()),
+        )?;
+
+        let mut call_args = args.to_vec();
+        call_args.push(out_len_ptr.into());
+        let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
+        let pointer = call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+        let length = self
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                out_len_ptr,
+                "load.map.string.len",
+            ))?
+            .into_int_value();
+
+        Ok(TypedValue {
+            value_type: ValueType::String,
+            value: self.build_runtime_string(pointer, length)?.into(),
+        })
+    }
+
     /// 校验表达式结果是否为列表值，并拆出句柄和元素类型。
     pub(super) fn expect_list_value(
         &self,
@@ -655,6 +990,22 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             return Err(CompilerError::build_message("当前表达式不是列表类型", span));
         };
         Ok((value.value.into_pointer_value(), (*element_type).clone()))
+    }
+
+    /// 校验表达式结果是否为字典值，并拆出句柄、键类型和值类型。
+    pub(super) fn expect_map_value(
+        &self,
+        value: TypedValue<'ctx>,
+        span: Span,
+    ) -> Result<(PointerValue<'ctx>, ValueType, ValueType), CompilerError> {
+        let ValueType::Map(key_type, value_type) = value.value_type else {
+            return Err(CompilerError::build_message("当前表达式不是字典类型", span));
+        };
+        Ok((
+            value.value.into_pointer_value(),
+            (*key_type).clone(),
+            (*value_type).clone(),
+        ))
     }
 
     /// 校验一个值类型是否能作为当前阶段的列表元素类型。

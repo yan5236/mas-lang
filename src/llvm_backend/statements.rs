@@ -1,7 +1,7 @@
 use inkwell::IntPredicate;
 
 use super::*;
-use crate::ast::{AssignOp, BinaryOp, ConditionalBranch, Expr, Stmt};
+use crate::ast::{AssignOp, AssignTarget, BinaryOp, ConditionalBranch, Expr, Stmt};
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 顺序编译一个语句数组，并返回当前控制流是否已经终止。
@@ -32,23 +32,29 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             } => {
                 let expected = annotation.as_ref().map(value_type_from_annotation);
                 let value = match (initializer.as_ref(), expected.as_ref()) {
-                    (Some(Expr::ListLiteral { elements, .. }), Some(ValueType::List(element_type)))
-                        if elements.is_empty() =>
-                    {
-                        TypedValue {
-                            value_type: ValueType::List(element_type.clone()),
-                            value: self.build_empty_list(element_type)?.into(),
-                        }
-                    }
+                    (
+                        Some(Expr::ListLiteral { elements, .. }),
+                        Some(ValueType::List(element_type)),
+                    ) if elements.is_empty() => TypedValue {
+                        value_type: ValueType::List(element_type.clone()),
+                        value: self.build_empty_list(element_type)?.into(),
+                    },
+                    (
+                        Some(Expr::MapLiteral { entries, .. }),
+                        Some(ValueType::Map(key_type, value_type)),
+                    ) if entries.is_empty() => TypedValue {
+                        value_type: ValueType::Map(key_type.clone(), value_type.clone()),
+                        value: self.build_empty_map(key_type, value_type)?.into(),
+                    },
                     (Some(initializer), _) => {
                         let compiled = self.compile_expr(initializer)?;
                         self.expect_value(compiled)?
                     }
                     (None, Some(ValueType::Array(_, _))) => TypedValue {
-                        value_type: expected
-                            .clone()
-                            .expect("前一分支已经确认数组期望类型存在"),
-                        value: self.basic_type_for(expected.as_ref().expect("数组类型存在"))?.const_zero(),
+                        value_type: expected.clone().expect("前一分支已经确认数组期望类型存在"),
+                        value: self
+                            .basic_type_for(expected.as_ref().expect("数组类型存在"))?
+                            .const_zero(),
                     },
                     (None, _) => {
                         return Err(CompilerError::build_message(
@@ -88,51 +94,80 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 Ok(false)
             }
             Stmt::Assign {
-                name,
+                target,
                 op,
                 value,
                 span,
-            } => {
-                let variable = self.lookup_variable(name).ok_or_else(|| {
-                    CompilerError::build_message(format!("代码生成阶段找不到变量 `{name}`"), *span)
-                })?;
-                if !variable.is_mutable {
-                    return Err(CompilerError::build_message(
-                        format!("常量 `{name}` 不能重新赋值"),
-                        *span,
-                    ));
-                }
-
-                let assigned = match op {
-                    AssignOp::Assign => {
-                        let compiled = self.compile_expr(value)?;
-                        self.expect_value(compiled)?
+            } => match target {
+                AssignTarget::Identifier { name, .. } => {
+                    let variable = self.lookup_variable(name).ok_or_else(|| {
+                        CompilerError::build_message(
+                            format!("代码生成阶段找不到变量 `{name}`"),
+                            *span,
+                        )
+                    })?;
+                    if !variable.is_mutable {
+                        return Err(CompilerError::build_message(
+                            format!("常量 `{name}` 不能重新赋值"),
+                            *span,
+                        ));
                     }
-                    _ => {
-                        let current = self.load_variable(variable.clone())?;
-                        let compiled = self.compile_expr(value)?;
-                        let right = self.expect_value(compiled)?;
-                        let binary_op = match op {
-                            AssignOp::AddAssign => BinaryOp::Add,
-                            AssignOp::SubtractAssign => BinaryOp::Subtract,
-                            AssignOp::MultiplyAssign => BinaryOp::Multiply,
-                            AssignOp::DivideAssign => BinaryOp::Divide,
-                            AssignOp::ModAssign => BinaryOp::Modulo,
-                            AssignOp::Assign => unreachable!(),
-                        };
-                        self.compile_binary_values(binary_op, current, right, *span)?
-                    }
-                };
 
-                if assigned.value_type != variable.value_type {
-                    return Err(CompilerError::build_message(
-                        "赋值类型无法写入目标变量",
-                        *span,
-                    ));
+                    let assigned = match op {
+                        AssignOp::Assign => {
+                            let compiled = self.compile_expr(value)?;
+                            self.expect_value(compiled)?
+                        }
+                        _ => {
+                            let current = self.load_variable(variable.clone())?;
+                            let compiled = self.compile_expr(value)?;
+                            let right = self.expect_value(compiled)?;
+                            let binary_op = match op {
+                                AssignOp::AddAssign => BinaryOp::Add,
+                                AssignOp::SubtractAssign => BinaryOp::Subtract,
+                                AssignOp::MultiplyAssign => BinaryOp::Multiply,
+                                AssignOp::DivideAssign => BinaryOp::Divide,
+                                AssignOp::ModAssign => BinaryOp::Modulo,
+                                AssignOp::Assign => unreachable!(),
+                            };
+                            self.compile_binary_values(binary_op, current, right, *span)?
+                        }
+                    };
+
+                    if assigned.value_type != variable.value_type {
+                        return Err(CompilerError::build_message(
+                            "赋值类型无法写入目标变量",
+                            *span,
+                        ));
+                    }
+                    self.store_variable(variable, assigned.value)?;
+                    Ok(false)
                 }
-                self.store_variable(variable, assigned.value)?;
-                Ok(false)
-            }
+                AssignTarget::Index { target, index, .. } => {
+                    let compiled_target = self.compile_expr(target)?;
+                    let target_value = self.expect_value(compiled_target)?;
+                    let (map_value, key_type, value_type) =
+                        self.expect_map_value(target_value, *span)?;
+                    let key_compiled = self.compile_expr(index)?;
+                    let key = self.expect_value(key_compiled)?;
+                    let assigned_compiled = self.compile_expr(value)?;
+                    let assigned = self.expect_value(assigned_compiled)?;
+                    if key.value_type != key_type {
+                        return Err(CompilerError::build_message(
+                            "字典键类型与下标表达式不匹配",
+                            index.span(),
+                        ));
+                    }
+                    if assigned.value_type != value_type {
+                        return Err(CompilerError::build_message(
+                            "字典值类型与赋值表达式不匹配",
+                            value.span(),
+                        ));
+                    }
+                    self.build_map_set(map_value, &key_type, &value_type, key, assigned, *span)?;
+                    Ok(false)
+                }
+            },
             Stmt::If {
                 branches,
                 else_branch,
@@ -149,11 +184,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             } => self.compile_for_range(name, start, end, body, *span),
             Stmt::ForEach {
-                name,
+                key_name,
+                value_name,
                 iterable,
                 body,
                 span,
-            } => self.compile_for_each(name, iterable, body, *span),
+            } => self.compile_for_each(key_name, value_name.as_deref(), iterable, body, *span),
             Stmt::Break { span } => {
                 let loop_context = self.loop_stack.last().ok_or_else(|| {
                     CompilerError::build_message("代码生成阶段遇到了非法的 break", *span)
@@ -417,19 +453,45 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(false)
     }
 
-    /// 编译 `for item in list` 形式的列表遍历循环。
+    /// 编译 `for item in list` 或 `for key, value in map` 形式的容器遍历循环。
     pub(super) fn compile_for_each(
         &mut self,
-        name: &str,
+        key_name: &str,
+        value_name: Option<&str>,
         iterable: &Expr,
         body: &[Stmt],
         span: Span,
     ) -> Result<bool, CompilerError> {
-        let function = self.current_function.expect("当前必须处于函数编译上下文");
         let compiled_iterable = self.compile_expr(iterable)?;
         let iterable_value = self.expect_value(compiled_iterable)?;
-        let (list_value, element_type) = self.expect_list_value(iterable_value, span)?;
+        match iterable_value.value_type.clone() {
+            ValueType::List(_) => self.compile_for_each_list(key_name, iterable_value, body, span),
+            ValueType::Map(_, _) => {
+                let Some(value_name) = value_name else {
+                    return Err(CompilerError::build_message(
+                        "遍历字典时必须同时声明键和值变量",
+                        span,
+                    ));
+                };
+                self.compile_for_each_map(key_name, value_name, iterable_value, body, span)
+            }
+            _ => Err(CompilerError::build_message(
+                "for 遍历当前只支持列表或字典类型",
+                span,
+            )),
+        }
+    }
 
+    /// 编译 `for item in list` 形式的列表遍历循环。
+    pub(super) fn compile_for_each_list(
+        &mut self,
+        name: &str,
+        iterable_value: TypedValue<'ctx>,
+        body: &[Stmt],
+        span: Span,
+    ) -> Result<bool, CompilerError> {
+        let function = self.current_function.expect("当前必须处于函数编译上下文");
+        let (list_value, element_type) = self.expect_list_value(iterable_value, span)?;
         self.push_scope();
         let iter_pointer = self.allocate_local(&ValueType::Int, &format!("{name}.iter"))?;
         let item_pointer = self.allocate_local(&element_type, name)?;
@@ -507,6 +569,130 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             iter_now,
             self.context.i64_type().const_int(1, false),
             "foreach.next",
+        ))?;
+        self.map_builder(self.builder.build_store(iter_pointer, next))?;
+        self.map_builder(self.builder.build_unconditional_branch(header_block))?;
+
+        self.builder.position_at_end(exit_block);
+        self.pop_scope();
+        Ok(false)
+    }
+
+    /// 编译 `for key, value in map` 形式的字典遍历循环。
+    pub(super) fn compile_for_each_map(
+        &mut self,
+        key_name: &str,
+        value_name: &str,
+        iterable_value: TypedValue<'ctx>,
+        body: &[Stmt],
+        span: Span,
+    ) -> Result<bool, CompilerError> {
+        let function = self.current_function.expect("当前必须处于函数编译上下文");
+        let (map_value, key_type, value_type) = self.expect_map_value(iterable_value, span)?;
+        let keys_call = self.map_builder(self.builder.build_call(
+            self.runtime.map_keys,
+            &[map_value.into()],
+            "foreach.map.keys",
+        ))?;
+        let keys_list = keys_call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+
+        self.push_scope();
+        let iter_pointer = self.allocate_local(&ValueType::Int, &format!("{key_name}.iter"))?;
+        let key_pointer = self.allocate_local(&key_type, key_name)?;
+        let value_pointer = self.allocate_local(&value_type, value_name)?;
+        self.map_builder(
+            self.builder
+                .build_store(iter_pointer, self.context.i64_type().const_zero()),
+        )?;
+        self.current_scope_mut().insert(
+            key_name.to_string(),
+            VariableInfo {
+                value_type: key_type.clone(),
+                pointer: key_pointer,
+                is_mutable: true,
+            },
+        );
+        self.current_scope_mut().insert(
+            value_name.to_string(),
+            VariableInfo {
+                value_type: value_type.clone(),
+                pointer: value_pointer,
+                is_mutable: true,
+            },
+        );
+
+        let header_block = self
+            .context
+            .append_basic_block(function, "foreach.map.header");
+        let body_block = self
+            .context
+            .append_basic_block(function, "foreach.map.body");
+        let continue_block = self
+            .context
+            .append_basic_block(function, "foreach.map.continue");
+        let exit_block = self
+            .context
+            .append_basic_block(function, "foreach.map.exit");
+
+        self.map_builder(self.builder.build_unconditional_branch(header_block))?;
+        self.builder.position_at_end(header_block);
+        let current = self
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                iter_pointer,
+                "foreach.map.current",
+            ))?
+            .into_int_value();
+        let len_call = self.map_builder(self.builder.build_call(
+            self.runtime.list_len,
+            &[keys_list.into()],
+            "foreach.map.len",
+        ))?;
+        let len_value = len_call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_int_value();
+        let condition = self.map_builder(self.builder.build_int_compare(
+            IntPredicate::SLT,
+            current,
+            len_value,
+            "foreach.map.cond",
+        ))?;
+        self.map_builder(
+            self.builder
+                .build_conditional_branch(condition, body_block, exit_block),
+        )?;
+
+        self.builder.position_at_end(body_block);
+        let key_value = self.build_list_get(keys_list, &key_type, current, span)?;
+        self.map_builder(self.builder.build_store(key_pointer, key_value.value))?;
+        let value_value = self.build_map_get(map_value, &key_type, &value_type, key_value, span)?;
+        self.map_builder(self.builder.build_store(value_pointer, value_value.value))?;
+        self.loop_stack.push(LoopContext {
+            break_block: exit_block,
+            continue_block,
+        });
+        let terminated = self.compile_statements(body)?;
+        self.loop_stack.pop();
+        if !terminated && !self.current_block_has_terminator() {
+            self.map_builder(self.builder.build_unconditional_branch(continue_block))?;
+        }
+
+        self.builder.position_at_end(continue_block);
+        let iter_now = self
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                iter_pointer,
+                "foreach.map.next.load",
+            ))?
+            .into_int_value();
+        let next = self.map_builder(self.builder.build_int_add(
+            iter_now,
+            self.context.i64_type().const_int(1, false),
+            "foreach.map.next",
         ))?;
         self.map_builder(self.builder.build_store(iter_pointer, next))?;
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;

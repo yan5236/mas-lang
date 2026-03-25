@@ -73,6 +73,10 @@ struct RuntimeFunctions<'ctx> {
     list_len: FunctionValue<'ctx>,
     list_slice: FunctionValue<'ctx>,
     list_reverse: FunctionValue<'ctx>,
+    map_create: FunctionValue<'ctx>,
+    map_len: FunctionValue<'ctx>,
+    map_keys: FunctionValue<'ctx>,
+    map_values: FunctionValue<'ctx>,
 }
 
 /// 保存循环内 `break` 与 `continue` 的目标基本块。
@@ -207,6 +211,10 @@ fn value_type_from_annotation(annotation: &TypeName) -> ValueType {
         TypeName::Bool => ValueType::Bool,
         TypeName::String => ValueType::String,
         TypeName::List(element) => ValueType::List(Box::new(value_type_from_annotation(element))),
+        TypeName::Map(key, value) => ValueType::Map(
+            Box::new(value_type_from_annotation(key)),
+            Box::new(value_type_from_annotation(value)),
+        ),
         TypeName::Array(element, size) => {
             ValueType::Array(Box::new(value_type_from_annotation(element)), *size)
         }
