@@ -173,6 +173,18 @@ fn should_emit_map_runtime_symbols() {
     assert!(ir.contains("foreach.map.header"));
 }
 
+/// 校验返回字符串的字典读取会把 `out_len` 插入到键参数之后，避免生成错误的 LLVM 调用签名。
+#[test]
+fn should_emit_string_map_calls_with_out_len_before_error_site() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var int_map:map<int,string> = {1: \"one\"}\n    var bool_map:map<bool,string> = {true: \"yes\", false: \"no\"}\n    print(int_map[1])\n    print(bool_map[true])\n    print(bool_map[false])\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("call ptr @map_get_int_string("));
+    assert!(ir.contains("call ptr @map_get_bool_string("));
+    assert!(!ir.contains("i64 61, ptr %map.string.out_len"));
+}
+
 /// 校验所有 `if / else` 分支都 `return` 时，后端不会再留下无终结器的悬空汇合块。
 #[test]
 fn should_compile_if_when_all_branches_return() {

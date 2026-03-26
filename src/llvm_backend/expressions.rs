@@ -961,8 +961,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 .build_store(out_len_ptr, self.context.i64_type().const_zero()),
         )?;
 
+        // 字典字符串读取的运行时签名要求把 out_len 放在“键参数”之后、“错误定位参数”之前。
+        // 这里不能像列表那样直接追加到末尾，否则会把路径字符串错当成 out_len 传给 LLVM。
+        let error_site_arg_count = 6;
+        let insert_index = args.len().checked_sub(error_site_arg_count).ok_or_else(|| {
+            CompilerError::build_message("字典字符串读取参数数量不合法", Span::new(0, 0))
+        })?;
         let mut call_args = args.to_vec();
-        call_args.push(out_len_ptr.into());
+        call_args.insert(insert_index, out_len_ptr.into());
         let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
         let pointer = call
             .try_as_basic_value()
