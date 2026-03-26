@@ -223,12 +223,58 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             i8_type.into(),
             &[ptr_type.into(), ptr_type.into(), i64_type.into()],
         );
-        add_void("map_remove_int", &[ptr_type.into(), i64_type.into()]);
-        add_void("map_remove_float", &[ptr_type.into(), f64_type.into()]);
-        add_void("map_remove_bool", &[ptr_type.into(), i8_type.into()]);
+        add_void(
+            "map_remove_int",
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+        );
+        add_void(
+            "map_remove_float",
+            &[
+                ptr_type.into(),
+                f64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+        );
+        add_void(
+            "map_remove_bool",
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+        );
         add_void(
             "map_remove_string",
-            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_contains_int",
@@ -253,77 +299,218 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         add_value(
             "map_get_int_int",
             i64_type.into(),
-            &[ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_int_float",
             f64_type.into(),
-            &[ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_int_bool",
             i8_type.into(),
-            &[ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_int_string",
             ptr_type.into(),
-            &[ptr_type.into(), i64_type.into(), ptr_type.into()],
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_float_int",
             i64_type.into(),
-            &[ptr_type.into(), f64_type.into()],
+            &[
+                ptr_type.into(),
+                f64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_float_float",
             f64_type.into(),
-            &[ptr_type.into(), f64_type.into()],
+            &[
+                ptr_type.into(),
+                f64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_float_bool",
             i8_type.into(),
-            &[ptr_type.into(), f64_type.into()],
+            &[
+                ptr_type.into(),
+                f64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_float_string",
             ptr_type.into(),
-            &[ptr_type.into(), f64_type.into(), ptr_type.into()],
+            &[
+                ptr_type.into(),
+                f64_type.into(),
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_bool_int",
             i64_type.into(),
-            &[ptr_type.into(), i8_type.into()],
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_bool_float",
             f64_type.into(),
-            &[ptr_type.into(), i8_type.into()],
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_bool_bool",
             i8_type.into(),
-            &[ptr_type.into(), i8_type.into()],
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_bool_string",
             ptr_type.into(),
-            &[ptr_type.into(), i8_type.into(), ptr_type.into()],
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_string_int",
             i64_type.into(),
-            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_string_float",
             f64_type.into(),
-            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_string_bool",
             i8_type.into(),
-            &[ptr_type.into(), ptr_type.into(), i64_type.into()],
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
         );
         add_value(
             "map_get_string_string",
@@ -333,6 +520,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ptr_type.into(),
                 i64_type.into(),
                 ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
             ],
         );
         add_void(
@@ -475,6 +668,41 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             )?
             .into_struct_value();
         Ok(with_len)
+    }
+
+    /// 构造字典运行时错误需要的源码上下文参数，供缺失键等错误精确定位到源码。
+    pub(super) fn build_map_error_site_arguments(
+        &mut self,
+        span: Span,
+    ) -> Result<Vec<inkwell::values::BasicMetadataValueEnum<'ctx>>, CompilerError> {
+        let path_value = if let Some(value) = self.source_path_value {
+            value
+        } else {
+            let value = self.build_string_literal(self.source.path())?;
+            self.source_path_value = Some(value);
+            value
+        };
+        let source_value = if let Some(value) = self.source_text_value {
+            value
+        } else {
+            let value = self.build_string_literal(self.source.text())?;
+            self.source_text_value = Some(value);
+            value
+        };
+
+        let path_ptr = self.extract_string_part(path_value, 0, "map.error.path.ptr")?;
+        let path_len = self.extract_string_part(path_value, 1, "map.error.path.len")?;
+        let source_ptr = self.extract_string_part(source_value, 0, "map.error.source.ptr")?;
+        let source_len = self.extract_string_part(source_value, 1, "map.error.source.len")?;
+
+        Ok(vec![
+            path_ptr.into(),
+            path_len.into(),
+            source_ptr.into(),
+            source_len.into(),
+            self.context.i64_type().const_int(span.start as u64, false).into(),
+            self.context.i64_type().const_int(span.end as u64, false).into(),
+        ])
     }
 
     /// 从内部字符串结构值中提取指定字段，避免重复写 `extractvalue` 指令。

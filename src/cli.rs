@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::io::{self, Write};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -158,12 +159,32 @@ fn run_file(settings: &CompilerSettings, path: PathBuf) -> ExitCode {
             }
         };
 
-    match Command::new(binary).status() {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(status) => {
+    match Command::new(binary).output() {
+        Ok(output) if output.status.success() => {
+            if write_child_output(&output.stdout, &output.stderr).is_err() {
+                eprintln!(
+                    "{}",
+                    CompilerError::cli(
+                        MessageId::CliRunBinaryFailed,
+                        vec!["写入子进程输出失败".to_string()]
+                    )
+                    .render(settings.language, None)
+                );
+                return ExitCode::FAILURE;
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(output) if !output.stderr.is_empty() => {
+            let _ = io::stderr().write_all(&output.stderr);
+            ExitCode::FAILURE
+        }
+        Ok(output) => {
             eprintln!(
                 "{}",
-                CompilerError::cli(MessageId::CliRunBinaryExited, vec![status.to_string()])
+                CompilerError::cli(
+                    MessageId::CliRunBinaryExited,
+                    vec![output.status.to_string()]
+                )
                     .render(settings.language, None)
             );
             ExitCode::FAILURE
@@ -177,6 +198,13 @@ fn run_file(settings: &CompilerSettings, path: PathBuf) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// 把子进程的标准输出和标准错误原样转发到当前终端，保留运行时诊断文本。
+fn write_child_output(stdout: &[u8], stderr: &[u8]) -> io::Result<()> {
+    io::stdout().write_all(stdout)?;
+    io::stderr().write_all(stderr)?;
+    Ok(())
 }
 
 /// 从磁盘读取 UTF-8 源码，并包装成统一的源码对象。

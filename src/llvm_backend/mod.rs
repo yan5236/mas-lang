@@ -9,7 +9,7 @@ use inkwell::targets::{
     CodeModel, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
 };
 use inkwell::types::StructType;
-use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue, StructValue};
 
 use crate::ast::{Program, Stmt, TypeName};
 use crate::diagnostic::{CompilerError, MessageId};
@@ -96,6 +96,8 @@ struct CodeGenerator<'ctx, 'src> {
     string_type: StructType<'ctx>,
     string_index: usize,
     global_index: usize,
+    source_path_value: Option<StructValue<'ctx>>,
+    source_text_value: Option<StructValue<'ctx>>,
     globals: HashMap<String, VariableInfo<'ctx>>,
     functions: HashMap<String, UserFunctionInfo<'ctx>>,
     current_function: Option<FunctionValue<'ctx>>,
@@ -140,6 +142,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             string_type,
             string_index: 0,
             global_index: 0,
+            source_path_value: None,
+            source_text_value: None,
             globals: HashMap::new(),
             functions: HashMap::new(),
             current_function: None,

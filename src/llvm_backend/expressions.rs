@@ -644,6 +644,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 let function = self.map_runtime_function("map_remove", &key_type, None)?;
                 let mut args = vec![map_value.into()];
                 args.extend(self.build_list_value_arguments(key, span)?);
+                args.extend(self.build_map_error_site_arguments(span)?);
                 self.map_builder(self.builder.build_call(function, &args, "call.map_remove"))?;
                 Ok(CodegenValue::Unit)
             }
@@ -812,6 +813,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let function = self.map_runtime_function("map_get", key_type, Some(value_type))?;
         let mut args = vec![map_value.into()];
         args.extend(self.build_list_value_arguments(key, span)?);
+        args.extend(self.build_map_error_site_arguments(span)?);
         self.build_map_result_from_call(function, &args, value_type, "call.map_get")
     }
 

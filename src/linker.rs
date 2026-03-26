@@ -338,7 +338,9 @@ mod tests {
             "map-missing-key",
             "func main():\n    var user:map<string,int> = {\"age\": 18}\n    print(user[\"name\"])\n",
         );
-        assert!(error.contains("字典中不存在目标键"));
+        assert!(error.contains("运行时错误: 字典中不存在目标键"));
+        assert!(error.contains("-->"));
+        assert!(error.contains("print(user[\"name\"])"));
     }
 
     /// 校验递归函数结合 `if / else` 全分支返回时，仍能通过 LLVM 后端完整编译并运行。
