@@ -353,6 +353,16 @@ mod tests {
         assert_eq!(output, "120\n");
     }
 
+    /// 校验基础类型转换在 LLVM 后端和运行时 ABI 协同下能够输出正确结果。
+    #[test]
+    fn should_build_and_run_type_convert_program() {
+        let output = build_and_run(
+            "type-convert",
+            "func main():\n    print(int(\"123\"))\n    print(float(\"3.14\"))\n    print(string(42))\n    print(string(false))\n    print(bool(1))\n    print(bool(0))\n    print(bool(\"hello\"))\n    print(bool(\"\"))\n",
+        );
+        assert_eq!(output, "123\n3.14\n42\nfalse\ntrue\nfalse\ntrue\nfalse\n");
+    }
+
     /// 校验 `msceshi` 中专门构造的分支返回矩阵样例能够稳定编译运行，避免 `if/return` 回归。
     #[test]
     fn should_build_and_run_msceshi_branch_return_matrix() {

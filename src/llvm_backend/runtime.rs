@@ -38,6 +38,31 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
                 None,
             ),
+            string_to_int: module.add_function(
+                "string_to_int",
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+                None,
+            ),
+            string_to_float: module.add_function(
+                "string_to_float",
+                f64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+                None,
+            ),
+            int_to_string: module.add_function(
+                "int_to_string",
+                ptr_type.fn_type(&[i64_type.into(), ptr_type.into()], false),
+                None,
+            ),
+            float_to_string: module.add_function(
+                "float_to_string",
+                ptr_type.fn_type(&[f64_type.into(), ptr_type.into()], false),
+                None,
+            ),
+            bool_to_string: module.add_function(
+                "bool_to_string",
+                ptr_type.fn_type(&[i8_type.into(), ptr_type.into()], false),
+                None,
+            ),
             string_concat: module.add_function(
                 "string_concat",
                 ptr_type.fn_type(
@@ -700,8 +725,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             path_len.into(),
             source_ptr.into(),
             source_len.into(),
-            self.context.i64_type().const_int(span.start as u64, false).into(),
-            self.context.i64_type().const_int(span.end as u64, false).into(),
+            self.context
+                .i64_type()
+                .const_int(span.start as u64, false)
+                .into(),
+            self.context
+                .i64_type()
+                .const_int(span.end as u64, false)
+                .into(),
         ])
     }
 

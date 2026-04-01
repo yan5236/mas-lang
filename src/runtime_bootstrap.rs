@@ -113,6 +113,60 @@ pub extern "C" fn string_equals(
     u8::from(left_bytes == right_bytes)
 }
 
+/// 把运行时创建的 UTF-8 文本缓冲区转换成返回给 LLVM 后端的稳定字符串 ABI。
+fn boxed_string_into_raw(text: String, out_len: *mut u64) -> *const u8 {
+    if out_len.is_null() {
+        abort_runtime("字符串返回长度输出指针不能为空");
+    }
+    let boxed = text.into_bytes().into_boxed_slice();
+    let len = boxed.len() as u64;
+    let ptr = Box::into_raw(boxed) as *const u8;
+    unsafe {
+        *out_len = len;
+    }
+    ptr
+}
+
+/// 把 Mascript 的运行时字符串解析为 UTF-8 文本切片，供转换函数统一复用。
+fn parse_runtime_text<'a>(ptr: *const u8, len: u64) -> &'a str {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    std::str::from_utf8(bytes).unwrap_or_else(|_| abort_runtime("字符串不是合法的 UTF-8 文本"))
+}
+
+/// 把字符串按十进制规则解析为 `int`，失败时报告明确的运行时类型转换错误。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_to_int(ptr: *const u8, len: u64) -> i64 {
+    let text = parse_runtime_text(ptr, len);
+    text.parse::<i64>()
+        .unwrap_or_else(|_| abort_runtime("字符串无法转换为 int"))
+}
+
+/// 把字符串按浮点规则解析为 `float`，失败时报告明确的运行时类型转换错误。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_to_float(ptr: *const u8, len: u64) -> f64 {
+    let text = parse_runtime_text(ptr, len);
+    text.parse::<f64>()
+        .unwrap_or_else(|_| abort_runtime("字符串无法转换为 float"))
+}
+
+/// 把整数值格式化成新的运行时字符串，供 `string(int)` 内建函数直接返回。
+#[unsafe(no_mangle)]
+pub extern "C" fn int_to_string(value: i64, out_len: *mut u64) -> *const u8 {
+    boxed_string_into_raw(value.to_string(), out_len)
+}
+
+/// 把浮点值格式化成新的运行时字符串，保持和 Rust `Display` 一致的输出格式。
+#[unsafe(no_mangle)]
+pub extern "C" fn float_to_string(value: f64, out_len: *mut u64) -> *const u8 {
+    boxed_string_into_raw(value.to_string(), out_len)
+}
+
+/// 把布尔值格式化成 `true/false` 文本，供 `string(bool)` 内建函数返回。
+#[unsafe(no_mangle)]
+pub extern "C" fn bool_to_string(value: u8, out_len: *mut u64) -> *const u8 {
+    boxed_string_into_raw((value != 0).to_string(), out_len)
+}
+
 /// 以统一的运行时错误格式输出消息，并立刻终止当前进程。
 fn abort_runtime(message: &str) -> ! {
     eprintln!("运行时错误: {}", message);

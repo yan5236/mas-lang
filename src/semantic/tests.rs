@@ -104,8 +104,7 @@ fn should_reject_empty_map_without_annotation() {
 /// 校验字典下标类型必须和声明的键类型一致。
 #[test]
 fn should_reject_invalid_map_index_type() {
-    let error =
-        analyze("var user:map<string,int> = {\"age\": 18}\nprint(user[1])\n").unwrap_err();
+    let error = analyze("var user:map<string,int> = {\"age\": 18}\nprint(user[1])\n").unwrap_err();
     assert!(error.contains("字典下标的键类型不匹配"));
 }
 
@@ -129,4 +128,20 @@ fn should_accept_array_declaration_and_index() {
 fn should_reject_array_initializer_length_mismatch() {
     let error = analyze("var values = array<int,3>(1, 2)\n").unwrap_err();
     assert!(error.contains("数组初始化需要 3 个元素"));
+}
+
+/// 校验四个基础类型转换内建函数都能在语义阶段推导出正确结果类型。
+#[test]
+fn should_accept_scalar_convert_builtins() {
+    analyze(
+        "var n:int = int(\"123\")\nvar f:float = float(true)\nvar s:string = string(42)\nvar b:bool = bool(\"hello\")\n",
+    )
+    .unwrap();
+}
+
+/// 校验容器类型不能直接传给当前阶段的基础类型转换内建函数。
+#[test]
+fn should_reject_non_scalar_convert_builtin_argument() {
+    let error = analyze("var items:list<int> = [1]\nvar text = string(items)\n").unwrap_err();
+    assert!(error.contains("只支持基础类型转换"));
 }

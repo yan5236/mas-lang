@@ -109,6 +109,19 @@ fn should_dispatch_print_runtime_by_value_type() {
     assert!(ir.contains("print_string"));
 }
 
+/// 校验类型转换内建函数会引用对应的解析与格式化运行时符号。
+#[test]
+fn should_emit_convert_runtime_symbols() {
+    let (source, program, _) = parse_program(
+        "func main():\n    print(int(\"123\"))\n    print(float(\"3.14\"))\n    print(string(true))\n    print(bool(\"x\"))\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("string_to_int"));
+    assert!(ir.contains("string_to_float"));
+    assert!(ir.contains("bool_to_string"));
+    assert!(ir.contains("call i64 @string_to_int("));
+}
+
 /// 校验列表操作会引用新增的列表运行时符号。
 #[test]
 fn should_emit_list_runtime_symbols() {

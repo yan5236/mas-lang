@@ -209,6 +209,10 @@ impl<'a> SemanticAnalyzer<'a> {
             return Ok(ValueType::Int);
         }
 
+        if let Some(value_type) = self.infer_builtin_convert_type(name, arguments, span)? {
+            return Ok(value_type);
+        }
+
         let signature = self.functions.get(name).cloned().ok_or_else(|| {
             CompilerError::semantic_message(format!("未声明函数 `{name}`"), callee.span())
         })?;
@@ -240,5 +244,41 @@ impl<'a> SemanticAnalyzer<'a> {
         }
 
         Ok(signature.return_type)
+    }
+
+    /// 推导基础类型转换内建函数的返回类型，并阻止容器或空值参与当前阶段的转换。
+    fn infer_builtin_convert_type(
+        &mut self,
+        name: &str,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<Option<ValueType>, CompilerError> {
+        let target_type = match name {
+            "int" => ValueType::Int,
+            "float" => ValueType::Float,
+            "string" => ValueType::String,
+            "bool" => ValueType::Bool,
+            _ => return Ok(None),
+        };
+
+        if arguments.len() != 1 {
+            return Err(CompilerError::semantic_message(
+                format!("内建函数 `{name}` 需要且只接受一个参数"),
+                span,
+            ));
+        }
+
+        let argument_type = self.infer_expression_type(&arguments[0])?;
+        if matches!(
+            argument_type,
+            ValueType::Int | ValueType::Float | ValueType::Bool | ValueType::String
+        ) {
+            Ok(Some(target_type))
+        } else {
+            Err(CompilerError::semantic_message(
+                format!("当前阶段 `{name}` 只支持基础类型转换"),
+                arguments[0].span(),
+            ))
+        }
     }
 }

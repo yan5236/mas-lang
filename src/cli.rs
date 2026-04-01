@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -185,7 +185,7 @@ fn run_file(settings: &CompilerSettings, path: PathBuf) -> ExitCode {
                     MessageId::CliRunBinaryExited,
                     vec![output.status.to_string()]
                 )
-                    .render(settings.language, None)
+                .render(settings.language, None)
             );
             ExitCode::FAILURE
         }

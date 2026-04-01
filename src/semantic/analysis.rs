@@ -40,7 +40,10 @@ impl<'a> SemanticAnalyzer<'a> {
                 continue;
             };
 
-            if name == "print" || name == "len" {
+            if matches!(
+                name.as_str(),
+                "print" | "len" | "int" | "float" | "string" | "bool"
+            ) {
                 return Err(CompilerError::semantic_message(
                     format!("用户函数不能覆盖内建函数 `{name}`"),
                     *span,

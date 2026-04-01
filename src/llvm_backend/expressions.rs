@@ -231,6 +231,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             }));
         }
 
+        if let Some(value) = self.compile_builtin_convert_call(name, arguments, span)? {
+            return Ok(CodegenValue::Value(value));
+        }
+
         let info = self.functions.get(name).cloned().ok_or_else(|| {
             CompilerError::build_message(format!("未声明函数 `{name}`"), callee.span())
         })?;
@@ -249,6 +253,292 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 value,
             }))
         }
+    }
+
+    /// 编译基础类型转换内建函数，并按源类型选择直接 LLVM 指令或运行时 ABI。
+    fn compile_builtin_convert_call(
+        &mut self,
+        name: &str,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<Option<TypedValue<'ctx>>, CompilerError> {
+        let converted = match name {
+            "int" => Some(self.compile_int_conversion(arguments, span)?),
+            "float" => Some(self.compile_float_conversion(arguments, span)?),
+            "string" => Some(self.compile_string_conversion(arguments, span)?),
+            "bool" => Some(self.compile_bool_conversion(arguments, span)?),
+            _ => None,
+        };
+        Ok(converted)
+    }
+
+    /// 把基础类型值转换为 `int`，其中字符串分支通过运行时解析十进制文本。
+    fn compile_int_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("int", arguments, span)?;
+        match argument.value_type {
+            ValueType::Int => Ok(argument),
+            ValueType::Float => Ok(TypedValue {
+                value_type: ValueType::Int,
+                value: self
+                    .map_builder(self.builder.build_float_to_signed_int(
+                        argument.value.into_float_value(),
+                        self.context.i64_type(),
+                        "float.to.int",
+                    ))?
+                    .into(),
+            }),
+            ValueType::Bool => Ok(TypedValue {
+                value_type: ValueType::Int,
+                value: self
+                    .map_builder(self.builder.build_int_z_extend(
+                        argument.value.into_int_value(),
+                        self.context.i64_type(),
+                        "bool.to.int",
+                    ))?
+                    .into(),
+            }),
+            ValueType::String => {
+                let string_value = argument.value.into_struct_value();
+                let call = self.map_builder(
+                    self.builder.build_call(
+                        self.runtime.string_to_int,
+                        &[
+                            self.extract_string_part(string_value, 0, "int.arg.ptr")?
+                                .into(),
+                            self.extract_string_part(string_value, 1, "int.arg.len")?
+                                .into(),
+                        ],
+                        "call.string_to_int",
+                    ),
+                )?;
+                Ok(TypedValue {
+                    value_type: ValueType::Int,
+                    value: call.try_as_basic_value().unwrap_basic(),
+                })
+            }
+            _ => Err(CompilerError::build_message(
+                "当前阶段 `int` 只支持基础类型转换",
+                span,
+            )),
+        }
+    }
+
+    /// 把基础类型值转换为 `float`，其中字符串分支通过运行时解析浮点文本。
+    fn compile_float_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("float", arguments, span)?;
+        match argument.value_type {
+            ValueType::Float => Ok(argument),
+            ValueType::Int => Ok(TypedValue {
+                value_type: ValueType::Float,
+                value: self
+                    .map_builder(self.builder.build_signed_int_to_float(
+                        argument.value.into_int_value(),
+                        self.context.f64_type(),
+                        "int.to.float",
+                    ))?
+                    .into(),
+            }),
+            ValueType::Bool => {
+                let integer = self.map_builder(self.builder.build_int_z_extend(
+                    argument.value.into_int_value(),
+                    self.context.i64_type(),
+                    "bool.to.int",
+                ))?;
+                Ok(TypedValue {
+                    value_type: ValueType::Float,
+                    value: self
+                        .map_builder(self.builder.build_signed_int_to_float(
+                            integer,
+                            self.context.f64_type(),
+                            "bool.to.float",
+                        ))?
+                        .into(),
+                })
+            }
+            ValueType::String => {
+                let string_value = argument.value.into_struct_value();
+                let call = self.map_builder(
+                    self.builder.build_call(
+                        self.runtime.string_to_float,
+                        &[
+                            self.extract_string_part(string_value, 0, "float.arg.ptr")?
+                                .into(),
+                            self.extract_string_part(string_value, 1, "float.arg.len")?
+                                .into(),
+                        ],
+                        "call.string_to_float",
+                    ),
+                )?;
+                Ok(TypedValue {
+                    value_type: ValueType::Float,
+                    value: call.try_as_basic_value().unwrap_basic(),
+                })
+            }
+            _ => Err(CompilerError::build_message(
+                "当前阶段 `float` 只支持基础类型转换",
+                span,
+            )),
+        }
+    }
+
+    /// 把基础类型值转换为 `string`，数值和布尔值通过运行时格式化为 UTF-8 文本。
+    fn compile_string_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("string", arguments, span)?;
+        match argument.value_type {
+            ValueType::String => Ok(argument),
+            ValueType::Int => self.build_scalar_string_call(
+                self.runtime.int_to_string,
+                &[argument.value.into()],
+                "call.int_to_string",
+                "int.string.out_len",
+                "load.int.string.len",
+            ),
+            ValueType::Float => self.build_scalar_string_call(
+                self.runtime.float_to_string,
+                &[argument.value.into()],
+                "call.float_to_string",
+                "float.string.out_len",
+                "load.float.string.len",
+            ),
+            ValueType::Bool => {
+                let bool_value = self.map_builder(self.builder.build_int_z_extend(
+                    argument.value.into_int_value(),
+                    self.context.i8_type(),
+                    "bool.to.i8",
+                ))?;
+                self.build_scalar_string_call(
+                    self.runtime.bool_to_string,
+                    &[bool_value.into()],
+                    "call.bool_to_string",
+                    "bool.string.out_len",
+                    "load.bool.string.len",
+                )
+            }
+            _ => Err(CompilerError::build_message(
+                "当前阶段 `string` 只支持基础类型转换",
+                span,
+            )),
+        }
+    }
+
+    /// 把基础类型值转换为 `bool`，采用零值/空字符串判假、其余判真的规则。
+    fn compile_bool_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("bool", arguments, span)?;
+        let value = match argument.value_type {
+            ValueType::Bool => argument.value.into_int_value(),
+            ValueType::Int => self.map_builder(self.builder.build_int_compare(
+                inkwell::IntPredicate::NE,
+                argument.value.into_int_value(),
+                self.context.i64_type().const_zero(),
+                "int.to.bool",
+            ))?,
+            ValueType::Float => self.map_builder(self.builder.build_float_compare(
+                inkwell::FloatPredicate::UNE,
+                argument.value.into_float_value(),
+                self.context.f64_type().const_zero(),
+                "float.to.bool",
+            ))?,
+            ValueType::String => {
+                let string_value = argument.value.into_struct_value();
+                let length = self
+                    .extract_string_part(string_value, 1, "bool.arg.len")?
+                    .into_int_value();
+                self.map_builder(self.builder.build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    length,
+                    self.context.i64_type().const_zero(),
+                    "string.to.bool",
+                ))?
+            }
+            _ => {
+                return Err(CompilerError::build_message(
+                    "当前阶段 `bool` 只支持基础类型转换",
+                    span,
+                ));
+            }
+        };
+        Ok(TypedValue {
+            value_type: ValueType::Bool,
+            value: value.into(),
+        })
+    }
+
+    /// 校验类型转换内建函数的参数数量，并把唯一参数编译为后续转换逻辑可复用的基础类型值。
+    fn compile_scalar_convert_argument(
+        &mut self,
+        name: &str,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        if arguments.len() != 1 {
+            return Err(CompilerError::build_message(
+                format!("内建函数 `{name}` 需要且只接受一个参数"),
+                span,
+            ));
+        }
+        let compiled = self.compile_expr(&arguments[0])?;
+        let argument = self.expect_value(compiled)?;
+        if matches!(
+            argument.value_type,
+            ValueType::Int | ValueType::Float | ValueType::Bool | ValueType::String
+        ) {
+            Ok(argument)
+        } else {
+            Err(CompilerError::build_message(
+                format!("当前阶段 `{name}` 只支持基础类型转换"),
+                arguments[0].span(),
+            ))
+        }
+    }
+
+    /// 调用“标量转字符串”运行时函数，并把 `ptr + out_len` 结果重建为内部字符串结构。
+    fn build_scalar_string_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        arguments: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+        out_len_name: &str,
+        load_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_len_ptr = self.allocate_local(&ValueType::Int, out_len_name)?;
+        self.map_builder(
+            self.builder
+                .build_store(out_len_ptr, self.context.i64_type().const_zero()),
+        )?;
+
+        let mut call_args = arguments.to_vec();
+        call_args.push(out_len_ptr.into());
+        let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
+        let pointer = call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+        let length = self
+            .map_builder(
+                self.builder
+                    .build_load(self.context.i64_type(), out_len_ptr, load_name),
+            )?
+            .into_int_value();
+        Ok(TypedValue {
+            value_type: ValueType::String,
+            value: self.build_runtime_string(pointer, length)?.into(),
+        })
     }
 
     /// 编译列表字面量，并逐项调用运行时追加元素。
@@ -964,9 +1254,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         // 字典字符串读取的运行时签名要求把 out_len 放在“键参数”之后、“错误定位参数”之前。
         // 这里不能像列表那样直接追加到末尾，否则会把路径字符串错当成 out_len 传给 LLVM。
         let error_site_arg_count = 6;
-        let insert_index = args.len().checked_sub(error_site_arg_count).ok_or_else(|| {
-            CompilerError::build_message("字典字符串读取参数数量不合法", Span::new(0, 0))
-        })?;
+        let insert_index = args
+            .len()
+            .checked_sub(error_site_arg_count)
+            .ok_or_else(|| {
+                CompilerError::build_message("字典字符串读取参数数量不合法", Span::new(0, 0))
+            })?;
         let mut call_args = args.to_vec();
         call_args.insert(insert_index, out_len_ptr.into());
         let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
