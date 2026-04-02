@@ -122,6 +122,19 @@ fn should_emit_convert_runtime_symbols() {
     assert!(ir.contains("call i64 @string_to_int("));
 }
 
+/// 校验安全类型转换会引用对应的安全解析运行时符号。
+#[test]
+fn should_emit_safe_convert_runtime_symbols() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var parsed = try_int(\"123\")\n    print(parsed.ok)\n    print(parsed.value)\n    var flag = try_bool(\"true\")\n    print(flag.ok)\n    print(flag.value)\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("try_string_to_int"));
+    assert!(ir.contains("try_string_to_bool"));
+    assert!(ir.contains("call i8 @try_string_to_int("));
+    assert!(ir.contains("call i8 @try_string_to_bool("));
+}
+
 /// 校验列表操作会引用新增的列表运行时符号。
 #[test]
 fn should_emit_list_runtime_symbols() {

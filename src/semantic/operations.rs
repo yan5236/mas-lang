@@ -109,7 +109,10 @@ impl<'a> SemanticAnalyzer<'a> {
                     && left != &ValueType::Unit
                     && !matches!(
                         left,
-                        ValueType::List(_) | ValueType::Map(_, _) | ValueType::Array(_, _)
+                        ValueType::SafeConvertResult(_)
+                            | ValueType::List(_)
+                            | ValueType::Map(_, _)
+                            | ValueType::Array(_, _)
                     )
                 {
                     Ok(ValueType::Bool)
@@ -180,6 +183,7 @@ impl<'a> SemanticAnalyzer<'a> {
             if matches!(
                 argument_type,
                 ValueType::Unit
+                    | ValueType::SafeConvertResult(_)
                     | ValueType::List(_)
                     | ValueType::Map(_, _)
                     | ValueType::Array(_, _)
@@ -258,6 +262,9 @@ impl<'a> SemanticAnalyzer<'a> {
             "float" => ValueType::Float,
             "string" => ValueType::String,
             "bool" => ValueType::Bool,
+            "try_int" => ValueType::SafeConvertResult(Box::new(ValueType::Int)),
+            "try_float" => ValueType::SafeConvertResult(Box::new(ValueType::Float)),
+            "try_bool" => ValueType::SafeConvertResult(Box::new(ValueType::Bool)),
             _ => return Ok(None),
         };
 

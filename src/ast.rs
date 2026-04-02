@@ -207,6 +207,11 @@ pub enum Expr {
         arguments: Vec<Expr>,
         span: Span,
     },
+    PropertyAccess {
+        target: Box<Expr>,
+        property: PropertyName,
+        span: Span,
+    },
     Grouped {
         expression: Box<Expr>,
         span: Span,
@@ -228,6 +233,7 @@ impl Expr {
             | Self::Index { span, .. }
             | Self::Slice { span, .. }
             | Self::MethodCall { span, .. }
+            | Self::PropertyAccess { span, .. }
             | Self::Grouped { span, .. } => *span,
         }
     }
@@ -284,6 +290,32 @@ impl MethodName {
             Self::Contains => "contains",
             Self::Keys => "keys",
             Self::Values => "values",
+        }
+    }
+}
+
+/// 表示当前阶段允许访问的只读属性名称。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PropertyName {
+    Ok,
+    Value,
+}
+
+impl PropertyName {
+    /// 根据源码中的属性名文本解析出对应的属性枚举。
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "ok" => Some(Self::Ok),
+            "value" => Some(Self::Value),
+            _ => None,
+        }
+    }
+
+    /// 返回属性在错误消息中使用的稳定文本。
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Value => "value",
         }
     }
 }

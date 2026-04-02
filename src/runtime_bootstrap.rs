@@ -149,6 +149,64 @@ pub extern "C" fn string_to_float(ptr: *const u8, len: u64) -> f64 {
         .unwrap_or_else(|_| abort_runtime("字符串无法转换为 float"))
 }
 
+/// 尝试把字符串解析为 `int`，成功时写入输出参数，失败时仅返回 `false`。
+#[unsafe(no_mangle)]
+pub extern "C" fn try_string_to_int(ptr: *const u8, len: u64, out_value: *mut i64) -> u8 {
+    if out_value.is_null() {
+        abort_runtime("安全整数转换的输出指针不能为空");
+    }
+    let text = parse_runtime_text(ptr, len);
+    match text.parse::<i64>() {
+        Ok(value) => {
+            unsafe {
+                *out_value = value;
+            }
+            1
+        }
+        Err(_) => 0,
+    }
+}
+
+/// 尝试把字符串解析为 `float`，成功时写入输出参数，失败时仅返回 `false`。
+#[unsafe(no_mangle)]
+pub extern "C" fn try_string_to_float(ptr: *const u8, len: u64, out_value: *mut f64) -> u8 {
+    if out_value.is_null() {
+        abort_runtime("安全浮点转换的输出指针不能为空");
+    }
+    let text = parse_runtime_text(ptr, len);
+    match text.parse::<f64>() {
+        Ok(value) => {
+            unsafe {
+                *out_value = value;
+            }
+            1
+        }
+        Err(_) => 0,
+    }
+}
+
+/// 尝试把字符串解析为 `bool`，仅 `true/false` 两种文本视为成功。
+#[unsafe(no_mangle)]
+pub extern "C" fn try_string_to_bool(ptr: *const u8, len: u64, out_value: *mut u8) -> u8 {
+    if out_value.is_null() {
+        abort_runtime("安全布尔转换的输出指针不能为空");
+    }
+    let text = parse_runtime_text(ptr, len);
+    let parsed = match text {
+        "true" => Some(1),
+        "false" => Some(0),
+        _ => None,
+    };
+    if let Some(value) = parsed {
+        unsafe {
+            *out_value = value;
+        }
+        1
+    } else {
+        0
+    }
+}
+
 /// 把整数值格式化成新的运行时字符串，供 `string(int)` 内建函数直接返回。
 #[unsafe(no_mangle)]
 pub extern "C" fn int_to_string(value: i64, out_len: *mut u64) -> *const u8 {

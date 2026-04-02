@@ -48,6 +48,21 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 f64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
                 None,
             ),
+            try_string_to_int: module.add_function(
+                "try_string_to_int",
+                i8_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], false),
+                None,
+            ),
+            try_string_to_float: module.add_function(
+                "try_string_to_float",
+                i8_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], false),
+                None,
+            ),
+            try_string_to_bool: module.add_function(
+                "try_string_to_bool",
+                i8_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], false),
+                None,
+            ),
             int_to_string: module.add_function(
                 "int_to_string",
                 ptr_type.fn_type(&[i64_type.into(), ptr_type.into()], false),
@@ -693,6 +708,20 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             )?
             .into_struct_value();
         Ok(with_len)
+    }
+
+    /// 返回安全转换结果在 LLVM 中使用的 `{ ok, value }` 结构类型。
+    pub(super) fn safe_convert_result_type(
+        &self,
+        value_type: &ValueType,
+    ) -> Result<StructType<'ctx>, CompilerError> {
+        Ok(self.context.struct_type(
+            &[
+                self.context.bool_type().into(),
+                self.basic_type_for(value_type)?.into(),
+            ],
+            false,
+        ))
     }
 
     /// 构造字典运行时错误需要的源码上下文参数，供缺失键等错误精确定位到源码。

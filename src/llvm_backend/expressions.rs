@@ -1,7 +1,7 @@
 use inkwell::values::{BasicMetadataValueEnum, FloatValue, FunctionValue, PointerValue};
 
 use super::*;
-use crate::ast::{Expr, Literal, MethodName, TypeName, UnaryOp};
+use crate::ast::{Expr, Literal, MethodName, PropertyName, TypeName, UnaryOp};
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 编译表达式，并把 LLVM 值与静态类型一起返回给调用方。
@@ -52,6 +52,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 arguments,
                 span,
             } => self.compile_method_call(target, *method, arguments, *span),
+            Expr::PropertyAccess {
+                target,
+                property,
+                span,
+            } => self.compile_property_access(target, *property, *span),
         }
     }
 
@@ -183,6 +188,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         (self.runtime.print_string, vec![ptr.into(), len.into()])
                     }
                     ValueType::Unit
+                    | ValueType::SafeConvertResult(_)
                     | ValueType::List(_)
                     | ValueType::Map(_, _)
                     | ValueType::Array(_, _) => {
@@ -255,6 +261,39 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
+    /// 编译安全转换结果上的 `ok/value` 属性访问，并从聚合结构中提取目标字段。
+    fn compile_property_access(
+        &mut self,
+        target: &Expr,
+        property: PropertyName,
+        span: Span,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        let compiled = self.compile_expr(target)?;
+        let target_value = self.expect_value(compiled)?;
+        let ValueType::SafeConvertResult(value_type) = &target_value.value_type else {
+            return Err(CompilerError::build_message(
+                "当前表达式不支持属性访问",
+                span,
+            ));
+        };
+
+        let aggregate = target_value.value.into_struct_value();
+        let extracted = match property {
+            PropertyName::Ok => TypedValue {
+                value_type: ValueType::Bool,
+                value: self
+                    .extract_string_part(aggregate, 0, "safe_convert.ok")?
+                    .into_int_value()
+                    .into(),
+            },
+            PropertyName::Value => TypedValue {
+                value_type: value_type.as_ref().clone(),
+                value: self.extract_string_part(aggregate, 1, "safe_convert.value")?,
+            },
+        };
+        Ok(CodegenValue::Value(extracted))
+    }
+
     /// 编译基础类型转换内建函数，并按源类型选择直接 LLVM 指令或运行时 ABI。
     fn compile_builtin_convert_call(
         &mut self,
@@ -267,6 +306,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             "float" => Some(self.compile_float_conversion(arguments, span)?),
             "string" => Some(self.compile_string_conversion(arguments, span)?),
             "bool" => Some(self.compile_bool_conversion(arguments, span)?),
+            "try_int" => Some(self.compile_try_int_conversion(arguments, span)?),
+            "try_float" => Some(self.compile_try_float_conversion(arguments, span)?),
+            "try_bool" => Some(self.compile_try_bool_conversion(arguments, span)?),
             _ => None,
         };
         Ok(converted)
@@ -479,6 +521,122 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
+    /// 编译 `try_int`，字符串分支返回失败标记而不是直接触发运行时错误。
+    fn compile_try_int_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("try_int", arguments, span)?;
+        match argument.value_type {
+            ValueType::Int => self.build_safe_convert_success(ValueType::Int, argument.value),
+            ValueType::Float => self.build_safe_convert_success(
+                ValueType::Int,
+                self.map_builder(self.builder.build_float_to_signed_int(
+                    argument.value.into_float_value(),
+                    self.context.i64_type(),
+                    "try.float.to.int",
+                ))?
+                .into(),
+            ),
+            ValueType::Bool => self.build_safe_convert_success(
+                ValueType::Int,
+                self.map_builder(self.builder.build_int_z_extend(
+                    argument.value.into_int_value(),
+                    self.context.i64_type(),
+                    "try.bool.to.int",
+                ))?
+                .into(),
+            ),
+            ValueType::String => self.build_try_string_int_result(argument.value.into_struct_value()),
+            _ => Err(CompilerError::build_message(
+                "当前阶段 `try_int` 只支持基础类型转换",
+                span,
+            )),
+        }
+    }
+
+    /// 编译 `try_float`，字符串分支返回失败标记而不是直接触发运行时错误。
+    fn compile_try_float_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("try_float", arguments, span)?;
+        match argument.value_type {
+            ValueType::Float => self.build_safe_convert_success(ValueType::Float, argument.value),
+            ValueType::Int => self.build_safe_convert_success(
+                ValueType::Float,
+                self.map_builder(self.builder.build_signed_int_to_float(
+                    argument.value.into_int_value(),
+                    self.context.f64_type(),
+                    "try.int.to.float",
+                ))?
+                .into(),
+            ),
+            ValueType::Bool => {
+                let integer = self.map_builder(self.builder.build_int_z_extend(
+                    argument.value.into_int_value(),
+                    self.context.i64_type(),
+                    "try.bool.to.int",
+                ))?;
+                self.build_safe_convert_success(
+                    ValueType::Float,
+                    self.map_builder(self.builder.build_signed_int_to_float(
+                        integer,
+                        self.context.f64_type(),
+                        "try.bool.to.float",
+                    ))?
+                    .into(),
+                )
+            }
+            ValueType::String => {
+                self.build_try_string_float_result(argument.value.into_struct_value())
+            }
+            _ => Err(CompilerError::build_message(
+                "当前阶段 `try_float` 只支持基础类型转换",
+                span,
+            )),
+        }
+    }
+
+    /// 编译 `try_bool`，字符串分支仅接受精确的 `true/false` 文本。
+    fn compile_try_bool_conversion(
+        &mut self,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let argument = self.compile_scalar_convert_argument("try_bool", arguments, span)?;
+        match argument.value_type {
+            ValueType::Bool => self.build_safe_convert_success(ValueType::Bool, argument.value),
+            ValueType::Int => self.build_safe_convert_success(
+                ValueType::Bool,
+                self.map_builder(self.builder.build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    argument.value.into_int_value(),
+                    self.context.i64_type().const_zero(),
+                    "try.int.to.bool",
+                ))?
+                .into(),
+            ),
+            ValueType::Float => self.build_safe_convert_success(
+                ValueType::Bool,
+                self.map_builder(self.builder.build_float_compare(
+                    inkwell::FloatPredicate::UNE,
+                    argument.value.into_float_value(),
+                    self.context.f64_type().const_zero(),
+                    "try.float.to.bool",
+                ))?
+                .into(),
+            ),
+            ValueType::String => self.build_try_string_bool_result(argument.value.into_struct_value()),
+            _ => Err(CompilerError::build_message(
+                "当前阶段 `try_bool` 只支持基础类型转换",
+                span,
+            )),
+        }
+    }
+
     /// 校验类型转换内建函数的参数数量，并把唯一参数编译为后续转换逻辑可复用的基础类型值。
     fn compile_scalar_convert_argument(
         &mut self,
@@ -539,6 +697,138 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             value_type: ValueType::String,
             value: self.build_runtime_string(pointer, length)?.into(),
         })
+    }
+
+    /// 把一个“必定成功”的基础类型转换结果组装成 `{ ok, value }` 结构值。
+    fn build_safe_convert_success(
+        &self,
+        value_type: ValueType,
+        value: BasicValueEnum<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        self.build_safe_convert_result(
+            value_type,
+            self.context.bool_type().const_int(1, false),
+            value,
+        )
+    }
+
+    /// 把成功标记与目标值组装成安全转换结果，供 `try_*` 内建函数统一复用。
+    fn build_safe_convert_result(
+        &self,
+        value_type: ValueType,
+        ok: inkwell::values::IntValue<'ctx>,
+        value: BasicValueEnum<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let result_type = self.safe_convert_result_type(&value_type)?;
+        let with_ok = self
+            .map_builder(self.builder.build_insert_value(result_type.get_undef(), ok, 0, "safe.ok"))?
+            .into_struct_value();
+        let with_value = self
+            .map_builder(self.builder.build_insert_value(with_ok, value, 1, "safe.value"))?
+            .into_struct_value();
+        Ok(TypedValue {
+            value_type: ValueType::SafeConvertResult(Box::new(value_type)),
+            value: with_value.into(),
+        })
+    }
+
+    /// 调用运行时的安全整数解析函数，并返回带成功标记的结果结构。
+    fn build_try_string_int_result(
+        &mut self,
+        value: inkwell::values::StructValue<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_ptr = self.allocate_local(&ValueType::Int, "try.int.out")?;
+        self.map_builder(
+            self.builder
+                .build_store(out_ptr, self.context.i64_type().const_zero()),
+        )?;
+        let ok = self.build_try_string_parse_ok(
+            self.runtime.try_string_to_int,
+            value,
+            out_ptr,
+            "call.try_string_to_int",
+        )?;
+        let parsed = self
+            .map_builder(self.builder.build_load(self.context.i64_type(), out_ptr, "load.try.int"))?;
+        self.build_safe_convert_result(ValueType::Int, ok, parsed)
+    }
+
+    /// 调用运行时的安全浮点解析函数，并返回带成功标记的结果结构。
+    fn build_try_string_float_result(
+        &mut self,
+        value: inkwell::values::StructValue<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_ptr = self.allocate_local(&ValueType::Float, "try.float.out")?;
+        self.map_builder(
+            self.builder
+                .build_store(out_ptr, self.context.f64_type().const_zero()),
+        )?;
+        let ok = self.build_try_string_parse_ok(
+            self.runtime.try_string_to_float,
+            value,
+            out_ptr,
+            "call.try_string_to_float",
+        )?;
+        let parsed = self
+            .map_builder(self.builder.build_load(self.context.f64_type(), out_ptr, "load.try.float"))?;
+        self.build_safe_convert_result(ValueType::Float, ok, parsed)
+    }
+
+    /// 调用运行时的安全布尔解析函数，并把 `u8` 结果规范化成内部 `i1` 布尔值。
+    fn build_try_string_bool_result(
+        &mut self,
+        value: inkwell::values::StructValue<'ctx>,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_ptr = self.map_builder(
+            self.builder
+                .build_alloca(self.context.i8_type(), "try.bool.out.raw"),
+        )?;
+        self.map_builder(
+            self.builder
+                .build_store(out_ptr, self.context.i8_type().const_zero()),
+        )?;
+        let ok = self.build_try_string_parse_ok(
+            self.runtime.try_string_to_bool,
+            value,
+            out_ptr,
+            "call.try_string_to_bool",
+        )?;
+        let raw = self
+            .map_builder(self.builder.build_load(self.context.i8_type(), out_ptr, "load.try.bool.raw"))?
+            .into_int_value();
+        let parsed = self.map_builder(self.builder.build_int_compare(
+            inkwell::IntPredicate::NE,
+            raw,
+            self.context.i8_type().const_zero(),
+            "try.bool.value",
+        ))?;
+        self.build_safe_convert_result(ValueType::Bool, ok, parsed.into())
+    }
+
+    /// 统一构造安全字符串解析调用，并把运行时返回的 `u8` 成功标记转换为内部 `i1`。
+    fn build_try_string_parse_ok(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        value: inkwell::values::StructValue<'ctx>,
+        out_ptr: PointerValue<'ctx>,
+        call_name: &str,
+    ) -> Result<inkwell::values::IntValue<'ctx>, CompilerError> {
+        let call = self.map_builder(self.builder.build_call(
+            function,
+            &[
+                self.extract_string_part(value, 0, "try.string.ptr")?.into(),
+                self.extract_string_part(value, 1, "try.string.len")?.into(),
+                out_ptr.into(),
+            ],
+            call_name,
+        ))?;
+        let ok_raw = call.try_as_basic_value().unwrap_basic().into_int_value();
+        self.map_builder(self.builder.build_int_compare(
+            inkwell::IntPredicate::NE,
+            ok_raw,
+            self.context.i8_type().const_zero(),
+            "try.parse.ok",
+        ))
     }
 
     /// 编译列表字面量，并逐项调用运行时追加元素。

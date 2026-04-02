@@ -8,6 +8,7 @@ pub enum ValueType {
     Float,
     Bool,
     String,
+    SafeConvertResult(Box<ValueType>),
     List(Box<ValueType>),
     Map(Box<ValueType>, Box<ValueType>),
     Array(Box<ValueType>, usize),
@@ -22,6 +23,9 @@ impl ValueType {
             Self::Float => "float".to_string(),
             Self::Bool => "bool".to_string(),
             Self::String => "string".to_string(),
+            Self::SafeConvertResult(value) => {
+                format!("try_result<{}>", value.display_name())
+            }
             Self::List(element) => format!("list<{}>", element.display_name()),
             Self::Map(key, value) => {
                 format!("map<{},{}>", key.display_name(), value.display_name())

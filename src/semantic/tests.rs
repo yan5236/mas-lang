@@ -145,3 +145,19 @@ fn should_reject_non_scalar_convert_builtin_argument() {
     let error = analyze("var items:list<int> = [1]\nvar text = string(items)\n").unwrap_err();
     assert!(error.contains("只支持基础类型转换"));
 }
+
+/// 校验安全转换内建函数及其 `ok/value` 属性都能通过语义分析。
+#[test]
+fn should_accept_safe_convert_builtins() {
+    analyze(
+        "var parsed = try_int(\"123\")\nif parsed.ok:\n    print(parsed.value)\nvar float_parsed = try_float(\"3.14\")\nif float_parsed.ok:\n    print(float_parsed.value)\nvar bool_parsed = try_bool(\"true\")\nif bool_parsed.ok:\n    print(bool_parsed.value)\n",
+    )
+    .unwrap();
+}
+
+/// 校验只有安全转换结果才允许访问 `ok/value` 属性。
+#[test]
+fn should_reject_property_access_on_non_safe_convert_value() {
+    let error = analyze("var value = 1\nprint(value.ok)\n").unwrap_err();
+    assert!(error.contains("当前表达式不支持属性访问"));
+}

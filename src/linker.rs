@@ -363,6 +363,16 @@ mod tests {
         assert_eq!(output, "123\n3.14\n42\nfalse\ntrue\nfalse\ntrue\nfalse\n");
     }
 
+    /// 校验安全类型转换在成功与失败两条路径上都能返回稳定的 `ok/value` 结果。
+    #[test]
+    fn should_build_and_run_safe_type_convert_program() {
+        let output = build_and_run(
+            "safe-type-convert",
+            "func main():\n    var parsed = try_int(\"123\")\n    print(parsed.ok)\n    print(parsed.value)\n    var failed = try_int(\"abc\")\n    print(failed.ok)\n    var float_parsed = try_float(\"3.5\")\n    print(float_parsed.ok)\n    print(float_parsed.value)\n    var bool_parsed = try_bool(\"true\")\n    print(bool_parsed.ok)\n    print(bool_parsed.value)\n    var bool_failed = try_bool(\"hello\")\n    print(bool_failed.ok)\n",
+        );
+        assert_eq!(output, "true\n123\nfalse\ntrue\n3.5\ntrue\ntrue\nfalse\n");
+    }
+
     /// 校验 `msceshi` 中专门构造的分支返回矩阵样例能够稳定编译运行，避免 `if/return` 回归。
     #[test]
     fn should_build_and_run_msceshi_branch_return_matrix() {

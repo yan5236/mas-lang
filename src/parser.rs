@@ -1,6 +1,6 @@
 use crate::ast::{
     AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, Expr, Literal, MapEntry,
-    MethodName, Parameter, Program, Stmt, TypeName, UnaryOp,
+    MethodName, Parameter, Program, PropertyName, Stmt, TypeName, UnaryOp,
 };
 use crate::diagnostic::CompilerError;
 use crate::settings::CompilerSettings;
@@ -510,7 +510,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_tag(TokenTag::Dot) {
-                expr = self.finish_method_call(expr)?;
+                expr = self.finish_member_access(expr)?;
                 continue;
             }
             break;
@@ -583,34 +583,48 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析对象方法调用，不引入通用成员访问语义。
-    fn finish_method_call(&mut self, target: Expr) -> Result<Expr, CompilerError> {
+    /// 解析方法调用或安全转换结果上的只读属性访问。
+    fn finish_member_access(&mut self, target: Expr) -> Result<Expr, CompilerError> {
         let dot_span = self.previous().span;
-        let (method_name, method_span) = self.consume_identifier("方法调用缺少方法名")?;
-        let method = MethodName::parse(&method_name).ok_or_else(|| {
-            CompilerError::syntax_message(
-                format!("当前阶段不支持对象方法 `{method_name}`"),
-                method_span,
-            )
-        })?;
-        self.consume(TokenTag::LeftParen, "方法调用缺少左括号 `(`")?;
-        let mut arguments = Vec::new();
+        let (member_name, member_span) = self.consume_identifier("`.` 后缺少成员名")?;
 
-        if !self.check(TokenTag::RightParen) {
-            loop {
-                arguments.push(self.parse_expression()?);
-                if !self.match_tag(TokenTag::Comma) {
-                    break;
+        if self.match_tag(TokenTag::LeftParen) {
+            let method = MethodName::parse(&member_name).ok_or_else(|| {
+                CompilerError::syntax_message(
+                    format!("当前阶段不支持对象方法 `{member_name}`"),
+                    member_span,
+                )
+            })?;
+            let mut arguments = Vec::new();
+
+            if !self.check(TokenTag::RightParen) {
+                loop {
+                    arguments.push(self.parse_expression()?);
+                    if !self.match_tag(TokenTag::Comma) {
+                        break;
+                    }
                 }
             }
+
+            let close = self.consume(TokenTag::RightParen, "方法调用缺少右括号 `)`")?;
+            return Ok(Expr::MethodCall {
+                target: Box::new(target),
+                method,
+                arguments,
+                span: Span::merge(dot_span, close.span),
+            });
         }
 
-        let close = self.consume(TokenTag::RightParen, "方法调用缺少右括号 `)`")?;
-        Ok(Expr::MethodCall {
+        let property = PropertyName::parse(&member_name).ok_or_else(|| {
+            CompilerError::syntax_message(
+                format!("当前阶段不支持属性 `{member_name}`"),
+                member_span,
+            )
+        })?;
+        Ok(Expr::PropertyAccess {
             target: Box::new(target),
-            method,
-            arguments,
-            span: Span::merge(dot_span, close.span),
+            property,
+            span: Span::merge(dot_span, member_span),
         })
     }
 
@@ -1001,7 +1015,8 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::Parser;
     use crate::ast::{
-        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, MethodName, Stmt, TypeName, UnaryOp,
+        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, MethodName, PropertyName, Stmt,
+        TypeName, UnaryOp,
     };
     use crate::lexer::Lexer;
     use crate::settings::{CompilerSettings, UiLanguage};
@@ -1176,6 +1191,34 @@ mod tests {
             panic!("第三条语句不是方法调用");
         };
         assert_eq!(*method, MethodName::Contains);
+    }
+
+    /// 校验安全转换结果的 `ok/value` 只读属性能够被正确解析。
+    #[test]
+    fn should_parse_safe_convert_property_access() {
+        let program = parse("var result = try_int(\"123\")\nprint(result.ok)\nprint(result.value)\n");
+
+        let Stmt::ExprStmt { expr, .. } = &program.statements[1] else {
+            panic!("第二条语句不是表达式语句");
+        };
+        let Expr::Call { arguments, .. } = expr else {
+            panic!("第二条语句不是函数调用");
+        };
+        let Expr::PropertyAccess { property, .. } = &arguments[0] else {
+            panic!("第二条语句参数不是属性访问");
+        };
+        assert_eq!(*property, PropertyName::Ok);
+
+        let Stmt::ExprStmt { expr, .. } = &program.statements[2] else {
+            panic!("第三条语句不是表达式语句");
+        };
+        let Expr::Call { arguments, .. } = expr else {
+            panic!("第三条语句不是函数调用");
+        };
+        let Expr::PropertyAccess { property, .. } = &arguments[0] else {
+            panic!("第三条语句参数不是属性访问");
+        };
+        assert_eq!(*property, PropertyName::Value);
     }
 
     /// 校验多行字典字面量中的换行不会被误判为缺少表达式。

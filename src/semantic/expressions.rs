@@ -1,5 +1,6 @@
-use crate::ast::{Expr, Literal};
+use crate::ast::{Expr, Literal, PropertyName};
 use crate::diagnostic::CompilerError;
+use crate::source::Span;
 
 use super::{SemanticAnalyzer, ValueType};
 
@@ -73,6 +74,32 @@ impl<'a> SemanticAnalyzer<'a> {
                 arguments,
                 span,
             } => self.infer_method_type(target, *method, arguments, *span),
+            Expr::PropertyAccess {
+                target,
+                property,
+                span,
+            } => self.infer_property_access_type(target, *property, *span),
         }
+    }
+
+    /// 推导安全转换结果上的 `ok/value` 属性访问类型。
+    fn infer_property_access_type(
+        &mut self,
+        target: &Expr,
+        property: PropertyName,
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        let target_type = self.infer_expression_type(target)?;
+        let ValueType::SafeConvertResult(value_type) = target_type else {
+            return Err(CompilerError::semantic_message(
+                "当前表达式不支持属性访问",
+                span,
+            ));
+        };
+
+        Ok(match property {
+            PropertyName::Ok => ValueType::Bool,
+            PropertyName::Value => (*value_type).clone(),
+        })
     }
 }

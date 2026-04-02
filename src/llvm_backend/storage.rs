@@ -44,6 +44,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Float => global.set_initializer(&self.context.f64_type().const_zero()),
             ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
             ValueType::String => global.set_initializer(&self.string_type.const_zero()),
+            ValueType::SafeConvertResult(value_type) => global
+                .set_initializer(&self.safe_convert_result_type(value_type.as_ref())?.const_zero()),
             ValueType::List(_) => global.set_initializer(&self.list_pointer_type().const_null()),
             ValueType::Map(_, _) => global.set_initializer(&self.map_pointer_type().const_null()),
             ValueType::Array(element, size) => {
@@ -102,6 +104,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Float => self.context.f64_type().into(),
             ValueType::Bool => self.context.bool_type().into(),
             ValueType::String => self.string_type.into(),
+            ValueType::SafeConvertResult(value_type) => {
+                self.safe_convert_result_type(value_type.as_ref())?.into()
+            }
             ValueType::List(_) => self.list_pointer_type().into(),
             ValueType::Map(_, _) => self.map_pointer_type().into(),
             ValueType::Array(element, size) => self.array_type_for(element.as_ref(), *size)?.into(),
