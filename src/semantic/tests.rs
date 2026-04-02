@@ -161,3 +161,12 @@ fn should_reject_property_access_on_non_safe_convert_value() {
     let error = analyze("var value = 1\nprint(value.ok)\n").unwrap_err();
     assert!(error.contains("当前表达式不支持属性访问"));
 }
+
+/// 校验模板字符串中的字符串与数值插值都能复用现有类型转换链路通过语义分析。
+#[test]
+fn should_accept_template_string_interpolation() {
+    analyze(
+        "var name = \"Mascript\"\nvar count = 3\nprint(\"hello ${name}, count=${count}\")\n",
+    )
+    .unwrap();
+}

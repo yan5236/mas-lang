@@ -37,6 +37,16 @@ fn should_emit_string_concat_runtime_symbol() {
     assert!(ir.contains("string_concat"));
 }
 
+/// 校验模板字符串会复用字符串拼接和 `int -> string` 的现有运行时符号。
+#[test]
+fn should_emit_template_string_runtime_symbols() {
+    let (source, program, _) =
+        parse_program("func main():\n    var count:int = 3\n    print(\"value=${count}\")\n");
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("string_concat"));
+    assert!(ir.contains("int_to_string"));
+}
+
 /// 校验字符串相等比较路径会引用 `string_equals` 运行时符号。
 #[test]
 fn should_emit_string_equals_runtime_symbol() {

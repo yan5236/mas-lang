@@ -3,8 +3,9 @@ use crate::ast::{
     MethodName, Parameter, Program, PropertyName, Stmt, TypeName, UnaryOp,
 };
 use crate::diagnostic::CompilerError;
+use crate::lexer::Lexer;
 use crate::settings::CompilerSettings;
-use crate::source::Span;
+use crate::source::{SourceFile, Span};
 use crate::token::{Token, TokenKind, TokenTag};
 
 /// 根据词法单元序列构建第三阶段列表能力所需的抽象语法树。
@@ -12,6 +13,17 @@ pub struct Parser<'a> {
     tokens: Vec<Token>,
     current: usize,
     settings: &'a CompilerSettings,
+}
+
+/// 表示模板字符串拆解后得到的一段普通文本或一段插值表达式。
+enum TemplateSegment {
+    Text {
+        value: String,
+        span: Span,
+    },
+    Expression {
+        value: Expr,
+    },
 }
 
 impl<'a> Parser<'a> {
@@ -645,10 +657,7 @@ impl<'a> Parser<'a> {
                 value: Literal::Bool(value),
                 span: token.span,
             }),
-            TokenKind::StringLiteral(value) => Ok(Expr::Literal {
-                value: Literal::String(value),
-                span: token.span,
-            }),
+            TokenKind::StringLiteral(value) => self.parse_string_literal(value, token.span),
             TokenKind::Identifier(name) => {
                 if name == "array" && self.check(TokenTag::Less) {
                     return self.parse_array_initializer(token.span);
@@ -673,6 +682,335 @@ impl<'a> Parser<'a> {
                 token.span,
             )),
         }
+    }
+
+    /// 解析普通字符串或模板字符串，并在需要时把插值降级为现有的字符串拼接表达式。
+    fn parse_string_literal(&mut self, value: String, span: Span) -> Result<Expr, CompilerError> {
+        let segments = self.parse_template_segments(&value, span)?;
+        Ok(self.build_template_expression(segments, span))
+    }
+
+    /// 把字符串内容拆成普通文本片段与 `${...}` 插值片段，供后续统一转换为 AST。
+    fn parse_template_segments(
+        &self,
+        value: &str,
+        literal_span: Span,
+    ) -> Result<Vec<TemplateSegment>, CompilerError> {
+        let mut segments = Vec::new();
+        let mut cursor = 0usize;
+
+        while let Some(offset) = value[cursor..].find("${") {
+            let interpolation_start = cursor + offset;
+            if interpolation_start > cursor {
+                segments.push(TemplateSegment::Text {
+                    value: value[cursor..interpolation_start].to_string(),
+                    span: self.offset_template_span(literal_span, cursor, interpolation_start),
+                });
+            }
+
+            let expression_start = interpolation_start + 2;
+            let expression_end = self.find_template_expression_end(value, expression_start, literal_span)?;
+            let expression_source = &value[expression_start..expression_end];
+            let trimmed = expression_source.trim();
+            if trimmed.is_empty() {
+                return Err(CompilerError::syntax_message(
+                    "模板字符串中的 `${}` 不能为空表达式",
+                    self.offset_template_span(literal_span, expression_start, expression_end),
+                ));
+            }
+
+            let leading_trimmed = expression_source
+                .find(trimmed)
+                .expect("去除空白后的模板表达式必须仍然存在于原文本中");
+            let trimmed_start = expression_start + leading_trimmed;
+            let trimmed_end = trimmed_start + trimmed.len();
+            let expression_span =
+                self.offset_template_span(literal_span, trimmed_start, trimmed_end);
+            let expression = self.parse_inline_template_expression(trimmed, expression_span)?;
+            segments.push(TemplateSegment::Expression { value: expression });
+            cursor = expression_end + 1;
+        }
+
+        if cursor < value.len() || segments.is_empty() {
+            segments.push(TemplateSegment::Text {
+                value: value[cursor..].to_string(),
+                span: self.offset_template_span(literal_span, cursor, value.len()),
+            });
+        }
+
+        Ok(segments)
+    }
+
+    /// 在模板字符串内部查找当前 `${` 对应的结束 `}`，并正确跳过字符串和嵌套括号。
+    fn find_template_expression_end(
+        &self,
+        value: &str,
+        start: usize,
+        literal_span: Span,
+    ) -> Result<usize, CompilerError> {
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        let mut paren_depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+
+        for (offset, character) in value[start..].char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+
+                match character {
+                    '\\' => escaped = true,
+                    '"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+
+            match character {
+                '"' => in_string = true,
+                '(' => paren_depth += 1,
+                ')' => paren_depth = paren_depth.saturating_sub(1),
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth = bracket_depth.saturating_sub(1),
+                '{' => brace_depth += 1,
+                '}' => {
+                    if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 {
+                        return Ok(start + offset);
+                    }
+                    brace_depth = brace_depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
+
+        Err(CompilerError::syntax_message(
+            "模板字符串缺少结束 `}`",
+            self.offset_template_span(literal_span, start.saturating_sub(2), value.len()),
+        ))
+    }
+
+    /// 使用独立的词法和语法分析器解析 `${...}` 内部表达式，并把相对位置回写到原字符串跨度。
+    fn parse_inline_template_expression(
+        &self,
+        expression_text: &str,
+        expression_span: Span,
+    ) -> Result<Expr, CompilerError> {
+        let source = SourceFile::new("<template>", format!("{expression_text}\n"));
+        let tokens = Lexer::new(&source, self.settings)
+            .tokenize()
+            .map_err(|error| self.offset_template_error(error, expression_span.start))?;
+        let mut parser = Self::new(tokens, self.settings);
+        let expression = parser
+            .parse_expression()
+            .map_err(|error| self.offset_template_error(error, expression_span.start))?;
+        parser.skip_newlines();
+        if !parser.check(TokenTag::Eof) {
+            return Err(CompilerError::syntax_message(
+                "模板字符串中的插值表达式格式无效",
+                expression_span,
+            ));
+        }
+        Ok(Self::offset_expression_spans(
+            expression,
+            expression_span.start,
+        ))
+    }
+
+    /// 把拆好的模板片段重建为现有 AST 中的字符串字面量与 `+` 拼接表达式，复用旧链路。
+    fn build_template_expression(&self, segments: Vec<TemplateSegment>, literal_span: Span) -> Expr {
+        let has_interpolation = segments
+            .iter()
+            .any(|segment| matches!(segment, TemplateSegment::Expression { .. }));
+        let mut parts = Vec::new();
+
+        for segment in segments {
+            match segment {
+                TemplateSegment::Text { value, span } => {
+                    if !value.is_empty() || !has_interpolation {
+                        parts.push(Expr::Literal {
+                            value: Literal::String(value),
+                            span,
+                        });
+                    }
+                }
+                TemplateSegment::Expression { value } => {
+                    parts.push(Self::build_template_string_convert_call(value));
+                }
+            }
+        }
+
+        let mut parts = parts.into_iter();
+        let mut expression = parts.next().unwrap_or(Expr::Literal {
+            value: Literal::String(String::new()),
+            span: literal_span,
+        });
+        for next in parts {
+            expression = Expr::Binary {
+                span: Span::merge(expression.span(), next.span()),
+                left: Box::new(expression),
+                op: BinaryOp::Add,
+                right: Box::new(next),
+            };
+        }
+        expression
+    }
+
+    /// 把模板字符串中的单个插值表达式包装成 `string(expr)`，统一走已有的基础类型转换能力。
+    fn build_template_string_convert_call(expression: Expr) -> Expr {
+        let span = expression.span();
+        Expr::Call {
+            callee: Box::new(Expr::Identifier {
+                name: "string".to_string(),
+                span,
+            }),
+            arguments: vec![expression],
+            span,
+        }
+    }
+
+    /// 把模板字符串内部表达式的相对跨度平移到原始源码中的近似位置，便于后续阶段复用。
+    fn offset_expression_spans(expression: Expr, offset: usize) -> Expr {
+        match expression {
+            Expr::Literal { value, span } => Expr::Literal {
+                value,
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Identifier { name, span } => Expr::Identifier {
+                name,
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => Expr::Binary {
+                left: Box::new(Self::offset_expression_spans(*left, offset)),
+                op,
+                right: Box::new(Self::offset_expression_spans(*right, offset)),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Unary { op, operand, span } => Expr::Unary {
+                op,
+                operand: Box::new(Self::offset_expression_spans(*operand, offset)),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Call {
+                callee,
+                arguments,
+                span,
+            } => Expr::Call {
+                callee: Box::new(Self::offset_expression_spans(*callee, offset)),
+                arguments: arguments
+                    .into_iter()
+                    .map(|argument| Self::offset_expression_spans(argument, offset))
+                    .collect(),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::ListLiteral { elements, span } => Expr::ListLiteral {
+                elements: elements
+                    .into_iter()
+                    .map(|element| Self::offset_expression_spans(element, offset))
+                    .collect(),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::MapLiteral { entries, span } => Expr::MapLiteral {
+                entries: entries
+                    .into_iter()
+                    .map(|entry| MapEntry {
+                        key: Self::offset_expression_spans(entry.key, offset),
+                        value: Self::offset_expression_spans(entry.value, offset),
+                        span: Self::shift_span(entry.span, offset),
+                    })
+                    .collect(),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::ArrayInitializer {
+                element_type,
+                size,
+                elements,
+                span,
+            } => Expr::ArrayInitializer {
+                element_type,
+                size,
+                elements: elements
+                    .into_iter()
+                    .map(|element| Self::offset_expression_spans(element, offset))
+                    .collect(),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Index {
+                target,
+                index,
+                span,
+            } => Expr::Index {
+                target: Box::new(Self::offset_expression_spans(*target, offset)),
+                index: Box::new(Self::offset_expression_spans(*index, offset)),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Slice {
+                target,
+                start,
+                end,
+                span,
+            } => Expr::Slice {
+                target: Box::new(Self::offset_expression_spans(*target, offset)),
+                start: start.map(|value| Box::new(Self::offset_expression_spans(*value, offset))),
+                end: end.map(|value| Box::new(Self::offset_expression_spans(*value, offset))),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::MethodCall {
+                target,
+                method,
+                arguments,
+                span,
+            } => Expr::MethodCall {
+                target: Box::new(Self::offset_expression_spans(*target, offset)),
+                method,
+                arguments: arguments
+                    .into_iter()
+                    .map(|argument| Self::offset_expression_spans(argument, offset))
+                    .collect(),
+                span: Self::shift_span(span, offset),
+            },
+            Expr::PropertyAccess {
+                target,
+                property,
+                span,
+            } => Expr::PropertyAccess {
+                target: Box::new(Self::offset_expression_spans(*target, offset)),
+                property,
+                span: Self::shift_span(span, offset),
+            },
+            Expr::Grouped { expression, span } => Expr::Grouped {
+                expression: Box::new(Self::offset_expression_spans(*expression, offset)),
+                span: Self::shift_span(span, offset),
+            },
+        }
+    }
+
+    /// 按模板字符串正文中的相对偏移，近似计算其在原始源码字符串字面量中的实际跨度。
+    fn offset_template_span(&self, literal_span: Span, start: usize, end: usize) -> Span {
+        Span::new(
+            literal_span.start + 1 + start,
+            literal_span.start + 1 + end,
+        )
+    }
+
+    /// 把模板字符串子解析器返回的错误跨度平移到原始源码位置，避免后续诊断落回临时源码文件。
+    fn offset_template_error(&self, error: CompilerError, offset: usize) -> CompilerError {
+        CompilerError {
+            span: Self::shift_span(error.span, offset),
+            ..error
+        }
+    }
+
+    /// 对单个源码跨度做统一平移，供模板字符串内部节点回写源码位置信息时复用。
+    fn shift_span(span: Span, offset: usize) -> Span {
+        Span::new(span.start + offset, span.end + offset)
     }
 
     /// 解析列表字面量。
@@ -1219,6 +1557,46 @@ mod tests {
             panic!("第三条语句参数不是属性访问");
         };
         assert_eq!(*property, PropertyName::Value);
+    }
+
+    /// 校验模板字符串会被解析为复用现有字符串拼接与 `string(...)` 转换的表达式树。
+    #[test]
+    fn should_parse_template_string_as_concat_expression() {
+        let program = parse("var name = \"Mascript\"\nprint(\"Hello ${name}: ${1 + 2}\")\n");
+
+        let Stmt::ExprStmt { expr, .. } = &program.statements[1] else {
+            panic!("第二条语句不是表达式语句");
+        };
+        let Expr::Call { arguments, .. } = expr else {
+            panic!("第二条语句不是函数调用");
+        };
+        let Expr::Binary { op, right, .. } = &arguments[0] else {
+            panic!("模板字符串没有被解析为拼接表达式");
+        };
+        assert_eq!(*op, BinaryOp::Add);
+
+        let Expr::Call { callee, arguments, .. } = &**right else {
+            panic!("模板字符串的最后一段没有被包装成 string(...) 调用");
+        };
+        let Expr::Identifier { name, .. } = &**callee else {
+            panic!("模板字符串的插值转换不是具名函数调用");
+        };
+        assert_eq!(name, "string");
+        assert!(matches!(
+            arguments[0],
+            Expr::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
+
+        assert!(matches!(
+            arguments[0],
+            Expr::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
     }
 
     /// 校验多行字典字面量中的换行不会被误判为缺少表达式。
