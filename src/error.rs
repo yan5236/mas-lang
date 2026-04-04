@@ -10,6 +10,15 @@ pub enum FamaError {
     ProjectAlreadyExists(PathBuf),
     MissingFile(PathBuf),
     InvalidSettings { path: PathBuf, message: String },
+    InvalidManifest { path: PathBuf, message: String },
+    InvalidLockFile { path: PathBuf, message: String },
+    InvalidGlobalSettings { path: PathBuf, message: String },
+    DependencyConflict {
+        name: String,
+        existing: String,
+        incoming: String,
+    },
+    DependencyInstall(String),
     CommandFailed { command: String, code: Option<i32> },
     Compiler(String),
     Io { path: PathBuf, source: io::Error },
@@ -36,6 +45,26 @@ impl Display for FamaError {
             Self::InvalidSettings { path, message } => {
                 write!(f, "项目配置无效：{}，原因：{message}", path.display())
             }
+            Self::InvalidManifest { path, message } => {
+                write!(f, "依赖清单无效：{}，原因：{message}", path.display())
+            }
+            Self::InvalidLockFile { path, message } => {
+                write!(f, "锁文件无效：{}，原因：{message}", path.display())
+            }
+            Self::InvalidGlobalSettings { path, message } => {
+                write!(f, "全局配置无效：{}，原因：{message}", path.display())
+            }
+            Self::DependencyConflict {
+                name,
+                existing,
+                incoming,
+            } => {
+                write!(
+                    f,
+                    "依赖 `{name}` 发生冲突：已有 `{existing}`，新值 `{incoming}`"
+                )
+            }
+            Self::DependencyInstall(message) => write!(f, "{message}"),
             Self::CommandFailed { command, code } => match code {
                 Some(code) => write!(f, "命令执行失败：{command}，退出码：{code}"),
                 None => write!(f, "命令执行失败：{command}"),

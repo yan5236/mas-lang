@@ -15,6 +15,10 @@ pub struct Cli {
 pub enum Commands {
     /// 创建一个新的 Mascript 项目。
     New(NewArgs),
+    /// 向当前项目添加一个本地路径依赖。
+    Add(AddArgs),
+    /// 安装 `mod.yml` 中声明的本地路径依赖。
+    Install(InstallArgs),
     /// 读取项目配置并编译当前 Mascript 项目。
     Build(BuildArgs),
     /// 编译当前 Mascript 项目后立即运行生成的可执行文件。
@@ -25,6 +29,24 @@ pub enum Commands {
 #[derive(Args, Debug, Clone)]
 pub struct NewArgs {
     pub project_name: String,
+}
+
+/// 定义 `fama add` 子命令支持的依赖路径和项目路径参数。
+#[derive(Args, Debug, Clone)]
+pub struct AddArgs {
+    /// 要添加的本地依赖项目路径。
+    pub dependency_path: PathBuf,
+    /// 指向当前 Mascript 项目根目录，默认使用当前目录。
+    #[arg(long, default_value = ".")]
+    pub project_dir: PathBuf,
+}
+
+/// 定义 `fama install` 子命令支持的项目路径参数。
+#[derive(Args, Debug, Clone)]
+pub struct InstallArgs {
+    /// 指向当前 Mascript 项目根目录，默认使用当前目录。
+    #[arg(default_value = ".")]
+    pub project_dir: PathBuf,
 }
 
 /// 定义 `fama build` 子命令支持的项目路径和输出覆盖参数。

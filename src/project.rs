@@ -37,7 +37,7 @@ pub struct ProjectContext {
 impl ProjectContext {
     /// 从项目根目录读取 `settings.toml`，并解析出 build/run 需要的关键路径。
     pub fn load(project_dir: &Path) -> Result<Self, FamaError> {
-        let root = canonicalize_project_root(project_dir)?;
+        let root = resolve_project_root(project_dir)?;
         let settings_path = root.join("settings.toml");
         let settings_text = read_required_utf8_file(&settings_path)?;
         let settings = parse_settings(&settings_path, &settings_text)?;
@@ -70,7 +70,7 @@ impl ProjectContext {
 }
 
 /// 把用户给出的项目目录转成绝对路径，便于后续统一处理相对路径。
-fn canonicalize_project_root(project_dir: &Path) -> Result<PathBuf, FamaError> {
+pub fn resolve_project_root(project_dir: &Path) -> Result<PathBuf, FamaError> {
     if !project_dir.exists() {
         return Err(FamaError::MissingFile(project_dir.to_path_buf()));
     }
