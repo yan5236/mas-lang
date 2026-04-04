@@ -215,7 +215,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    /// 推导对象方法调用的返回值类型，并根据目标类型分派到列表或字典规则。
+    /// 推导对象方法调用的返回值类型，并根据目标类型分派到字符串、列表或字典规则。
     pub(super) fn infer_method_type(
         &mut self,
         target: &Expr,
@@ -224,15 +224,93 @@ impl<'a> SemanticAnalyzer<'a> {
         span: Span,
     ) -> Result<ValueType, CompilerError> {
         let target_type = self.infer_expression_type(target)?;
-        match target_type {
+        match target_type.clone() {
+            ValueType::String => self.infer_string_method_type(method, arguments, span),
             ValueType::List(element_type) => {
                 self.infer_list_method_type(element_type, method, arguments, span)
             }
             ValueType::Map(key_type, value_type) => {
                 self.infer_map_method_type(key_type, value_type, method, arguments, span)
             }
+            _ if method.supports_string_target() => Err(CompilerError::semantic_message(
+                format!(
+                    "字符串方法 `{}` 只能用于 `string` 类型，当前目标类型为 `{}`",
+                    method.display_name(),
+                    target_type.display_name()
+                ),
+                span,
+            )),
             _ => Err(CompilerError::semantic_message(
-                "当前方法只能用于列表或字典类型",
+                "当前方法只能用于字符串、列表或字典类型",
+                span,
+            )),
+        }
+    }
+
+    /// 推导字符串方法调用的返回值类型，并校验参数个数与参数类型规则。
+    fn infer_string_method_type(
+        &mut self,
+        method: MethodName,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        match method {
+            MethodName::Trim => {
+                if !arguments.is_empty() {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `trim` 不接受参数",
+                        span,
+                    ));
+                }
+                Ok(ValueType::String)
+            }
+            MethodName::Contains | MethodName::StartsWith | MethodName::EndsWith => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        format!(
+                            "字符串方法 `{}` 需要且只接受一个 string 参数",
+                            method.display_name()
+                        ),
+                        span,
+                    ));
+                }
+                if self.infer_expression_type(&arguments[0])? != ValueType::String {
+                    return Err(CompilerError::semantic_message(
+                        format!(
+                            "字符串方法 `{}` 的参数类型必须是 string",
+                            method.display_name()
+                        ),
+                        arguments[0].span(),
+                    ));
+                }
+                Ok(ValueType::Bool)
+            }
+            MethodName::Replace => {
+                if arguments.len() != 2 {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `replace` 需要且只接受两个 string 参数",
+                        span,
+                    ));
+                }
+                for argument in arguments {
+                    if self.infer_expression_type(argument)? != ValueType::String {
+                        return Err(CompilerError::semantic_message(
+                            "字符串方法 `replace` 的参数类型必须是 string",
+                            argument.span(),
+                        ));
+                    }
+                }
+                Ok(ValueType::String)
+            }
+            MethodName::Append
+            | MethodName::Remove
+            | MethodName::Pop
+            | MethodName::Sort
+            | MethodName::Reverse
+            | MethodName::Index
+            | MethodName::Keys
+            | MethodName::Values => Err(CompilerError::semantic_message(
+                format!("字符串类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
         }
@@ -294,7 +372,12 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
                 Ok(ValueType::Unit)
             }
-            MethodName::Keys | MethodName::Values => Err(CompilerError::semantic_message(
+            MethodName::Keys
+            | MethodName::Values
+            | MethodName::Trim
+            | MethodName::StartsWith
+            | MethodName::EndsWith
+            | MethodName::Replace => Err(CompilerError::semantic_message(
                 format!("列表类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -354,7 +437,11 @@ impl<'a> SemanticAnalyzer<'a> {
             | MethodName::Pop
             | MethodName::Sort
             | MethodName::Reverse
-            | MethodName::Index => Err(CompilerError::semantic_message(
+            | MethodName::Index
+            | MethodName::Trim
+            | MethodName::StartsWith
+            | MethodName::EndsWith
+            | MethodName::Replace => Err(CompilerError::semantic_message(
                 format!("字典类型不支持方法 `{}`", method.display_name()),
                 span,
             )),

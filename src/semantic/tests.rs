@@ -116,6 +116,52 @@ fn should_reject_invalid_map_method_argument_type() {
     assert!(error.contains("参数类型不匹配"));
 }
 
+/// 校验字符串方法集合能够在语义阶段推导出稳定的返回类型。
+#[test]
+fn should_accept_string_methods() {
+    analyze(
+        "func main():\n    var text = \"  你好，世界  \"\n    var cleaned:string = text.trim()\n    var has_hao:bool = cleaned.contains(\"好\")\n    var starts:bool = cleaned.starts_with(\"你好\")\n    var ends:bool = cleaned.ends_with(\"世界\")\n    var replaced:string = cleaned.replace(\"世界\", \"Mascript\")\n    print(cleaned)\n    print(has_hao)\n    print(starts)\n    print(ends)\n    print(replaced)\n",
+    )
+    .unwrap();
+}
+
+/// 校验字符串方法用于非字符串目标时会返回明确的目标类型诊断。
+#[test]
+fn should_reject_string_method_on_non_string_targets() {
+    let cases = [
+        ("var value:int = 1\nprint(value.trim())\n", "int"),
+        ("var value:float = 1.5\nprint(value.trim())\n", "float"),
+        ("var value:bool = true\nprint(value.trim())\n", "bool"),
+        ("var value:array<int,2>\nprint(value.trim())\n", "array<int,2>"),
+    ];
+
+    for (source, expected_type) in cases {
+        let error = analyze(source).unwrap_err();
+        assert!(error.contains("字符串方法 `trim` 只能用于 `string` 类型"), "{error}");
+        assert!(error.contains(expected_type), "{error}");
+    }
+}
+
+/// 校验字符串专属方法不会意外污染现有列表与字典方法集合。
+#[test]
+fn should_reject_string_only_method_on_list_and_map() {
+    let list_error = analyze("var items:list<int> = [1]\nitems.trim()\n").unwrap_err();
+    assert!(list_error.contains("列表类型不支持方法 `trim`"));
+
+    let map_error = analyze("var user:map<string,int> = {\"age\": 18}\nuser.trim()\n").unwrap_err();
+    assert!(map_error.contains("字典类型不支持方法 `trim`"));
+}
+
+/// 校验字符串方法会分别拦截参数数量错误与参数类型错误。
+#[test]
+fn should_reject_invalid_string_method_arguments() {
+    let missing_argument = analyze("var text = \"Mascript\"\nprint(text.contains())\n").unwrap_err();
+    assert!(missing_argument.contains("字符串方法 `contains` 需要且只接受一个 string 参数"));
+
+    let invalid_type = analyze("var text = \"Mascript\"\nprint(text.replace(\"M\", 1))\n").unwrap_err();
+    assert!(invalid_type.contains("字符串方法 `replace` 的参数类型必须是 string"));
+}
+
 /// 校验数组默认声明和元素访问能够通过语义分析。
 #[test]
 fn should_accept_array_declaration_and_index() {

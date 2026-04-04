@@ -1079,7 +1079,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }))
     }
 
-    /// 编译对象方法调用，并根据目标类型分派到列表或字典实现。
+    /// 编译对象方法调用，并根据目标类型分派到字符串、列表或字典实现。
     pub(super) fn compile_method_call(
         &mut self,
         target: &Expr,
@@ -1090,14 +1090,100 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let compiled_target = self.compile_expr(target)?;
         let target_value = self.expect_value(compiled_target)?;
         match target_value.value_type.clone() {
+            ValueType::String => {
+                self.compile_string_method_call(target_value, method, arguments, span)
+            }
             ValueType::List(_) => {
                 self.compile_list_method_call(target_value, method, arguments, span)
             }
             ValueType::Map(_, _) => {
                 self.compile_map_method_call(target_value, method, arguments, span)
             }
+            _ if method.supports_string_target() => Err(CompilerError::build_message(
+                format!(
+                    "字符串方法 `{}` 只能用于 `string` 类型",
+                    method.display_name()
+                ),
+                span,
+            )),
             _ => Err(CompilerError::build_message(
-                "当前方法只能用于列表或字典类型",
+                "当前方法只能用于字符串、列表或字典类型",
+                span,
+            )),
+        }
+    }
+
+    /// 编译字符串方法调用，并复用现有字符串 ABI 进行参数拆包和结果重建。
+    pub(super) fn compile_string_method_call(
+        &mut self,
+        target_value: TypedValue<'ctx>,
+        method: MethodName,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        let string_value = self.expect_string_value(target_value, span, "当前表达式不是字符串类型")?;
+        let mut target_args = self.build_string_runtime_arguments(string_value)?;
+
+        match method {
+            MethodName::Trim => Ok(CodegenValue::Value(
+                self.build_string_method_result_from_call(
+                    self.runtime.string_trim,
+                    &target_args,
+                    "call.string_trim",
+                )?,
+            )),
+            MethodName::Contains => {
+                let argument = self.compile_string_method_argument(&arguments[0])?;
+                target_args.extend(self.build_string_runtime_arguments(argument)?);
+                Ok(CodegenValue::Value(self.build_bool_result_from_call(
+                    self.runtime.string_contains,
+                    &target_args,
+                    "call.string_contains",
+                    "string.contains.bool",
+                )?))
+            }
+            MethodName::StartsWith => {
+                let argument = self.compile_string_method_argument(&arguments[0])?;
+                target_args.extend(self.build_string_runtime_arguments(argument)?);
+                Ok(CodegenValue::Value(self.build_bool_result_from_call(
+                    self.runtime.string_starts_with,
+                    &target_args,
+                    "call.string_starts_with",
+                    "string.starts_with.bool",
+                )?))
+            }
+            MethodName::EndsWith => {
+                let argument = self.compile_string_method_argument(&arguments[0])?;
+                target_args.extend(self.build_string_runtime_arguments(argument)?);
+                Ok(CodegenValue::Value(self.build_bool_result_from_call(
+                    self.runtime.string_ends_with,
+                    &target_args,
+                    "call.string_ends_with",
+                    "string.ends_with.bool",
+                )?))
+            }
+            MethodName::Replace => {
+                let from_value = self.compile_string_method_argument(&arguments[0])?;
+                let to_value = self.compile_string_method_argument(&arguments[1])?;
+                target_args.extend(self.build_string_runtime_arguments(from_value)?);
+                target_args.extend(self.build_string_runtime_arguments(to_value)?);
+                Ok(CodegenValue::Value(
+                    self.build_string_method_result_from_call(
+                        self.runtime.string_replace,
+                        &target_args,
+                        "call.string_replace",
+                    )?,
+                ))
+            }
+            MethodName::Append
+            | MethodName::Remove
+            | MethodName::Pop
+            | MethodName::Sort
+            | MethodName::Reverse
+            | MethodName::Index
+            | MethodName::Keys
+            | MethodName::Values => Err(CompilerError::build_message(
+                format!("字符串类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
         }
@@ -1201,7 +1287,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     value: value.into(),
                 }))
             }
-            MethodName::Keys | MethodName::Values => Err(CompilerError::build_message(
+            MethodName::Keys
+            | MethodName::Values
+            | MethodName::Trim
+            | MethodName::StartsWith
+            | MethodName::EndsWith
+            | MethodName::Replace => Err(CompilerError::build_message(
                 format!("列表类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -1277,7 +1368,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::Pop
             | MethodName::Sort
             | MethodName::Reverse
-            | MethodName::Index => Err(CompilerError::build_message(
+            | MethodName::Index
+            | MethodName::Trim
+            | MethodName::StartsWith
+            | MethodName::EndsWith
+            | MethodName::Replace => Err(CompilerError::build_message(
                 format!("字典类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -1494,6 +1589,40 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
+    /// 把字符串运行时调用结果恢复为后端内部的带类型字符串值。
+    pub(super) fn build_string_method_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let out_len_ptr = self.allocate_local(&ValueType::Int, "string.method.out_len")?;
+        self.map_builder(
+            self.builder
+                .build_store(out_len_ptr, self.context.i64_type().const_zero()),
+        )?;
+
+        let mut call_args = args.to_vec();
+        call_args.push(out_len_ptr.into());
+        let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
+        let pointer = call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+        let length = self
+            .map_builder(self.builder.build_load(
+                self.context.i64_type(),
+                out_len_ptr,
+                "load.string.method.len",
+            ))?
+            .into_int_value();
+
+        Ok(TypedValue {
+            value_type: ValueType::String,
+            value: self.build_runtime_string(pointer, length)?.into(),
+        })
+    }
+
     /// 处理字符串列表读取与弹出调用，使用额外长度输出参数重建内部字符串值。
     pub(super) fn build_string_list_result_from_call(
         &mut self,
@@ -1525,6 +1654,52 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(TypedValue {
             value_type: ValueType::String,
             value: self.build_runtime_string(pointer, length)?.into(),
+        })
+    }
+
+    /// 把字符串结构值拆成运行时函数统一使用的 `ptr + len` 参数列表。
+    pub(super) fn build_string_runtime_arguments(
+        &self,
+        value: StructValue<'ctx>,
+    ) -> Result<Vec<BasicMetadataValueEnum<'ctx>>, CompilerError> {
+        let ptr = self.extract_string_part(value, 0, "string.runtime.ptr")?;
+        let len = self.extract_string_part(value, 1, "string.runtime.len")?;
+        Ok(vec![ptr.into(), len.into()])
+    }
+
+    /// 编译字符串方法参数，并确保参与调用的参数本身也是字符串值。
+    pub(super) fn compile_string_method_argument(
+        &mut self,
+        argument: &Expr,
+    ) -> Result<StructValue<'ctx>, CompilerError> {
+        let compiled_argument = self.compile_expr(argument)?;
+        let argument_value = self.expect_value(compiled_argument)?;
+        self.expect_string_value(
+            argument_value,
+            argument.span(),
+            "字符串方法参数必须是字符串类型",
+        )
+    }
+
+    /// 把运行时返回的 `i8` 布尔值恢复为后端内部统一使用的布尔类型。
+    pub(super) fn build_bool_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+        compare_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let call = self.map_builder(self.builder.build_call(function, args, call_name))?;
+        let raw = call.try_as_basic_value().unwrap_basic().into_int_value();
+        let value = self.map_builder(self.builder.build_int_compare(
+            inkwell::IntPredicate::NE,
+            raw,
+            self.context.i8_type().const_zero(),
+            compare_name,
+        ))?;
+        Ok(TypedValue {
+            value_type: ValueType::Bool,
+            value: value.into(),
         })
     }
 
@@ -1597,6 +1772,19 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             (*key_type).clone(),
             (*value_type).clone(),
         ))
+    }
+
+    /// 校验表达式结果是否为字符串值，并返回内部复用的 `{ ptr, len }` 结构。
+    pub(super) fn expect_string_value(
+        &self,
+        value: TypedValue<'ctx>,
+        span: Span,
+        message: &str,
+    ) -> Result<StructValue<'ctx>, CompilerError> {
+        if value.value_type != ValueType::String {
+            return Err(CompilerError::build_message(message, span));
+        }
+        Ok(value.value.into_struct_value())
     }
 
     /// 校验一个值类型是否能作为当前阶段的列表元素类型。

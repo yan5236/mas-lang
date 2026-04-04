@@ -55,6 +55,25 @@ fn should_emit_string_equals_runtime_symbol() {
     assert!(ir.contains("string_equals"));
 }
 
+/// 校验字符串实例方法会绑定到对应的运行时符号，并区分字符串返回值与布尔返回值。
+#[test]
+fn should_emit_string_method_runtime_symbols() {
+    let (source, program, _) = parse_program(
+        "func main():\n    var text = \"  你好，世界  \"\n    var cleaned = text.trim()\n    print(cleaned.contains(\"好\"))\n    print(cleaned.starts_with(\"你好\"))\n    print(cleaned.ends_with(\"世界\"))\n    print(cleaned.replace(\"世界\", \"Mascript\"))\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("string_trim"));
+    assert!(ir.contains("string_contains"));
+    assert!(ir.contains("string_starts_with"));
+    assert!(ir.contains("string_ends_with"));
+    assert!(ir.contains("string_replace"));
+    assert!(ir.contains("call ptr @string_trim("));
+    assert!(ir.contains("call i8 @string_contains("));
+    assert!(ir.contains("call i8 @string_starts_with("));
+    assert!(ir.contains("call i8 @string_ends_with("));
+    assert!(ir.contains("call ptr @string_replace("));
+}
+
 /// 校验顶层变量与同名局部变量共存时，后端仍会同时生成全局与局部存储。
 #[test]
 fn should_keep_top_level_and_local_storage_separate() {

@@ -247,7 +247,7 @@ pub struct MapEntry {
     pub span: Span,
 }
 
-/// 表示容器对象当前阶段支持的方法名称。
+/// 表示字符串、列表与字典对象当前阶段支持的方法名称。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MethodName {
     Append,
@@ -259,6 +259,10 @@ pub enum MethodName {
     Contains,
     Keys,
     Values,
+    Trim,
+    StartsWith,
+    EndsWith,
+    Replace,
 }
 
 impl MethodName {
@@ -274,8 +278,20 @@ impl MethodName {
             "contains" => Some(Self::Contains),
             "keys" => Some(Self::Keys),
             "values" => Some(Self::Values),
+            "trim" => Some(Self::Trim),
+            "starts_with" => Some(Self::StartsWith),
+            "ends_with" => Some(Self::EndsWith),
+            "replace" => Some(Self::Replace),
             _ => None,
         }
+    }
+
+    /// 返回该方法是否允许以 `string` 作为调用目标。
+    pub fn supports_string_target(self) -> bool {
+        matches!(
+            self,
+            Self::Trim | Self::Contains | Self::StartsWith | Self::EndsWith | Self::Replace
+        )
     }
 
     /// 返回方法在错误消息中使用的稳定文本。
@@ -290,6 +306,10 @@ impl MethodName {
             Self::Contains => "contains",
             Self::Keys => "keys",
             Self::Values => "values",
+            Self::Trim => "trim",
+            Self::StartsWith => "starts_with",
+            Self::EndsWith => "ends_with",
+            Self::Replace => "replace",
         }
     }
 }

@@ -1368,6 +1368,17 @@ mod tests {
         Parser::new(tokens, &settings).parse_program().unwrap()
     }
 
+    /// 先做词法分析和语法分析，并把失败结果渲染为稳定的中文诊断文本。
+    fn parse_error(text: &str) -> String {
+        let settings = CompilerSettings::new(UiLanguage::ZhCn);
+        let source = SourceFile::new("<test>", text.to_string());
+        let tokens = Lexer::new(&source, &settings).tokenize().unwrap();
+        Parser::new(tokens, &settings)
+            .parse_program()
+            .unwrap_err()
+            .render(settings.language, Some(&source))
+    }
+
     /// 校验函数定义能够被正确解析为顶层语句节点。
     #[test]
     fn should_parse_function_declaration() {
@@ -1529,6 +1540,38 @@ mod tests {
             panic!("第三条语句不是方法调用");
         };
         assert_eq!(*method, MethodName::Contains);
+    }
+
+    /// 校验字符串实例方法会被统一解析为 `Expr::MethodCall` 节点。
+    #[test]
+    fn should_parse_string_method_expressions() {
+        let program = parse(
+            "var text = \"  你好，世界  \"\ntext.trim()\ntext.contains(\"好\")\ntext.starts_with(\" 你\")\ntext.ends_with(\"界  \")\ntext.replace(\"世界\", \"Mascript\")\n",
+        );
+        let expected_methods = [
+            MethodName::Trim,
+            MethodName::Contains,
+            MethodName::StartsWith,
+            MethodName::EndsWith,
+            MethodName::Replace,
+        ];
+
+        for (statement, expected_method) in program.statements[1..].iter().zip(expected_methods.iter()) {
+            let Stmt::ExprStmt { expr, .. } = statement else {
+                panic!("字符串方法语句不是表达式语句");
+            };
+            let Expr::MethodCall { method, .. } = expr else {
+                panic!("字符串方法语句没有解析成方法调用");
+            };
+            assert_eq!(method, expected_method);
+        }
+    }
+
+    /// 校验未知的字符串对象方法仍会给出明确的未支持语法诊断。
+    #[test]
+    fn should_reject_unsupported_string_method_name() {
+        let error = parse_error("var text = \"Mascript\"\ntext.lowercase()\n");
+        assert!(error.contains("当前阶段不支持对象方法 `lowercase`"));
     }
 
     /// 校验安全转换结果的 `ok/value` 只读属性能够被正确解析。

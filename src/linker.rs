@@ -241,6 +241,7 @@ mod tests {
             "branch-return-matrix.ms" => include_str!("testdata/branch-return-matrix.ms.txt"),
             "array-matrix.ms" => include_str!("testdata/array-matrix.ms.txt"),
             "string-list-matrix.ms" => include_str!("testdata/string-list-matrix.ms.txt"),
+            "string-method-matrix.ms" => include_str!("testdata/string-method-matrix.ms.txt"),
             "short-circuit-guard.ms" => include_str!("testdata/short-circuit-guard.ms.txt"),
             other => panic!("未知的 msceshi 样例 `{other}`"),
         }
@@ -395,6 +396,13 @@ mod tests {
             output,
             "3\ngamma\ntrue\n2\nalpha\nbeta\nbeta\n2\ndelta\ngamma\ngamma\ndelta\ngamma\n"
         );
+    }
+
+    /// 校验 `msceshi` 中字符串方法样例能够处理中文 UTF-8 文本，并覆盖空替换保护逻辑。
+    #[test]
+    fn should_build_and_run_msceshi_string_method_matrix() {
+        let output = build_and_run_msceshi_fixture("string-method-matrix.ms");
+        assert_eq!(output, "你好，世界\ntrue\ntrue\ntrue\n你好，Mascript\n中文\n");
     }
 
     /// 校验 `msceshi` 中短路保护样例运行时不会错误求值右侧危险表达式，避免隐藏的越界/空指针回归。

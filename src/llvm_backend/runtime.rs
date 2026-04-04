@@ -105,6 +105,66 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ),
                 None,
             ),
+            string_trim: module.add_function(
+                "string_trim",
+                ptr_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], false),
+                None,
+            ),
+            string_contains: module.add_function(
+                "string_contains",
+                i8_type.fn_type(
+                    &[
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                        i64_type.into(),
+                    ],
+                    false,
+                ),
+                None,
+            ),
+            string_starts_with: module.add_function(
+                "string_starts_with",
+                i8_type.fn_type(
+                    &[
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                        i64_type.into(),
+                    ],
+                    false,
+                ),
+                None,
+            ),
+            string_ends_with: module.add_function(
+                "string_ends_with",
+                i8_type.fn_type(
+                    &[
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                        i64_type.into(),
+                    ],
+                    false,
+                ),
+                None,
+            ),
+            string_replace: module.add_function(
+                "string_replace",
+                ptr_type.fn_type(
+                    &[
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                        i64_type.into(),
+                        ptr_type.into(),
+                    ],
+                    false,
+                ),
+                None,
+            ),
             list_create: module.add_function(
                 "list_create",
                 ptr_type.fn_type(&[i8_type.into()], false),

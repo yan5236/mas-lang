@@ -113,6 +113,72 @@ pub extern "C" fn string_equals(
     u8::from(left_bytes == right_bytes)
 }
 
+/// 去除字符串首尾空白字符，并把结果重新封装成运行时字符串 ABI。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_trim(ptr: *const u8, len: u64, out_len: *mut u64) -> *const u8 {
+    let text = parse_runtime_text(ptr, len);
+    boxed_string_into_raw(text.trim().to_string(), out_len)
+}
+
+/// 判断目标字符串是否包含指定子串，结果继续使用 `u8` 表示布尔值。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_contains(
+    ptr: *const u8,
+    len: u64,
+    needle_ptr: *const u8,
+    needle_len: u64,
+) -> u8 {
+    let text = parse_runtime_text(ptr, len);
+    let needle = parse_runtime_text(needle_ptr, needle_len);
+    u8::from(text.contains(needle))
+}
+
+/// 判断目标字符串是否以给定前缀开头，并保持 UTF-8 文本语义。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_starts_with(
+    ptr: *const u8,
+    len: u64,
+    prefix_ptr: *const u8,
+    prefix_len: u64,
+) -> u8 {
+    let text = parse_runtime_text(ptr, len);
+    let prefix = parse_runtime_text(prefix_ptr, prefix_len);
+    u8::from(text.starts_with(prefix))
+}
+
+/// 判断目标字符串是否以给定后缀结尾，并保持 UTF-8 文本语义。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_ends_with(
+    ptr: *const u8,
+    len: u64,
+    suffix_ptr: *const u8,
+    suffix_len: u64,
+) -> u8 {
+    let text = parse_runtime_text(ptr, len);
+    let suffix = parse_runtime_text(suffix_ptr, suffix_len);
+    u8::from(text.ends_with(suffix))
+}
+
+/// 按从左到右的非重叠匹配规则替换子串，并在空模式时直接返回原字符串。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_replace(
+    ptr: *const u8,
+    len: u64,
+    from_ptr: *const u8,
+    from_len: u64,
+    to_ptr: *const u8,
+    to_len: u64,
+    out_len: *mut u64,
+) -> *const u8 {
+    let text = parse_runtime_text(ptr, len);
+    let from = parse_runtime_text(from_ptr, from_len);
+    if from.is_empty() {
+        return boxed_string_into_raw(text.to_string(), out_len);
+    }
+    let to = parse_runtime_text(to_ptr, to_len);
+    boxed_string_into_raw(text.replace(from, to), out_len)
+}
+
 /// 把运行时创建的 UTF-8 文本缓冲区转换成返回给 LLVM 后端的稳定字符串 ABI。
 fn boxed_string_into_raw(text: String, out_len: *mut u64) -> *const u8 {
     if out_len.is_null() {
@@ -1156,5 +1222,16 @@ mod tests {
     fn should_not_include_utf8_bom() {
         let bytes = bootstrap_source().as_bytes();
         assert!(!bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
+    }
+
+    /// 校验运行时引导源码已经包含字符串方法集合对应的导出符号。
+    #[test]
+    fn should_include_string_method_runtime_symbols() {
+        let source = bootstrap_source();
+        assert!(source.contains("pub extern \"C\" fn string_trim"));
+        assert!(source.contains("pub extern \"C\" fn string_contains"));
+        assert!(source.contains("pub extern \"C\" fn string_starts_with"));
+        assert!(source.contains("pub extern \"C\" fn string_ends_with"));
+        assert!(source.contains("pub extern \"C\" fn string_replace"));
     }
 }
