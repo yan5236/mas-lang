@@ -113,6 +113,7 @@ impl<'a> SemanticAnalyzer<'a> {
             return_type,
             body,
             span,
+            ..
         } = statement
         else {
             unreachable!("只有函数定义语句会进入该分支");

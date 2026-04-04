@@ -3,6 +3,10 @@ use crate::source::Span;
 /// 表示词法单元的粗粒度类别，供语法分析阶段快速分支判断。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TokenTag {
+    Import,
+    Export,
+    Pub,
+    As,
     Var,
     Const,
     Func,
@@ -61,6 +65,10 @@ pub enum TokenTag {
 /// 保存词法单元的具体值，必要时携带字面量或标识符文本。
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
+    Import,
+    Export,
+    Pub,
+    As,
     Var,
     Const,
     Func,
@@ -120,6 +128,10 @@ impl TokenKind {
     /// 返回词法单元所属的粗粒度类别，便于忽略其内部载荷参与判断。
     pub fn tag(&self) -> TokenTag {
         match self {
+            Self::Import => TokenTag::Import,
+            Self::Export => TokenTag::Export,
+            Self::Pub => TokenTag::Pub,
+            Self::As => TokenTag::As,
             Self::Var => TokenTag::Var,
             Self::Const => TokenTag::Const,
             Self::Func => TokenTag::Func,

@@ -14,6 +14,44 @@ pub struct Parameter {
     pub span: Span,
 }
 
+/// 表示 `import` 使用的模块路径及其源码区间。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImportPath {
+    pub segments: Vec<String>,
+    pub span: Span,
+}
+
+impl ImportPath {
+    /// 返回当前模块路径是否显式使用了 `local.` 前缀。
+    pub fn is_local(&self) -> bool {
+        self.segments.first().is_some_and(|segment| segment == "local")
+    }
+
+    /// 返回去除 `local.` 前缀后的真实模块路径片段。
+    pub fn normalized_segments(&self) -> &[String] {
+        if self.is_local() {
+            &self.segments[1..]
+        } else {
+            &self.segments
+        }
+    }
+}
+
+/// 表示具名导入中的单个导入项，支持可选别名。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImportItem {
+    pub name: String,
+    pub alias: Option<String>,
+    pub span: Span,
+}
+
+/// 表示 `import` 支持的导入形式：具名导入或全部导入。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ImportKind {
+    Named(Vec<ImportItem>),
+    All,
+}
+
 /// 表示绑定声明的可变性，用于区分 `var` 与 `const`。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BindingKind {
@@ -48,13 +86,25 @@ pub struct ConditionalBranch {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     FunctionDecl {
+        is_public: bool,
         name: String,
         parameters: Vec<Parameter>,
         return_type: Option<TypeName>,
         body: Vec<Stmt>,
         span: Span,
     },
+    Import {
+        path: ImportPath,
+        kind: ImportKind,
+        span: Span,
+    },
+    ExportImport {
+        path: ImportPath,
+        kind: ImportKind,
+        span: Span,
+    },
     VarDecl {
+        is_public: bool,
         binding_kind: BindingKind,
         name: String,
         annotation: Option<TypeName>,
@@ -135,6 +185,8 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Self::FunctionDecl { span, .. }
+            | Self::Import { span, .. }
+            | Self::ExportImport { span, .. }
             | Self::VarDecl { span, .. }
             | Self::Assign { span, .. }
             | Self::If { span, .. }

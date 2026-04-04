@@ -1,6 +1,7 @@
 use crate::ast::{
     AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, Expr, Literal, MapEntry,
-    MethodName, Parameter, Program, PropertyName, Stmt, TypeName, UnaryOp,
+    ImportItem, ImportKind, ImportPath, MethodName, Parameter, Program, PropertyName, Stmt,
+    TypeName, UnaryOp,
 };
 use crate::diagnostic::CompilerError;
 use crate::lexer::Lexer;
@@ -52,14 +53,24 @@ impl<'a> Parser<'a> {
 
     /// 根据当前词法单元判断应进入哪一种语句分支。
     fn parse_statement(&mut self) -> Result<Stmt, CompilerError> {
+        if self.match_tag(TokenTag::Export) {
+            self.consume(TokenTag::Import, "`export` 后必须跟 `import`")?;
+            return self.parse_import_statement(true);
+        }
+        if self.match_tag(TokenTag::Import) {
+            return self.parse_import_statement(false);
+        }
+        if self.match_tag(TokenTag::Pub) {
+            return self.parse_public_statement();
+        }
         if self.match_tag(TokenTag::Func) {
-            return self.parse_function_declaration();
+            return self.parse_function_declaration(false);
         }
         if self.match_tag(TokenTag::Var) {
-            return self.parse_binding_declaration(BindingKind::Var);
+            return self.parse_binding_declaration(BindingKind::Var, false);
         }
         if self.match_tag(TokenTag::Const) {
-            return self.parse_binding_declaration(BindingKind::Const);
+            return self.parse_binding_declaration(BindingKind::Const, false);
         }
         if self.match_tag(TokenTag::If) {
             return self.parse_if_statement();
@@ -90,8 +101,26 @@ impl<'a> Parser<'a> {
         self.parse_expression_statement()
     }
 
+    /// 解析 `pub func/var/const` 公开声明，其他语句会被拒绝。
+    fn parse_public_statement(&mut self) -> Result<Stmt, CompilerError> {
+        if self.match_tag(TokenTag::Func) {
+            return self.parse_function_declaration(true);
+        }
+        if self.match_tag(TokenTag::Var) {
+            return self.parse_binding_declaration(BindingKind::Var, true);
+        }
+        if self.match_tag(TokenTag::Const) {
+            return self.parse_binding_declaration(BindingKind::Const, true);
+        }
+
+        Err(CompilerError::syntax_message(
+            "`pub` 只能用于顶层 `func`、`var` 或 `const` 声明",
+            self.peek().span,
+        ))
+    }
+
     /// 解析 `func name(args) [-> type] :` 形式的函数定义。
-    fn parse_function_declaration(&mut self) -> Result<Stmt, CompilerError> {
+    fn parse_function_declaration(&mut self, is_public: bool) -> Result<Stmt, CompilerError> {
         let start = self.previous().span;
         let (name, _) = self.consume_identifier("函数定义缺少函数名")?;
         self.consume(TokenTag::LeftParen, "函数定义缺少左括号 `(`")?;
@@ -122,6 +151,7 @@ impl<'a> Parser<'a> {
         let (body, body_span) = self.parse_suite("函数定义缺少函数体")?;
 
         Ok(Stmt::FunctionDecl {
+            is_public,
             name,
             parameters,
             return_type,
@@ -134,6 +164,7 @@ impl<'a> Parser<'a> {
     fn parse_binding_declaration(
         &mut self,
         binding_kind: BindingKind,
+        is_public: bool,
     ) -> Result<Stmt, CompilerError> {
         let start = self.previous().span;
         let declaration_name = binding_kind.keyword();
@@ -163,11 +194,77 @@ impl<'a> Parser<'a> {
             .map(|expr| Span::merge(start, expr.span()))
             .unwrap_or_else(|| Span::merge(start, self.previous().span));
         Ok(Stmt::VarDecl {
+            is_public,
             binding_kind,
             name,
             annotation,
             initializer,
             span,
+        })
+    }
+
+    /// 解析 `import` 或 `export import` 语句。
+    fn parse_import_statement(&mut self, is_export: bool) -> Result<Stmt, CompilerError> {
+        let start = self.previous().span;
+        let path = self.parse_import_path()?;
+        let kind = if self.match_tag(TokenTag::Dot) {
+            self.consume(TokenTag::Star, "全部导入缺少 `*`")?;
+            ImportKind::All
+        } else {
+            self.consume(TokenTag::LeftBrace, "导入语句缺少左花括号 `{`")?;
+            let mut items = Vec::new();
+            if !self.check(TokenTag::RightBrace) {
+                loop {
+                    let (name, item_span) = self.consume_identifier("导入项缺少名称")?;
+                    let alias = if self.match_tag(TokenTag::As) {
+                        Some(self.consume_identifier("别名导入缺少别名")?.0)
+                    } else {
+                        None
+                    };
+                    items.push(ImportItem {
+                        name,
+                        alias,
+                        span: item_span,
+                    });
+                    if !self.match_tag(TokenTag::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.consume(TokenTag::RightBrace, "导入语句缺少右花括号 `}`")?;
+            ImportKind::Named(items)
+        };
+        let span = Span::merge(start, self.previous().span);
+
+        if is_export {
+            Ok(Stmt::ExportImport { path, kind, span })
+        } else {
+            Ok(Stmt::Import { path, kind, span })
+        }
+    }
+
+    /// 解析 `foo.bar` 或 `local.foo.bar` 形式的模块路径。
+    fn parse_import_path(&mut self) -> Result<ImportPath, CompilerError> {
+        let (first_segment, start) = self.consume_identifier("导入路径缺少模块名")?;
+        let mut segments = vec![first_segment];
+        let mut end = start;
+
+        while self.check(TokenTag::Dot)
+            && self
+                .peek_next()
+                .kind
+                .tag()
+                .eq(&TokenTag::Identifier)
+        {
+            self.advance();
+            let (segment, span) = self.consume_identifier("导入路径缺少模块片段")?;
+            segments.push(segment);
+            end = span;
+        }
+
+        Ok(ImportPath {
+            segments,
+            span: Span::merge(start, end),
         })
     }
 
@@ -1353,8 +1450,8 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::Parser;
     use crate::ast::{
-        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, MethodName, PropertyName, Stmt,
-        TypeName, UnaryOp,
+        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, ImportKind, MethodName,
+        PropertyName, Stmt, TypeName, UnaryOp,
     };
     use crate::lexer::Lexer;
     use crate::settings::{CompilerSettings, UiLanguage};
@@ -1394,6 +1491,33 @@ mod tests {
             panic!("首条语句不是绑定声明");
         };
         assert_eq!(*binding_kind, BindingKind::Const);
+    }
+
+    /// 校验具名导入与别名导入能够被正确解析为独立语句节点。
+    #[test]
+    fn should_parse_named_import_with_alias() {
+        let program = parse("import utils.math { add as plus, sub }\n");
+        let Stmt::Import { path, kind, .. } = &program.statements[0] else {
+            panic!("首条语句不是导入语句");
+        };
+        assert_eq!(path.segments, vec!["utils", "math"]);
+        let ImportKind::Named(items) = kind else {
+            panic!("导入语句没有解析为具名导入");
+        };
+        assert_eq!(items[0].name, "add");
+        assert_eq!(items[0].alias.as_deref(), Some("plus"));
+        assert_eq!(items[1].name, "sub");
+    }
+
+    /// 校验 `export import` 与全部导入语法能够被正确识别。
+    #[test]
+    fn should_parse_export_import_all() {
+        let program = parse("export import local.utils.*\n");
+        let Stmt::ExportImport { path, kind, .. } = &program.statements[0] else {
+            panic!("首条语句不是导出导入语句");
+        };
+        assert_eq!(path.segments, vec!["local", "utils"]);
+        assert!(matches!(kind, ImportKind::All));
     }
 
     /// 校验 `if / elif / else` 链能够被解析为统一条件分支节点。

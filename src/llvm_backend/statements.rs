@@ -22,6 +22,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 编译单条语句，并返回当前基本块是否已经结束。
     pub(super) fn compile_statement(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
         match statement {
+            Stmt::Import { .. } | Stmt::ExportImport { .. } => Ok(false),
             Stmt::FunctionDecl { .. } => Ok(false),
             Stmt::VarDecl {
                 binding_kind,
@@ -29,6 +30,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 annotation,
                 initializer,
                 span,
+                ..
             } => {
                 let expected = annotation.as_ref().map(value_type_from_annotation);
                 let value = match (initializer.as_ref(), expected.as_ref()) {

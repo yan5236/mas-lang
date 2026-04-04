@@ -179,6 +179,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 return_type,
                 body,
                 span,
+                ..
             } = statement
             {
                 self.compile_user_function(name, parameters, return_type.clone(), body, *span)?;

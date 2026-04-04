@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -54,7 +55,11 @@ struct UiSection {
 
 /// 返回约定的用户级设置文件路径。
 fn settings_path() -> PathBuf {
-    PathBuf::from(r"C:\Users\nanhai\.mascript\setting.toml")
+    if let Some(custom_home) = env::var_os("FAMA_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(custom_home).join("setting.toml");
+    }
+
+    resolve_home_directory().join(".fama").join("setting.toml")
 }
 
 /// 从用户目录读取编译器设置；当配置缺失或无效时回退到默认值。
@@ -118,6 +123,28 @@ fn parse_settings_text(text: &str) -> Result<CompilerSettings, CompilerError> {
     })?;
 
     Ok(CompilerSettings::new(language))
+}
+
+/// 解析当前用户的 home 目录，供默认全局设置路径拼接使用。
+fn resolve_home_directory() -> PathBuf {
+    if let Some(path) = env::var_os("HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
+
+    if let Some(path) = env::var_os("USERPROFILE").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
+
+    if let (Some(home_drive), Some(home_path)) = (
+        env::var_os("HOMEDRIVE").filter(|value| !value.is_empty()),
+        env::var_os("HOMEPATH").filter(|value| !value.is_empty()),
+    ) {
+        let mut path = PathBuf::from(home_drive);
+        path.push(home_path);
+        return path;
+    }
+
+    PathBuf::from(".")
 }
 
 #[cfg(test)]

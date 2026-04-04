@@ -330,6 +330,10 @@ impl<'a> Lexer<'a> {
 
         let text = &self.source.text()[start..self.position];
         let kind = match text {
+            "import" => TokenKind::Import,
+            "export" => TokenKind::Export,
+            "pub" => TokenKind::Pub,
+            "as" => TokenKind::As,
             "var" => TokenKind::Var,
             "const" => TokenKind::Const,
             "func" => TokenKind::Func,
