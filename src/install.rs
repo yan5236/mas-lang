@@ -87,7 +87,7 @@ impl Installer {
             &source_root,
         )?;
 
-        if self.locked_dependencies.contains_key(dependency_name) {
+        if self.should_reuse_locked_dependency(dependency_name) {
             return Ok(());
         }
 
@@ -99,9 +99,8 @@ impl Installer {
 
         let store_dir =
             dependency_store_dir(&self.project_root, dependency_name, &dependency_manifest.version);
-        if !store_dir.exists() {
-            copy_dependency_project(&source_root, &store_dir)?;
-        }
+        prepare_dependency_store(&store_dir)?;
+        copy_dependency_project(&source_root, &store_dir)?;
 
         self.source_paths
             .insert(dependency_name.to_string(), source_root.clone());
@@ -177,6 +176,16 @@ impl Installer {
 
         Ok(())
     }
+
+    /// 判断锁文件中的依赖是否可以直接复用，避免锁文件存在但缓存缺失时被错误短路。
+    fn should_reuse_locked_dependency(&self, dependency_name: &str) -> bool {
+        self.locked_dependencies
+            .get(dependency_name)
+            .is_some_and(|dependency| {
+                resolve_locked_store_dir(&self.project_root, dependency)
+                    .is_some_and(|store_dir| is_dependency_store_usable(&store_dir))
+            })
+    }
 }
 
 /// 复制依赖项目到平铺缓存目录，并显式忽略依赖自身的缓存和构建输出目录。
@@ -215,6 +224,40 @@ fn copy_directory_recursive(source_root: &Path, target_root: &Path) -> Result<()
 
         fs::copy(&source_path, &target_path)
             .map_err(|source| FamaError::io(target_path.clone(), source))?;
+    }
+
+    Ok(())
+}
+
+/// 根据锁文件中的 `store_path` 还原依赖缓存目录的绝对路径，缺失时回退到固定平铺规则。
+fn resolve_locked_store_dir(project_root: &Path, dependency: &LockedDependency) -> Option<PathBuf> {
+    let trimmed = dependency.store_path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(project_root.join(trimmed.replace('/', "\\")))
+}
+
+/// 判断依赖缓存目录是否包含最小可用结构，避免复用空目录或半拷贝目录。
+fn is_dependency_store_usable(store_dir: &Path) -> bool {
+    store_dir.is_dir() && store_dir.join("mod.yml").is_file() && store_dir.join("src").is_dir()
+}
+
+/// 在重新复制依赖前清理残缺缓存目录，保证目标目录处于干净状态。
+fn prepare_dependency_store(store_dir: &Path) -> Result<(), FamaError> {
+    if is_dependency_store_usable(store_dir) {
+        fs::remove_dir_all(store_dir).map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
+        return Ok(());
+    }
+
+    if store_dir.exists() {
+        if store_dir.is_dir() {
+            fs::remove_dir_all(store_dir)
+                .map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
+        } else {
+            fs::remove_file(store_dir).map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
+        }
     }
 
     Ok(())
@@ -358,5 +401,41 @@ mod tests {
 
         let error = install_project_dependencies(&app_root).unwrap_err();
         assert!(error.to_string().contains("循环依赖"));
+    }
+
+    /// 校验锁文件命中但缓存目录缺失时，安装流程会重新复制依赖而不是被旧状态短路。
+    #[test]
+    fn should_reinstall_when_lock_file_exists_but_store_dir_is_missing() {
+        let workspace = create_temp_dir("repair-missing-store");
+        let app_root = workspace.join("app");
+        let lib_root = workspace.join("time");
+        create_project(&app_root, "app", "0.1.0");
+        create_project(&lib_root, "time", "0.1.0");
+
+        save_project_manifest(
+            &app_root,
+            &ProjectManifest {
+                name: "app".to_string(),
+                version: "0.1.0".to_string(),
+                dependencies: std::collections::BTreeMap::from([(
+                    "time".to_string(),
+                    DependencySpec {
+                        path: "../time".to_string(),
+                        version: "0.1.0".to_string(),
+                    },
+                )]),
+            },
+        )
+        .expect("更新应用依赖失败");
+
+        install_project_dependencies(&app_root).expect("首次安装依赖失败");
+        let store_dir = app_root.join("mod_module").join("time@0.1.0");
+        fs::remove_dir_all(&store_dir).expect("删除缓存目录失败");
+
+        install_project_dependencies(&app_root).expect("补装依赖失败");
+
+        assert!(store_dir.is_dir());
+        assert!(store_dir.join("mod.yml").is_file());
+        assert!(store_dir.join("src").is_dir());
     }
 }
