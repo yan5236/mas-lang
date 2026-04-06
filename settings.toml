@@ -6,3 +6,11 @@ version = "0.1.0"
 entry = "src/main.ms"
 output = "build"
 opt-level = 2
+
+[native]
+include = ["native/include"]
+
+[native.sources]
+common = ["native/common/time_common.c"]
+windows = ["native/platform/windows/time_windows.c"]
+posix = ["native/platform/posix/time_posix.c"]
