@@ -10,7 +10,10 @@ impl<'a> SemanticAnalyzer<'a> {
         self.collect_function_signatures(program)?;
 
         for statement in &program.statements {
-            if !matches!(statement, Stmt::FunctionDecl { .. }) {
+            if !matches!(
+                statement,
+                Stmt::FunctionDecl { .. } | Stmt::ExternFunctionDecl { .. }
+            ) {
                 self.analyze_statement(statement)?;
             }
         }
@@ -29,15 +32,22 @@ impl<'a> SemanticAnalyzer<'a> {
     /// 预先收集所有顶层函数签名，支持前向调用和递归调用。
     fn collect_function_signatures(&mut self, program: &Program) -> Result<(), CompilerError> {
         for statement in &program.statements {
-            let Stmt::FunctionDecl {
-                name,
-                parameters,
-                return_type,
-                span,
-                ..
-            } = statement
-            else {
-                continue;
+            let (name, parameters, return_type, span, is_extern) = match statement {
+                Stmt::FunctionDecl {
+                    name,
+                    parameters,
+                    return_type,
+                    span,
+                    ..
+                } => (name, parameters, return_type, span, false),
+                Stmt::ExternFunctionDecl {
+                    name,
+                    parameters,
+                    return_type,
+                    span,
+                    ..
+                } => (name, parameters, return_type, span, true),
+                _ => continue,
             };
 
             if matches!(
@@ -76,11 +86,12 @@ impl<'a> SemanticAnalyzer<'a> {
                 ValueType::Unit
             };
 
-            self.functions.insert(
+                self.functions.insert(
                 name.clone(),
                 FunctionSignature {
                     parameter_types,
                     return_type,
+                    is_extern,
                     span: *span,
                 },
             );

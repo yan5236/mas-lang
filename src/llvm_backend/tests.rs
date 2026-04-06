@@ -164,6 +164,21 @@ fn should_emit_safe_convert_runtime_symbols() {
     assert!(ir.contains("call i8 @try_string_to_bool("));
 }
 
+/// 校验 `extern func` 会直接绑定到同名外部符号，并对 `string` 返回值保留结构体 ABI。
+#[test]
+fn should_emit_extern_function_symbols() {
+    let (source, program, _) = parse_program(
+        "extern func host_now() -> int\nextern func host_name() -> string\nextern func host_sleep(ms:int)\nfunc main():\n    print(host_now())\n    print(host_name())\n    host_sleep(1)\n",
+    );
+    let ir = compile_program_to_ir(&source, &program).unwrap();
+    assert!(ir.contains("declare i64 @host_now()"));
+    assert!(ir.contains("declare ptr @host_name(ptr)"));
+    assert!(ir.contains("declare void @host_sleep(i64)"));
+    assert!(ir.contains("call i64 @host_now("));
+    assert!(ir.contains("call ptr @host_name("));
+    assert!(ir.contains("call void @host_sleep("));
+}
+
 /// 校验列表操作会引用新增的列表运行时符号。
 #[test]
 fn should_emit_list_runtime_symbols() {

@@ -333,6 +333,7 @@ impl<'a> Lexer<'a> {
             "import" => TokenKind::Import,
             "export" => TokenKind::Export,
             "pub" => TokenKind::Pub,
+            "extern" => TokenKind::Extern,
             "as" => TokenKind::As,
             "var" => TokenKind::Var,
             "const" => TokenKind::Const,
@@ -479,6 +480,14 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Dot));
         assert!(kinds.contains(&TokenKind::Less));
         assert!(kinds.contains(&TokenKind::Greater));
+    }
+
+    /// 校验 `extern` 关键字会被词法分析器识别为独立保留字。
+    #[test]
+    fn should_tokenize_extern_keyword() {
+        let kinds = lex("pub extern func answer() -> int\n");
+        assert!(kinds.contains(&TokenKind::Extern));
+        assert!(kinds.contains(&TokenKind::Func));
     }
 
     /// 校验字典相关分隔符会被词法分析器正确识别。

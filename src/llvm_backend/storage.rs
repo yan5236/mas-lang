@@ -127,6 +127,25 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(self.basic_type_for(value_type)?.into())
     }
 
+    /// 返回原生函数 ABI 使用的 LLVM 类型，当前仅对 `bool` 走 `i8` 兼容 C ABI。
+    pub(super) fn extern_basic_type_for(
+        &self,
+        value_type: &ValueType,
+    ) -> Result<BasicTypeEnum<'ctx>, CompilerError> {
+        Ok(match value_type {
+            ValueType::Bool => self.context.i8_type().into(),
+            _ => self.basic_type_for(value_type)?,
+        })
+    }
+
+    /// 把原生函数参数类型转换为签名元数据类型，供 `extern func` 统一复用。
+    pub(super) fn extern_metadata_type_for(
+        &self,
+        value_type: &ValueType,
+    ) -> Result<BasicMetadataTypeEnum<'ctx>, CompilerError> {
+        Ok(self.extern_basic_type_for(value_type)?.into())
+    }
+
     /// 根据元素类型和固定长度构造 LLVM 数组类型。
     pub(super) fn array_type_for(
         &self,

@@ -1,49 +1,76 @@
 use std::collections::HashMap;
 
+use inkwell::AddressSpace;
 use inkwell::types::BasicType;
 
 use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 为所有用户函数预先声明 LLVM 符号，支持前向调用和递归调用。
+    /// 为用户函数和原生函数声明预先分配 LLVM 符号，支持前向调用与递归调用。
     pub(super) fn declare_user_functions(
         &mut self,
         program: &Program,
     ) -> Result<(), CompilerError> {
         for statement in &program.statements {
-            let Stmt::FunctionDecl {
-                name,
-                parameters,
-                return_type,
-                ..
-            } = statement
-            else {
-                continue;
+            let (name, parameters, return_type, abi) = match statement {
+                Stmt::FunctionDecl {
+                    name,
+                    parameters,
+                    return_type,
+                    ..
+                } => (name, parameters, return_type, FunctionAbi::User),
+                Stmt::ExternFunctionDecl {
+                    name,
+                    parameters,
+                    return_type,
+                    ..
+                } => (name, parameters, return_type, FunctionAbi::Extern),
+                _ => continue,
             };
 
             let parameter_types = parameters
                 .iter()
                 .map(|parameter| {
-                    self.basic_metadata_type_for(&value_type_from_annotation(&parameter.type_name))
+                    let value_type = value_type_from_annotation(&parameter.type_name);
+                    match abi {
+                        FunctionAbi::User => self.basic_metadata_type_for(&value_type),
+                        FunctionAbi::Extern => self.extern_metadata_type_for(&value_type),
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let function_type = match return_type.as_ref().map(value_type_from_annotation) {
-                Some(value_type) => self
-                    .basic_type_for(&value_type)?
-                    .fn_type(&parameter_types, false),
+                Some(ValueType::String) if abi == FunctionAbi::Extern => {
+                    let mut abi_parameters = parameter_types;
+                    abi_parameters.push(
+                        self.context
+                            .ptr_type(AddressSpace::default())
+                            .into(),
+                    );
+                    self.context
+                        .ptr_type(AddressSpace::default())
+                        .fn_type(&abi_parameters, false)
+                }
+                Some(value_type) => match abi {
+                    FunctionAbi::User => self.basic_type_for(&value_type)?,
+                    FunctionAbi::Extern => self.extern_basic_type_for(&value_type)?,
+                }
+                .fn_type(&parameter_types, false),
                 None => self.context.void_type().fn_type(&parameter_types, false),
             };
-            let function =
-                self.module
-                    .add_function(&format!("ms_user_{name}"), function_type, None);
+            let symbol_name = match abi {
+                FunctionAbi::User => format!("ms_user_{name}"),
+                FunctionAbi::Extern => name.clone(),
+            };
+            let function = self.module.add_function(&symbol_name, function_type, None);
             self.functions.insert(
                 name.clone(),
-                UserFunctionInfo {
+                FunctionInfo {
                     function,
                     return_type: return_type
                         .as_ref()
                         .map(value_type_from_annotation)
                         .unwrap_or(ValueType::Unit),
+                    abi,
                 },
             );
         }

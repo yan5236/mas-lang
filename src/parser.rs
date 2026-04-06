@@ -63,6 +63,10 @@ impl<'a> Parser<'a> {
         if self.match_tag(TokenTag::Pub) {
             return self.parse_public_statement();
         }
+        if self.match_tag(TokenTag::Extern) {
+            self.consume(TokenTag::Func, "`extern` 后必须跟 `func`")?;
+            return self.parse_extern_function_declaration(false);
+        }
         if self.match_tag(TokenTag::Func) {
             return self.parse_function_declaration(false);
         }
@@ -106,6 +110,10 @@ impl<'a> Parser<'a> {
         if self.match_tag(TokenTag::Func) {
             return self.parse_function_declaration(true);
         }
+        if self.match_tag(TokenTag::Extern) {
+            self.consume(TokenTag::Func, "`pub extern` 后必须跟 `func`")?;
+            return self.parse_extern_function_declaration(true);
+        }
         if self.match_tag(TokenTag::Var) {
             return self.parse_binding_declaration(BindingKind::Var, true);
         }
@@ -114,7 +122,7 @@ impl<'a> Parser<'a> {
         }
 
         Err(CompilerError::syntax_message(
-            "`pub` 只能用于顶层 `func`、`var` 或 `const` 声明",
+            "`pub` 只能用于顶层 `func`、`extern func`、`var` 或 `const` 声明",
             self.peek().span,
         ))
     }
@@ -157,6 +165,49 @@ impl<'a> Parser<'a> {
             return_type,
             body,
             span: Span::merge(start, body_span),
+        })
+    }
+
+    /// 解析 `extern func name(args) [-> type]` 形式的原生函数声明。
+    fn parse_extern_function_declaration(
+        &mut self,
+        is_public: bool,
+    ) -> Result<Stmt, CompilerError> {
+        let start = self.previous().span;
+        let (name, _) = self.consume_identifier("extern 函数声明缺少函数名")?;
+        self.consume(TokenTag::LeftParen, "extern 函数声明缺少左括号 `(`")?;
+        let mut parameters = Vec::new();
+
+        if !self.check(TokenTag::RightParen) {
+            loop {
+                let (param_name, param_span) =
+                    self.consume_identifier("extern 函数参数缺少参数名")?;
+                self.consume(TokenTag::Colon, "extern 函数参数缺少类型分隔符 `:`")?;
+                let type_name = self.parse_type_name()?;
+                parameters.push(Parameter {
+                    name: param_name,
+                    type_name,
+                    span: param_span,
+                });
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenTag::RightParen, "extern 函数声明缺少右括号 `)`")?;
+        let return_type = if self.match_tag(TokenTag::Arrow) {
+            Some(self.parse_type_name()?)
+        } else {
+            None
+        };
+        let span = Span::merge(start, self.previous().span);
+        Ok(Stmt::ExternFunctionDecl {
+            is_public,
+            name,
+            parameters,
+            return_type,
+            span,
         })
     }
 
@@ -1481,6 +1532,13 @@ mod tests {
     fn should_parse_function_declaration() {
         let program = parse("func add(a:int, b:int) -> int:\n    return a + b\n");
         assert!(matches!(program.statements[0], Stmt::FunctionDecl { .. }));
+    }
+
+    /// 校验 `extern func` 声明能够被正确解析为独立的原生函数声明节点。
+    #[test]
+    fn should_parse_extern_function_declaration() {
+        let program = parse("pub extern func mas_time_now_unix() -> int\n");
+        assert!(matches!(program.statements[0], Stmt::ExternFunctionDecl { .. }));
     }
 
     /// 校验 `const` 声明会带着不可变标记进入语法树。

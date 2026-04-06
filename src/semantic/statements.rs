@@ -13,7 +13,8 @@ impl<'a> SemanticAnalyzer<'a> {
                     *span,
                 ))
             }
-            Stmt::FunctionDecl { span, .. } => Err(CompilerError::semantic_message(
+            Stmt::FunctionDecl { span, .. } | Stmt::ExternFunctionDecl { span, .. } => Err(
+                CompilerError::semantic_message(
                 "函数定义只能出现在顶层",
                 *span,
             )),

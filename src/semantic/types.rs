@@ -41,6 +41,7 @@ impl ValueType {
 pub struct FunctionSignature {
     pub parameter_types: Vec<ValueType>,
     pub return_type: ValueType,
+    pub is_extern: bool,
     pub span: Span,
 }
 

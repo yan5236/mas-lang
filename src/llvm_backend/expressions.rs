@@ -245,15 +245,31 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             CompilerError::build_message(format!("未声明函数 `{name}`"), callee.span())
         })?;
         let mut args = Vec::with_capacity(arguments.len());
-        for argument in arguments {
+        for (argument, expected_type) in arguments
+            .iter()
+            .zip(info.function.get_type().get_param_types().iter())
+        {
             let compiled = self.compile_expr(argument)?;
-            args.push(self.expect_value(compiled)?.value.into());
+            let value = self.expect_value(compiled)?;
+            args.push(
+                self.prepare_function_call_argument(&info, value, *expected_type, argument.span())?,
+            );
+        }
+        if info.abi == FunctionAbi::Extern && info.return_type == ValueType::String {
+            let string_value = self.build_scalar_string_call(
+                info.function,
+                &args,
+                "call.extern.string",
+                "extern.string.out_len",
+                "load.extern.string.len",
+            )?;
+            return Ok(CodegenValue::Value(string_value));
         }
         let call = self.map_builder(self.builder.build_call(info.function, &args, "call.user"))?;
         if info.return_type == ValueType::Unit {
             Ok(CodegenValue::Unit)
         } else {
-            let value = call.try_as_basic_value().unwrap_basic();
+            let value = self.rebuild_function_call_result(&info, call.try_as_basic_value().unwrap_basic())?;
             Ok(CodegenValue::Value(TypedValue {
                 value_type: info.return_type,
                 value,
@@ -312,6 +328,59 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             _ => None,
         };
         Ok(converted)
+    }
+
+    /// 按函数 ABI 规则把内部值转换成真正参与调用的参数值。
+    fn prepare_function_call_argument(
+        &mut self,
+        info: &FunctionInfo<'ctx>,
+        value: TypedValue<'ctx>,
+        expected_type: inkwell::types::BasicMetadataTypeEnum<'ctx>,
+        span: Span,
+    ) -> Result<BasicMetadataValueEnum<'ctx>, CompilerError> {
+        if info.abi != FunctionAbi::Extern {
+            return Ok(value.value.into());
+        }
+
+        match value.value_type {
+            ValueType::Bool => {
+                let expected = expected_type.into_int_type();
+                let widened = self.map_builder(self.builder.build_int_z_extend(
+                    value.value.into_int_value(),
+                    expected,
+                    "extern.bool.arg",
+                ))?;
+                Ok(widened.into())
+            }
+            ValueType::Unit => Err(CompilerError::build_message(
+                "unit 不能作为原生函数参数传递",
+                span,
+            )),
+            _ => Ok(value.value.into()),
+        }
+    }
+
+    /// 按函数 ABI 规则把调用返回值恢复成内部统一使用的值表示。
+    fn rebuild_function_call_result(
+        &mut self,
+        info: &FunctionInfo<'ctx>,
+        value: inkwell::values::BasicValueEnum<'ctx>,
+    ) -> Result<inkwell::values::BasicValueEnum<'ctx>, CompilerError> {
+        if info.abi != FunctionAbi::Extern {
+            return Ok(value);
+        }
+
+        match &info.return_type {
+            ValueType::Bool => Ok(self
+                .map_builder(self.builder.build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    value.into_int_value(),
+                    self.context.i8_type().const_zero(),
+                    "extern.bool.ret",
+                ))?
+                .into()),
+            _ => Ok(value),
+        }
     }
 
     /// 把基础类型值转换为 `int`，其中字符串分支通过运行时解析十进制文本。

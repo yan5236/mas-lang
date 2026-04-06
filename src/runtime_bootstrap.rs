@@ -3,6 +3,7 @@ pub fn bootstrap_source() -> &'static str {
     r#"#![allow(unsafe_op_in_unsafe_fn)]
 
 use std::collections::HashMap;
+use std::ffi::{CStr, c_char};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -289,6 +290,31 @@ pub extern "C" fn float_to_string(value: f64, out_len: *mut u64) -> *const u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn bool_to_string(value: u8, out_len: *mut u64) -> *const u8 {
     boxed_string_into_raw((value != 0).to_string(), out_len)
+}
+
+/// 按给定字节切片克隆一份新的运行时字符串，供原生模块以统一 ABI 返回 `string`。
+#[unsafe(no_mangle)]
+pub extern "C" fn mas_runtime_string_clone(ptr: *const u8, len: u64) -> MsString {
+    if ptr.is_null() {
+        abort_runtime("原生字符串指针不能为空");
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    let boxed = bytes.to_vec().into_boxed_slice();
+    let len = boxed.len() as u64;
+    let ptr = Box::into_raw(boxed) as *const u8;
+    MsString { ptr, len }
+}
+
+/// 接收 C 风格错误消息并按统一中文运行时格式终止当前进程，供原生模块直接复用。
+#[unsafe(no_mangle)]
+pub extern "C" fn mas_runtime_abort(message: *const c_char) -> ! {
+    if message.is_null() {
+        abort_runtime("原生模块返回了空错误消息");
+    }
+    let text = unsafe { CStr::from_ptr(message) }
+        .to_str()
+        .unwrap_or("原生模块返回了非 UTF-8 错误消息");
+    abort_runtime(text)
 }
 
 /// 以统一的运行时错误格式输出消息，并立刻终止当前进程。
@@ -1233,5 +1259,13 @@ mod tests {
         assert!(source.contains("pub extern \"C\" fn string_starts_with"));
         assert!(source.contains("pub extern \"C\" fn string_ends_with"));
         assert!(source.contains("pub extern \"C\" fn string_replace"));
+    }
+
+    /// 校验运行时引导源码已经包含原生模块复用的通用字符串与错误辅助符号。
+    #[test]
+    fn should_include_native_runtime_helper_symbols() {
+        let source = bootstrap_source();
+        assert!(source.contains("pub extern \"C\" fn mas_runtime_string_clone"));
+        assert!(source.contains("pub extern \"C\" fn mas_runtime_abort"));
     }
 }

@@ -16,6 +16,7 @@ use crate::source::{SourceFile, Span};
 pub struct ModuleLoadResult {
     pub source: SourceFile,
     pub program: Program,
+    pub package_roots: Vec<PathBuf>,
 }
 
 /// 从入口源码开始装载整个模块图，并把模块重写为单个可编译程序。
@@ -37,6 +38,7 @@ pub fn load_module_graph(
         program: Program {
             statements: loader.statements,
         },
+        package_roots: loader.package_roots.into_iter().collect(),
     })
 }
 
@@ -47,6 +49,7 @@ struct ModuleLoader<'a> {
     loaded_modules: BTreeMap<PathBuf, LoadedModule>,
     active_modules: HashSet<PathBuf>,
     dependency_cache: BTreeMap<PathBuf, BTreeSet<String>>,
+    package_roots: BTreeSet<PathBuf>,
     synthetic_source: String,
     statements: Vec<Stmt>,
 }
@@ -72,6 +75,7 @@ impl<'a> ModuleLoader<'a> {
             loaded_modules: BTreeMap::new(),
             active_modules: HashSet::new(),
             dependency_cache: BTreeMap::new(),
+            package_roots: BTreeSet::new(),
             synthetic_source: String::new(),
             statements: Vec::new(),
         }
@@ -87,6 +91,8 @@ impl<'a> ModuleLoader<'a> {
         if let Some(loaded) = self.loaded_modules.get(module_path) {
             return Ok(loaded.clone());
         }
+
+        self.package_roots.insert(package_root.to_path_buf());
 
         if !self.active_modules.insert(module_path.to_path_buf()) {
             return Err(CompilerError::build_message(
@@ -115,6 +121,9 @@ impl<'a> ModuleLoader<'a> {
                     &mut exports,
                 )?,
                 Stmt::FunctionDecl {
+                    is_public, name, ..
+                }
+                | Stmt::ExternFunctionDecl {
                     is_public, name, ..
                 }
                 | Stmt::VarDecl {
@@ -318,6 +327,19 @@ impl ModuleRewriter {
                     span,
                 }
             }
+            Stmt::ExternFunctionDecl {
+                is_public: _,
+                name,
+                parameters,
+                return_type,
+                span,
+            } => Stmt::ExternFunctionDecl {
+                is_public: false,
+                name: if is_top_level { self.rename_name(&name) } else { name },
+                parameters,
+                return_type,
+                span,
+            },
             Stmt::VarDecl {
                 is_public: _,
                 binding_kind,
@@ -538,6 +560,7 @@ fn collect_top_level_declarations(
                     format!("__ms_{}_{}", sanitize_module_name(module_path), name)
                 },
             )),
+            Stmt::ExternFunctionDecl { name, .. } => Some((name.clone(), name.clone())),
             _ => None,
         })
         .collect()
@@ -679,6 +702,7 @@ fn parse_single_source(
     Ok(ModuleLoadResult {
         source: source.clone(),
         program,
+        package_roots: Vec::new(),
     })
 }
 
@@ -698,6 +722,13 @@ fn shift_stmt(statement: Stmt, offset: usize) -> Stmt {
             parameters: parameters.into_iter().map(|mut item| { item.span = shift_span(item.span, offset); item }).collect(),
             return_type,
             body: body.into_iter().map(|item| shift_stmt(item, offset)).collect(),
+            span: shift_span(span, offset),
+        },
+        Stmt::ExternFunctionDecl { is_public, name, parameters, return_type, span } => Stmt::ExternFunctionDecl {
+            is_public,
+            name,
+            parameters: parameters.into_iter().map(|mut item| { item.span = shift_span(item.span, offset); item }).collect(),
+            return_type,
             span: shift_span(span, offset),
         },
         Stmt::VarDecl { is_public, binding_kind, name, annotation, initializer, span } => Stmt::VarDecl {

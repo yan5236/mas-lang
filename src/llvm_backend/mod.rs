@@ -56,9 +56,17 @@ enum CodegenValue<'ctx> {
 
 /// 保存用户函数的 LLVM 符号与返回类型信息。
 #[derive(Clone)]
-struct UserFunctionInfo<'ctx> {
+struct FunctionInfo<'ctx> {
     function: FunctionValue<'ctx>,
     return_type: ValueType,
+    abi: FunctionAbi,
+}
+
+/// 区分用户函数与原生函数声明的 ABI 处理路径。
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FunctionAbi {
+    User,
+    Extern,
 }
 
 /// 保存运行时 ABI 中需要调用的外部函数。
@@ -112,7 +120,7 @@ struct CodeGenerator<'ctx, 'src> {
     source_path_value: Option<StructValue<'ctx>>,
     source_text_value: Option<StructValue<'ctx>>,
     globals: HashMap<String, VariableInfo<'ctx>>,
-    functions: HashMap<String, UserFunctionInfo<'ctx>>,
+    functions: HashMap<String, FunctionInfo<'ctx>>,
     current_function: Option<FunctionValue<'ctx>>,
     entry_function: Option<FunctionValue<'ctx>>,
     current_return_type: ValueType,

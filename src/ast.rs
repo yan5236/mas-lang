@@ -93,6 +93,13 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    ExternFunctionDecl {
+        is_public: bool,
+        name: String,
+        parameters: Vec<Parameter>,
+        return_type: Option<TypeName>,
+        span: Span,
+    },
     Import {
         path: ImportPath,
         kind: ImportKind,
@@ -185,6 +192,7 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Self::FunctionDecl { span, .. }
+            | Self::ExternFunctionDecl { span, .. }
             | Self::Import { span, .. }
             | Self::ExportImport { span, .. }
             | Self::VarDecl { span, .. }

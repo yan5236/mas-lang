@@ -201,6 +201,33 @@ fn should_accept_safe_convert_builtins() {
     .unwrap();
 }
 
+/// 校验 `extern func` 声明能够参与语义分析，并推导出稳定的参数与返回类型。
+#[test]
+fn should_accept_extern_function_declarations() {
+    analyze(
+        "extern func host_now() -> int\nextern func host_sleep(ms:int)\nextern func host_name() -> string\nvar unix:int = host_now()\nhost_sleep(1)\nprint(host_name())\nprint(unix)\n",
+    )
+    .unwrap();
+}
+
+/// 校验 `extern func` 也会复用普通函数调用的参数数量与类型检查逻辑。
+#[test]
+fn should_reject_invalid_extern_function_arguments() {
+    let count_error = analyze("extern func host_now() -> int\nprint(host_now(1))\n").unwrap_err();
+    assert!(count_error.contains("期望 0 个参数"));
+
+    let type_error =
+        analyze("extern func host_sleep(ms:int)\nhost_sleep(\"1\")\n").unwrap_err();
+    assert!(type_error.contains("第 1 个参数类型不匹配"));
+}
+
+/// 校验旧的 `__time_*` 入口在迁移完成后会以未声明函数的方式失败，避免继续绕过标准库边界。
+#[test]
+fn should_reject_legacy_time_builtins_after_migration() {
+    let error = analyze("print(__time_now_unix())\n").unwrap_err();
+    assert!(error.contains("未声明函数 `__time_now_unix`"));
+}
+
 /// 校验只有安全转换结果才允许访问 `ok/value` 属性。
 #[test]
 fn should_reject_property_access_on_non_safe_convert_value() {

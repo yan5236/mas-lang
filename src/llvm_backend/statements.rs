@@ -23,7 +23,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     pub(super) fn compile_statement(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
         match statement {
             Stmt::Import { .. } | Stmt::ExportImport { .. } => Ok(false),
-            Stmt::FunctionDecl { .. } => Ok(false),
+            Stmt::FunctionDecl { .. } | Stmt::ExternFunctionDecl { .. } => Ok(false),
             Stmt::VarDecl {
                 binding_kind,
                 name,

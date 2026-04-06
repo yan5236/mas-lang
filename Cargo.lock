@@ -100,6 +100,7 @@ dependencies = [
 name = "mascript-compiler-llvm"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "inkwell",
  "serde",
  "toml",
