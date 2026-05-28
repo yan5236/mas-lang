@@ -1,7 +1,7 @@
 use crate::ast::{
-    AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, Expr, Literal, MapEntry,
-    ImportItem, ImportKind, ImportPath, MethodName, Parameter, Program, PropertyName, Stmt,
-    TypeName, UnaryOp,
+    AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, Expr, ImportItem, ImportKind,
+    ImportPath, Literal, MapEntry, MethodName, Parameter, Program, PropertyName, Stmt, TypeName,
+    UnaryOp,
 };
 use crate::diagnostic::CompilerError;
 use crate::lexer::Lexer;
@@ -18,13 +18,8 @@ pub struct Parser<'a> {
 
 /// 表示模板字符串拆解后得到的一段普通文本或一段插值表达式。
 enum TemplateSegment {
-    Text {
-        value: String,
-        span: Span,
-    },
-    Expression {
-        value: Expr,
-    },
+    Text { value: String, span: Span },
+    Expression { value: Expr },
 }
 
 impl<'a> Parser<'a> {
@@ -300,13 +295,7 @@ impl<'a> Parser<'a> {
         let mut segments = vec![first_segment];
         let mut end = start;
 
-        while self.check(TokenTag::Dot)
-            && self
-                .peek_next()
-                .kind
-                .tag()
-                .eq(&TokenTag::Identifier)
-        {
+        while self.check(TokenTag::Dot) && self.peek_next().kind.tag().eq(&TokenTag::Identifier) {
             self.advance();
             let (segment, span) = self.consume_identifier("导入路径缺少模块片段")?;
             segments.push(segment);
@@ -857,7 +846,8 @@ impl<'a> Parser<'a> {
             }
 
             let expression_start = interpolation_start + 2;
-            let expression_end = self.find_template_expression_end(value, expression_start, literal_span)?;
+            let expression_end =
+                self.find_template_expression_end(value, expression_start, literal_span)?;
             let expression_source = &value[expression_start..expression_end];
             let trimmed = expression_source.trim();
             if trimmed.is_empty() {
@@ -968,7 +958,11 @@ impl<'a> Parser<'a> {
     }
 
     /// 把拆好的模板片段重建为现有 AST 中的字符串字面量与 `+` 拼接表达式，复用旧链路。
-    fn build_template_expression(&self, segments: Vec<TemplateSegment>, literal_span: Span) -> Expr {
+    fn build_template_expression(
+        &self,
+        segments: Vec<TemplateSegment>,
+        literal_span: Span,
+    ) -> Expr {
         let has_interpolation = segments
             .iter()
             .any(|segment| matches!(segment, TemplateSegment::Expression { .. }));
@@ -1142,10 +1136,7 @@ impl<'a> Parser<'a> {
 
     /// 按模板字符串正文中的相对偏移，近似计算其在原始源码字符串字面量中的实际跨度。
     fn offset_template_span(&self, literal_span: Span, start: usize, end: usize) -> Span {
-        Span::new(
-            literal_span.start + 1 + start,
-            literal_span.start + 1 + end,
-        )
+        Span::new(literal_span.start + 1 + start, literal_span.start + 1 + end)
     }
 
     /// 把模板字符串子解析器返回的错误跨度平移到原始源码位置，避免后续诊断落回临时源码文件。
@@ -1501,8 +1492,8 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::Parser;
     use crate::ast::{
-        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, ImportKind, MethodName,
-        PropertyName, Stmt, TypeName, UnaryOp,
+        AssignOp, AssignTarget, BinaryOp, BindingKind, Expr, ImportKind, MethodName, PropertyName,
+        Stmt, TypeName, UnaryOp,
     };
     use crate::lexer::Lexer;
     use crate::settings::{CompilerSettings, UiLanguage};
@@ -1538,7 +1529,10 @@ mod tests {
     #[test]
     fn should_parse_extern_function_declaration() {
         let program = parse("pub extern func mas_time_now_unix() -> int\n");
-        assert!(matches!(program.statements[0], Stmt::ExternFunctionDecl { .. }));
+        assert!(matches!(
+            program.statements[0],
+            Stmt::ExternFunctionDecl { .. }
+        ));
     }
 
     /// 校验 `const` 声明会带着不可变标记进入语法树。
@@ -1738,7 +1732,9 @@ mod tests {
             MethodName::Replace,
         ];
 
-        for (statement, expected_method) in program.statements[1..].iter().zip(expected_methods.iter()) {
+        for (statement, expected_method) in
+            program.statements[1..].iter().zip(expected_methods.iter())
+        {
             let Stmt::ExprStmt { expr, .. } = statement else {
                 panic!("字符串方法语句不是表达式语句");
             };
@@ -1759,7 +1755,8 @@ mod tests {
     /// 校验安全转换结果的 `ok/value` 只读属性能够被正确解析。
     #[test]
     fn should_parse_safe_convert_property_access() {
-        let program = parse("var result = try_int(\"123\")\nprint(result.ok)\nprint(result.value)\n");
+        let program =
+            parse("var result = try_int(\"123\")\nprint(result.ok)\nprint(result.value)\n");
 
         let Stmt::ExprStmt { expr, .. } = &program.statements[1] else {
             panic!("第二条语句不是表达式语句");
@@ -1800,7 +1797,10 @@ mod tests {
         };
         assert_eq!(*op, BinaryOp::Add);
 
-        let Expr::Call { callee, arguments, .. } = &**right else {
+        let Expr::Call {
+            callee, arguments, ..
+        } = &**right
+        else {
             panic!("模板字符串的最后一段没有被包装成 string(...) 调用");
         };
         let Expr::Identifier { name, .. } = &**callee else {

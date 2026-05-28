@@ -132,12 +132,18 @@ fn should_reject_string_method_on_non_string_targets() {
         ("var value:int = 1\nprint(value.trim())\n", "int"),
         ("var value:float = 1.5\nprint(value.trim())\n", "float"),
         ("var value:bool = true\nprint(value.trim())\n", "bool"),
-        ("var value:array<int,2>\nprint(value.trim())\n", "array<int,2>"),
+        (
+            "var value:array<int,2>\nprint(value.trim())\n",
+            "array<int,2>",
+        ),
     ];
 
     for (source, expected_type) in cases {
         let error = analyze(source).unwrap_err();
-        assert!(error.contains("字符串方法 `trim` 只能用于 `string` 类型"), "{error}");
+        assert!(
+            error.contains("字符串方法 `trim` 只能用于 `string` 类型"),
+            "{error}"
+        );
         assert!(error.contains(expected_type), "{error}");
     }
 }
@@ -155,10 +161,12 @@ fn should_reject_string_only_method_on_list_and_map() {
 /// 校验字符串方法会分别拦截参数数量错误与参数类型错误。
 #[test]
 fn should_reject_invalid_string_method_arguments() {
-    let missing_argument = analyze("var text = \"Mascript\"\nprint(text.contains())\n").unwrap_err();
+    let missing_argument =
+        analyze("var text = \"Mascript\"\nprint(text.contains())\n").unwrap_err();
     assert!(missing_argument.contains("字符串方法 `contains` 需要且只接受一个 string 参数"));
 
-    let invalid_type = analyze("var text = \"Mascript\"\nprint(text.replace(\"M\", 1))\n").unwrap_err();
+    let invalid_type =
+        analyze("var text = \"Mascript\"\nprint(text.replace(\"M\", 1))\n").unwrap_err();
     assert!(invalid_type.contains("字符串方法 `replace` 的参数类型必须是 string"));
 }
 
@@ -216,8 +224,7 @@ fn should_reject_invalid_extern_function_arguments() {
     let count_error = analyze("extern func host_now() -> int\nprint(host_now(1))\n").unwrap_err();
     assert!(count_error.contains("期望 0 个参数"));
 
-    let type_error =
-        analyze("extern func host_sleep(ms:int)\nhost_sleep(\"1\")\n").unwrap_err();
+    let type_error = analyze("extern func host_sleep(ms:int)\nhost_sleep(\"1\")\n").unwrap_err();
     assert!(type_error.contains("第 1 个参数类型不匹配"));
 }
 
@@ -238,8 +245,6 @@ fn should_reject_property_access_on_non_safe_convert_value() {
 /// 校验模板字符串中的字符串与数值插值都能复用现有类型转换链路通过语义分析。
 #[test]
 fn should_accept_template_string_interpolation() {
-    analyze(
-        "var name = \"Mascript\"\nvar count = 3\nprint(\"hello ${name}, count=${count}\")\n",
-    )
-    .unwrap();
+    analyze("var name = \"Mascript\"\nvar count = 3\nprint(\"hello ${name}, count=${count}\")\n")
+        .unwrap();
 }

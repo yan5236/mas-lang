@@ -5,6 +5,7 @@ pub mod lexer;
 pub mod linker;
 pub mod llvm_backend;
 pub mod module_loader;
+pub mod native_link;
 pub mod parser;
 pub mod runtime_bootstrap;
 pub mod semantic;
@@ -31,12 +32,22 @@ pub struct FrontendOutput {
 /// 保存构建阶段允许外部指定的输出选项。
 pub struct CompileOptions {
     pub output_path: Option<PathBuf>,
+    pub allow_native_source_build: bool,
 }
 
 impl CompileOptions {
     /// 使用可选输出路径创建新的编译选项对象。
     pub fn new(output_path: Option<PathBuf>) -> Self {
-        Self { output_path }
+        Self {
+            output_path,
+            allow_native_source_build: false,
+        }
+    }
+
+    /// 返回一个启用或关闭“维护者源码构建”模式的新选项对象，避免调用侧手写字段赋值。
+    pub fn with_allow_native_source_build(mut self, allow_native_source_build: bool) -> Self {
+        self.allow_native_source_build = allow_native_source_build;
+        self
     }
 }
 
@@ -99,7 +110,11 @@ mod tests {
             .as_nanos();
         let root = env::temp_dir().join(format!("mascript-llvm-project-{name}-{unique}"));
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("mod.yml"), "name: demo\nversion: 0.1.0\n\ndependencies: {}\n").unwrap();
+        fs::write(
+            root.join("mod.yml"),
+            "name: demo\nversion: 0.1.0\n\ndependencies: {}\n",
+        )
+        .unwrap();
         fs::write(root.join("mod-lock.yml"), "dependencies: {}\n").unwrap();
         fs::write(
             root.join("settings.toml"),
@@ -109,43 +124,54 @@ mod tests {
         root
     }
 
+    /// 递归复制目录树中的全部文件，保证测试依赖里的预编译对象文件按原字节保留下来。
+    fn copy_directory_recursive(source_root: &Path, target_root: &Path) {
+        fs::create_dir_all(target_root).unwrap();
+        for entry in fs::read_dir(source_root).unwrap() {
+            let entry = entry.unwrap();
+            let source_path = entry.path();
+            let target_path = target_root.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_directory_recursive(&source_path, &target_path);
+            } else {
+                fs::copy(&source_path, &target_path).unwrap();
+            }
+        }
+    }
+
     /// 把仓库中的 `time` 标准库包复制到临时项目的 `mod_module` 缓存目录，模拟本地依赖安装结果。
     fn install_time_dependency(root: &Path) {
         let package_root = root.join("mod_module").join("time@0.1.0");
-        let dependency_root = package_root.join("src");
-        fs::create_dir_all(&dependency_root).unwrap();
-
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
             .to_path_buf();
         let source_root = workspace_root.join("mas-lang-std").join("time");
+        copy_directory_recursive(&source_root, &package_root);
+    }
 
-        for file_name in ["mod.yml", "mod-lock.yml", "settings.toml"] {
-            let source_path = source_root.join(file_name);
-            let target_path = package_root.join(file_name);
-            fs::write(&target_path, fs::read_to_string(&source_path).unwrap()).unwrap();
-        }
+    /// 为依赖 `time` 的测试项目写入固定依赖清单，避免每个用例重复拼接样板文件。
+    fn write_time_dependency_manifest(root: &Path) {
+        fs::write(
+            root.join("mod.yml"),
+            "name: demo\nversion: 0.1.0\n\ndependencies:\n  time:\n    path: ../time\n    version: 0.1.0\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("mod-lock.yml"),
+            "dependencies:\n  time:\n    version: 0.1.0\n    source:\n      type: path\n      path: ../time\n    store_path: mod_module/time@0.1.0\n",
+        )
+        .unwrap();
+    }
 
-        for file_name in ["index.ms", "system.ms", "timer.ms", "native.ms"] {
-            let source_path = source_root.join("src").join(file_name);
-            let target_path = dependency_root.join(file_name);
-            fs::write(&target_path, fs::read_to_string(&source_path).unwrap()).unwrap();
-        }
-
-        for directory in ["include", "common", "platform/windows", "platform/posix"] {
-            fs::create_dir_all(package_root.join("native").join(directory)).unwrap();
-        }
-        for file_name in [
-            "include/time_host.h",
-            "common/time_common.c",
-            "platform/windows/time_windows.c",
-            "platform/posix/time_posix.c",
-        ] {
-            let source_path = source_root.join("native").join(file_name);
-            let target_path = package_root.join("native").join(file_name);
-            fs::write(&target_path, fs::read_to_string(&source_path).unwrap()).unwrap();
-        }
+    /// 把给定主程序写入临时项目并返回可直接传给编译器的 `SourceFile`。
+    fn write_time_app_source(root: &Path, text: &str) -> SourceFile {
+        let source_path = root.join("src").join("main.ms");
+        fs::write(&source_path, text).unwrap();
+        SourceFile::new(
+            source_path.display().to_string(),
+            fs::read_to_string(&source_path).unwrap(),
+        )
     }
 
     /// 校验最小程序能够完整通过前端分析流水线。
@@ -274,7 +300,11 @@ mod tests {
             fs::read_to_string(&source_path).unwrap(),
         );
         let error = analyze_source(&source, &zh_settings()).unwrap_err();
-        assert!(error.render(UiLanguage::ZhCn, Some(&source)).contains("未公开"));
+        assert!(
+            error
+                .render(UiLanguage::ZhCn, Some(&source))
+                .contains("未公开")
+        );
 
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
@@ -295,7 +325,10 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            root.join("mod_module").join("time@0.1.0").join("src").join("index.ms"),
+            root.join("mod_module")
+                .join("time@0.1.0")
+                .join("src")
+                .join("index.ms"),
             "pub func now() -> int:\n    return 1\n",
         )
         .unwrap();
@@ -356,7 +389,11 @@ mod tests {
             fs::read_to_string(&source_path).unwrap(),
         );
         let error = analyze_source(&source, &zh_settings()).unwrap_err();
-        assert!(error.render(UiLanguage::ZhCn, Some(&source)).contains("循环依赖"));
+        assert!(
+            error
+                .render(UiLanguage::ZhCn, Some(&source))
+                .contains("循环依赖")
+        );
 
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
@@ -366,26 +403,10 @@ mod tests {
     fn should_build_project_with_time_standard_library_dependency() {
         let root = create_temp_project("time-stdlib");
         install_time_dependency(&root);
-        fs::write(
-            root.join("mod.yml"),
-            "name: demo\nversion: 0.1.0\n\ndependencies:\n  time:\n    path: ../time\n    version: 0.1.0\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("mod-lock.yml"),
-            "dependencies:\n  time:\n    version: 0.1.0\n    source:\n      type: path\n      path: ../time\n    store_path: mod_module/time@0.1.0\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("src").join("main.ms"),
+        write_time_dependency_manifest(&root);
+        let source = write_time_app_source(
+            &root,
             "import time { monotonic_millis, now_iso8601, now_rfc2822, now_rfc7231, now_unix, now_unix_millis, sleep }\n\nfunc main():\n    print(\"unix=\" + string(now_unix()))\n    print(\"unix_millis=\" + string(now_unix_millis()))\n    print(\"iso8601=\" + now_iso8601())\n    print(\"rfc2822=\" + now_rfc2822())\n    print(\"rfc7231=\" + now_rfc7231())\n    var started = monotonic_millis()\n    sleep(10)\n    print(\"elapsed_ms=\" + string(monotonic_millis() - started))\n",
-        )
-        .unwrap();
-
-        let source_path = root.join("src").join("main.ms");
-        let source = SourceFile::new(
-            source_path.display().to_string(),
-            fs::read_to_string(&source_path).unwrap(),
         );
         let output_path = root.join("build").join("demo.exe");
         let binary = compile_to_executable(
@@ -425,26 +446,10 @@ mod tests {
     fn should_report_negative_sleep_from_time_dependency() {
         let root = create_temp_project("time-sleep-error");
         install_time_dependency(&root);
-        fs::write(
-            root.join("mod.yml"),
-            "name: demo\nversion: 0.1.0\n\ndependencies:\n  time:\n    path: ../time\n    version: 0.1.0\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("mod-lock.yml"),
-            "dependencies:\n  time:\n    version: 0.1.0\n    source:\n      type: path\n      path: ../time\n    store_path: mod_module/time@0.1.0\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("src").join("main.ms"),
+        write_time_dependency_manifest(&root);
+        let source = write_time_app_source(
+            &root,
             "import time { sleep }\n\nfunc main():\n    sleep(-1)\n",
-        )
-        .unwrap();
-
-        let source_path = root.join("src").join("main.ms");
-        let source = SourceFile::new(
-            source_path.display().to_string(),
-            fs::read_to_string(&source_path).unwrap(),
         );
         let output_path = root.join("build").join("demo.exe");
         let binary = compile_to_executable(
@@ -457,6 +462,163 @@ mod tests {
         assert!(!output.status.success());
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.contains("sleep(ms) 只接受大于等于 0 的毫秒整数"));
+
+        fs::remove_dir_all(Path::new(&root)).unwrap();
+    }
+
+    /// 校验测试辅助安装流程会把 `time` 的预编译清单与对象文件一并复制到依赖缓存。
+    #[test]
+    fn should_copy_time_prebuilt_artifacts_into_dependency_cache() {
+        let root = create_temp_project("time-prebuilt-only");
+        install_time_dependency(&root);
+        let artifact_root = root
+            .join("mod_module")
+            .join("time@0.1.0")
+            .join("native")
+            .join("artifacts")
+            .join("x86_64-pc-windows-msvc");
+        assert!(artifact_root.join("manifest.toml").is_file());
+        assert!(artifact_root.join("time_common.obj").is_file());
+        assert!(artifact_root.join("time_windows.obj").is_file());
+
+        fs::remove_dir_all(Path::new(&root)).unwrap();
+    }
+
+    /// 校验缺少预编译矩阵声明时，普通消费路径会返回明确的中文错误而不是隐式源码编译。
+    #[test]
+    fn should_fail_when_time_prebuilt_matrix_is_missing() {
+        let root = create_temp_project("time-missing-matrix");
+        install_time_dependency(&root);
+        write_time_dependency_manifest(&root);
+        let package_root = root.join("mod_module").join("time@0.1.0");
+        let settings_path = package_root.join("settings.toml");
+        let settings = fs::read_to_string(&settings_path).unwrap();
+        fs::write(
+            &settings_path,
+            settings.replace(
+                "\n[native.prebuilt.x86_64-pc-windows-msvc]\nmanifest = \"native/artifacts/x86_64-pc-windows-msvc/manifest.toml\"\nobjects = [\n  \"native/artifacts/x86_64-pc-windows-msvc/time_common.obj\",\n  \"native/artifacts/x86_64-pc-windows-msvc/time_windows.obj\",\n]\n",
+                "",
+            ),
+        )
+        .unwrap();
+
+        let source = write_time_app_source(
+            &root,
+            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+        );
+        let output_path = root.join("build").join("demo.exe");
+        let error = compile_to_executable(
+            &source,
+            &zh_settings(),
+            &CompileOptions::new(Some(output_path)),
+        )
+        .unwrap_err();
+        let rendered = error.render(UiLanguage::ZhCn, Some(&source));
+        assert!(rendered.contains("未声明预编译产物"));
+        assert!(rendered.contains("x86_64-pc-windows-msvc"));
+        assert!(rendered.contains("普通依赖消费不支持自动回退到源码编译"));
+
+        fs::remove_dir_all(Path::new(&root)).unwrap();
+    }
+
+    /// 校验缺少对象文件时会返回中文诊断，并明确提示维护者刷新预编译产物。
+    #[test]
+    fn should_fail_when_time_prebuilt_object_is_missing() {
+        let root = create_temp_project("time-missing-object");
+        install_time_dependency(&root);
+        write_time_dependency_manifest(&root);
+        let package_root = root.join("mod_module").join("time@0.1.0");
+        fs::remove_file(
+            package_root
+                .join("native")
+                .join("artifacts")
+                .join("x86_64-pc-windows-msvc")
+                .join("time_common.obj"),
+        )
+        .unwrap();
+
+        let source = write_time_app_source(
+            &root,
+            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+        );
+        let output_path = root.join("build").join("demo.exe");
+        let error = compile_to_executable(
+            &source,
+            &zh_settings(),
+            &CompileOptions::new(Some(output_path)),
+        )
+        .unwrap_err();
+        let rendered = error.render(UiLanguage::ZhCn, Some(&source));
+        assert!(rendered.contains("缺少预编译对象文件"));
+        assert!(rendered.contains("普通依赖消费"));
+
+        fs::remove_dir_all(Path::new(&root)).unwrap();
+    }
+
+    /// 校验 ABI 版本不匹配时会在链接前被阻止，并提示维护者先刷新对应目标的预编译产物。
+    #[test]
+    fn should_fail_when_time_prebuilt_abi_mismatches() {
+        let root = create_temp_project("time-abi-mismatch");
+        install_time_dependency(&root);
+        write_time_dependency_manifest(&root);
+        let manifest_path = root
+            .join("mod_module")
+            .join("time@0.1.0")
+            .join("native")
+            .join("artifacts")
+            .join("x86_64-pc-windows-msvc")
+            .join("manifest.toml");
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        fs::write(&manifest_path, manifest.replace("abi = 1", "abi = 999")).unwrap();
+
+        let source = write_time_app_source(
+            &root,
+            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+        );
+        let output_path = root.join("build").join("demo.exe");
+        let error = compile_to_executable(
+            &source,
+            &zh_settings(),
+            &CompileOptions::new(Some(output_path)),
+        )
+        .unwrap_err();
+        let rendered = error.render(UiLanguage::ZhCn, Some(&source));
+        assert!(rendered.contains("ABI 版本"));
+        assert!(rendered.contains("维护者请先刷新对应目标的预编译产物"));
+
+        fs::remove_dir_all(Path::new(&root)).unwrap();
+    }
+
+    /// 校验维护者显式开启源码构建模式后，缺失的预编译对象和清单会被重新生成并立即可用。
+    #[test]
+    fn should_refresh_time_prebuilt_when_maintainer_mode_is_enabled() {
+        let root = create_temp_project("time-refresh");
+        install_time_dependency(&root);
+        write_time_dependency_manifest(&root);
+        let artifact_root = root
+            .join("mod_module")
+            .join("time@0.1.0")
+            .join("native")
+            .join("artifacts")
+            .join("x86_64-pc-windows-msvc");
+        fs::remove_dir_all(&artifact_root).unwrap();
+
+        let source = write_time_app_source(
+            &root,
+            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+        );
+        let output_path = root.join("build").join("demo.exe");
+        let binary = compile_to_executable(
+            &source,
+            &zh_settings(),
+            &CompileOptions::new(Some(output_path)).with_allow_native_source_build(true),
+        )
+        .unwrap();
+        let output = std::process::Command::new(binary).output().unwrap();
+        assert!(output.status.success());
+        assert!(artifact_root.join("manifest.toml").is_file());
+        assert!(artifact_root.join("time_common.obj").is_file());
+        assert!(artifact_root.join("time_windows.obj").is_file());
 
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }

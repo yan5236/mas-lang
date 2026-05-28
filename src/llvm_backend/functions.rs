@@ -41,11 +41,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             let function_type = match return_type.as_ref().map(value_type_from_annotation) {
                 Some(ValueType::String) if abi == FunctionAbi::Extern => {
                     let mut abi_parameters = parameter_types;
-                    abi_parameters.push(
-                        self.context
-                            .ptr_type(AddressSpace::default())
-                            .into(),
-                    );
+                    abi_parameters.push(self.context.ptr_type(AddressSpace::default()).into());
                     self.context
                         .ptr_type(AddressSpace::default())
                         .fn_type(&abi_parameters, false)

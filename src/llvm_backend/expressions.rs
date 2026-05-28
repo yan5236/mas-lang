@@ -251,9 +251,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         {
             let compiled = self.compile_expr(argument)?;
             let value = self.expect_value(compiled)?;
-            args.push(
-                self.prepare_function_call_argument(&info, value, *expected_type, argument.span())?,
-            );
+            args.push(self.prepare_function_call_argument(
+                &info,
+                value,
+                *expected_type,
+                argument.span(),
+            )?);
         }
         if info.abi == FunctionAbi::Extern && info.return_type == ValueType::String {
             let string_value = self.build_scalar_string_call(
@@ -269,7 +272,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         if info.return_type == ValueType::Unit {
             Ok(CodegenValue::Unit)
         } else {
-            let value = self.rebuild_function_call_result(&info, call.try_as_basic_value().unwrap_basic())?;
+            let value =
+                self.rebuild_function_call_result(&info, call.try_as_basic_value().unwrap_basic())?;
             Ok(CodegenValue::Value(TypedValue {
                 value_type: info.return_type,
                 value,
@@ -617,7 +621,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ))?
                 .into(),
             ),
-            ValueType::String => self.build_try_string_int_result(argument.value.into_struct_value()),
+            ValueType::String => {
+                self.build_try_string_int_result(argument.value.into_struct_value())
+            }
             _ => Err(CompilerError::build_message(
                 "当前阶段 `try_int` 只支持基础类型转换",
                 span,
@@ -698,7 +704,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ))?
                 .into(),
             ),
-            ValueType::String => self.build_try_string_bool_result(argument.value.into_struct_value()),
+            ValueType::String => {
+                self.build_try_string_bool_result(argument.value.into_struct_value())
+            }
             _ => Err(CompilerError::build_message(
                 "当前阶段 `try_bool` 只支持基础类型转换",
                 span,
@@ -790,10 +798,18 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         let result_type = self.safe_convert_result_type(&value_type)?;
         let with_ok = self
-            .map_builder(self.builder.build_insert_value(result_type.get_undef(), ok, 0, "safe.ok"))?
+            .map_builder(self.builder.build_insert_value(
+                result_type.get_undef(),
+                ok,
+                0,
+                "safe.ok",
+            ))?
             .into_struct_value();
         let with_value = self
-            .map_builder(self.builder.build_insert_value(with_ok, value, 1, "safe.value"))?
+            .map_builder(
+                self.builder
+                    .build_insert_value(with_ok, value, 1, "safe.value"),
+            )?
             .into_struct_value();
         Ok(TypedValue {
             value_type: ValueType::SafeConvertResult(Box::new(value_type)),
@@ -817,8 +833,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             out_ptr,
             "call.try_string_to_int",
         )?;
-        let parsed = self
-            .map_builder(self.builder.build_load(self.context.i64_type(), out_ptr, "load.try.int"))?;
+        let parsed = self.map_builder(self.builder.build_load(
+            self.context.i64_type(),
+            out_ptr,
+            "load.try.int",
+        ))?;
         self.build_safe_convert_result(ValueType::Int, ok, parsed)
     }
 
@@ -838,8 +857,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             out_ptr,
             "call.try_string_to_float",
         )?;
-        let parsed = self
-            .map_builder(self.builder.build_load(self.context.f64_type(), out_ptr, "load.try.float"))?;
+        let parsed = self.map_builder(self.builder.build_load(
+            self.context.f64_type(),
+            out_ptr,
+            "load.try.float",
+        ))?;
         self.build_safe_convert_result(ValueType::Float, ok, parsed)
     }
 
@@ -863,7 +885,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             "call.try_string_to_bool",
         )?;
         let raw = self
-            .map_builder(self.builder.build_load(self.context.i8_type(), out_ptr, "load.try.bool.raw"))?
+            .map_builder(self.builder.build_load(
+                self.context.i8_type(),
+                out_ptr,
+                "load.try.bool.raw",
+            ))?
             .into_int_value();
         let parsed = self.map_builder(self.builder.build_int_compare(
             inkwell::IntPredicate::NE,
@@ -1190,7 +1216,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         arguments: &[Expr],
         span: Span,
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
-        let string_value = self.expect_string_value(target_value, span, "当前表达式不是字符串类型")?;
+        let string_value =
+            self.expect_string_value(target_value, span, "当前表达式不是字符串类型")?;
         let mut target_args = self.build_string_runtime_arguments(string_value)?;
 
         match method {

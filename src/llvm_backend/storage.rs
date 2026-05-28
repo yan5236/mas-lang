@@ -44,8 +44,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Float => global.set_initializer(&self.context.f64_type().const_zero()),
             ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
             ValueType::String => global.set_initializer(&self.string_type.const_zero()),
-            ValueType::SafeConvertResult(value_type) => global
-                .set_initializer(&self.safe_convert_result_type(value_type.as_ref())?.const_zero()),
+            ValueType::SafeConvertResult(value_type) => global.set_initializer(
+                &self
+                    .safe_convert_result_type(value_type.as_ref())?
+                    .const_zero(),
+            ),
             ValueType::List(_) => global.set_initializer(&self.list_pointer_type().const_null()),
             ValueType::Map(_, _) => global.set_initializer(&self.map_pointer_type().const_null()),
             ValueType::Array(element, size) => {

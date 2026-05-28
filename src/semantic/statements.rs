@@ -7,17 +7,12 @@ impl<'a> SemanticAnalyzer<'a> {
     /// 分析单条语句，并在需要时更新作用域中的变量或上下文状态。
     pub(super) fn analyze_statement(&mut self, statement: &Stmt) -> Result<(), CompilerError> {
         match statement {
-            Stmt::Import { span, .. } | Stmt::ExportImport { span, .. } => {
-                Err(CompilerError::semantic_message(
-                    "模块导入应在语义分析前完成展开",
-                    *span,
-                ))
-            }
+            Stmt::Import { span, .. } | Stmt::ExportImport { span, .. } => Err(
+                CompilerError::semantic_message("模块导入应在语义分析前完成展开", *span),
+            ),
             Stmt::FunctionDecl { span, .. } | Stmt::ExternFunctionDecl { span, .. } => Err(
-                CompilerError::semantic_message(
-                "函数定义只能出现在顶层",
-                *span,
-            )),
+                CompilerError::semantic_message("函数定义只能出现在顶层", *span),
+            ),
             Stmt::VarDecl {
                 binding_kind,
                 name,

@@ -4,17 +4,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
-
 use crate::CompileOptions;
 use crate::ast::Program;
 use crate::diagnostic::{CompilerError, MessageId};
 use crate::llvm_backend;
+use crate::native_link::{DEFAULT_TARGET_TRIPLE, resolve_native_link_inputs};
 use crate::runtime_bootstrap;
 use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
-
-const DEFAULT_TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 
 /// 执行完整的对象文件生成与本机链接流程，并返回最终可执行文件路径。
 pub fn compile_to_executable(
@@ -38,8 +35,12 @@ pub fn compile_to_executable(
         runtime_bootstrap::bootstrap_source(),
         source,
     )?;
-    let native_objects =
-        compile_native_objects(package_roots, &workspace.native_root, source)?;
+    let native_objects = resolve_native_link_inputs(
+        package_roots,
+        &workspace.native_root,
+        source,
+        options.allow_native_source_build,
+    )?;
     ensure_parent_directory(&output_path, source)?;
     link_executable(
         &workspace.object_path,
@@ -121,195 +122,6 @@ fn link_executable(
             vec![status.to_string()],
             Span::new(0, source.text().len()),
         ))
-    }
-}
-
-/// 保存单个包解析后的原生构建配置，供链接阶段统一编译。
-#[derive(Debug, Default)]
-struct NativeBuildConfig {
-    include_dirs: Vec<PathBuf>,
-    source_files: Vec<PathBuf>,
-}
-
-/// 表示 `settings.toml` 中与原生源码构建相关的最小字段集合。
-#[derive(Debug, Default, Deserialize)]
-struct PackageSettingsFile {
-    native: Option<NativeSection>,
-}
-
-/// 保存单个包的原生包含目录与按平台拆分的源码列表。
-#[derive(Debug, Default, Deserialize)]
-struct NativeSection {
-    #[serde(default)]
-    include: Vec<String>,
-    #[serde(default)]
-    sources: NativeSourcesSection,
-}
-
-/// 保存公共源码与平台专属源码列表，供不同目标平台筛选使用。
-#[derive(Debug, Default, Deserialize)]
-struct NativeSourcesSection {
-    #[serde(default)]
-    common: Vec<String>,
-    #[serde(default)]
-    windows: Vec<String>,
-    #[serde(default)]
-    posix: Vec<String>,
-}
-
-/// 编译模块图中所有包声明的原生 C 源文件，并返回可直接参与最终链接的目标文件列表。
-fn compile_native_objects(
-    package_roots: &[PathBuf],
-    native_root: &Path,
-    source: &SourceFile,
-) -> Result<Vec<PathBuf>, CompilerError> {
-    let mut objects = Vec::new();
-
-    for package_root in package_roots {
-        let config = load_native_build_config(package_root, source)?;
-        if config.source_files.is_empty() {
-            continue;
-        }
-
-        let package_output = native_root.join(sanitize_package_name(package_root));
-        fs::create_dir_all(&package_output).map_err(|error| {
-            CompilerError::build(
-                MessageId::BuildCreateOutputDirFailed,
-                vec![package_output.display().to_string(), error.to_string()],
-                Span::new(0, source.text().len()),
-            )
-        })?;
-
-        let mut build = cc::Build::new();
-        build
-            .cargo_metadata(false)
-            .warnings(false)
-            .target(DEFAULT_TARGET_TRIPLE)
-            .host(DEFAULT_TARGET_TRIPLE)
-            .opt_level(2)
-            .debug(false)
-            .out_dir(&package_output);
-        if DEFAULT_TARGET_TRIPLE.contains("windows") {
-            build.flag_if_supported("/utf-8");
-        }
-
-        for include_dir in &config.include_dirs {
-            build.include(include_dir);
-        }
-        for source_file in &config.source_files {
-            build.file(source_file);
-        }
-
-        let built_objects = build.try_compile_intermediates().map_err(|error| {
-            CompilerError::build(
-                MessageId::BuildRustcFailed,
-                vec![format!(
-                    "编译原生源码失败（{}）：{}",
-                    package_root.display(),
-                    error
-                )],
-                Span::new(0, source.text().len()),
-            )
-        })?;
-        objects.extend(built_objects);
-    }
-
-    Ok(objects)
-}
-
-/// 从包级 `settings.toml` 读取原生源码配置，并把相对路径转换为绝对路径。
-fn load_native_build_config(
-    package_root: &Path,
-    source: &SourceFile,
-) -> Result<NativeBuildConfig, CompilerError> {
-    let settings_path = package_root.join("settings.toml");
-    let text = match fs::read_to_string(&settings_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(NativeBuildConfig::default());
-        }
-        Err(error) => {
-            return Err(CompilerError::build(
-                MessageId::BuildRustcFailed,
-                vec![format!("读取包配置失败：{}: {}", settings_path.display(), error)],
-                Span::new(0, source.text().len()),
-            ));
-        }
-    };
-
-    let parsed: PackageSettingsFile = toml::from_str(&text).map_err(|error| {
-        CompilerError::build(
-            MessageId::BuildRustcFailed,
-            vec![format!("解析包配置失败：{}: {}", settings_path.display(), error)],
-            Span::new(0, source.text().len()),
-        )
-    })?;
-
-    let Some(native) = parsed.native else {
-        return Ok(NativeBuildConfig::default());
-    };
-
-    let mut source_files = native
-        .sources
-        .common
-        .iter()
-        .map(|item| resolve_native_path(package_root, item, source))
-        .collect::<Result<Vec<_>, _>>()?;
-    let platform_sources = if DEFAULT_TARGET_TRIPLE.contains("windows") {
-        &native.sources.windows
-    } else {
-        &native.sources.posix
-    };
-    source_files.extend(
-        platform_sources
-            .iter()
-            .map(|item| resolve_native_path(package_root, item, source))
-            .collect::<Result<Vec<_>, _>>()?,
-    );
-
-    Ok(NativeBuildConfig {
-        include_dirs: native
-            .include
-            .iter()
-            .map(|item| resolve_native_path(package_root, item, source))
-            .collect::<Result<Vec<_>, _>>()?,
-        source_files,
-    })
-}
-
-/// 把包配置中的相对原生路径解析为绝对路径，并确保目标文件或目录真实存在。
-fn resolve_native_path(
-    package_root: &Path,
-    relative: &str,
-    source: &SourceFile,
-) -> Result<PathBuf, CompilerError> {
-    let path = package_root.join(relative);
-    if path.exists() {
-        Ok(normalize_windows_path(&path))
-    } else {
-        Err(CompilerError::build(
-            MessageId::BuildRustcFailed,
-            vec![format!("原生路径不存在：{}", path.display())],
-            Span::new(0, source.text().len()),
-        ))
-    }
-}
-
-/// 把包根目录转换为稳定的临时目录名，避免不同包的原生产物互相覆盖。
-fn sanitize_package_name(path: &Path) -> String {
-    path.to_string_lossy()
-        .chars()
-        .map(|character| if character.is_ascii_alphanumeric() { character } else { '_' })
-        .collect()
-}
-
-/// 去掉 Windows `\\?\` 长路径前缀，避免 `cl.exe` 在源码路径解析上出现兼容性问题。
-fn normalize_windows_path(path: &Path) -> PathBuf {
-    let text = path.display().to_string();
-    if let Some(stripped) = text.strip_prefix("\\\\?\\") {
-        PathBuf::from(stripped)
-    } else {
-        path.to_path_buf()
     }
 }
 
@@ -607,7 +419,10 @@ mod tests {
     #[test]
     fn should_build_and_run_msceshi_string_method_matrix() {
         let output = build_and_run_msceshi_fixture("string-method-matrix.ms");
-        assert_eq!(output, "你好，世界\ntrue\ntrue\ntrue\n你好，Mascript\n中文\n");
+        assert_eq!(
+            output,
+            "你好，世界\ntrue\ntrue\ntrue\n你好，Mascript\n中文\n"
+        );
     }
 
     /// 校验 `msceshi` 中短路保护样例运行时不会错误求值右侧危险表达式，避免隐藏的越界/空指针回归。

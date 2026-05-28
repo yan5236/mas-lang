@@ -24,7 +24,9 @@ pub struct ImportPath {
 impl ImportPath {
     /// 返回当前模块路径是否显式使用了 `local.` 前缀。
     pub fn is_local(&self) -> bool {
-        self.segments.first().is_some_and(|segment| segment == "local")
+        self.segments
+            .first()
+            .is_some_and(|segment| segment == "local")
     }
 
     /// 返回去除 `local.` 前缀后的真实模块路径片段。

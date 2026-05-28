@@ -86,7 +86,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 ValueType::Unit
             };
 
-                self.functions.insert(
+            self.functions.insert(
                 name.clone(),
                 FunctionSignature {
                     parameter_types,

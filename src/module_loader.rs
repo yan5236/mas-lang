@@ -217,7 +217,8 @@ impl<'a> ModuleLoader<'a> {
         let dependency_names = self.read_dependency_names(package_root)?;
         if !path.is_local() && dependency_names.contains(&segments[0]) {
             let dependency_root = self.find_dependency_root(&segments[0])?;
-            let target = resolve_module_file(&dependency_root.join("src"), &segments[1..], path.span)?;
+            let target =
+                resolve_module_file(&dependency_root.join("src"), &segments[1..], path.span)?;
             return Ok((target, dependency_root));
         }
 
@@ -226,7 +227,10 @@ impl<'a> ModuleLoader<'a> {
     }
 
     /// 读取当前包 `mod.yml` 中声明的依赖名集合，供导入解析顺序判断复用。
-    fn read_dependency_names(&mut self, package_root: &Path) -> Result<BTreeSet<String>, CompilerError> {
+    fn read_dependency_names(
+        &mut self,
+        package_root: &Path,
+    ) -> Result<BTreeSet<String>, CompilerError> {
         if let Some(cached) = self.dependency_cache.get(package_root) {
             return Ok(cached.clone());
         }
@@ -311,8 +315,13 @@ impl ModuleRewriter {
                 body,
                 span,
             } => {
-                let new_name = if is_top_level { self.rename_name(&name) } else { name.clone() };
-                self.local_scopes.push(parameters.iter().map(|item| item.name.clone()).collect());
+                let new_name = if is_top_level {
+                    self.rename_name(&name)
+                } else {
+                    name.clone()
+                };
+                self.local_scopes
+                    .push(parameters.iter().map(|item| item.name.clone()).collect());
                 let body = body
                     .into_iter()
                     .map(|nested| self.rewrite_stmt(nested, false))
@@ -335,7 +344,11 @@ impl ModuleRewriter {
                 span,
             } => Stmt::ExternFunctionDecl {
                 is_public: false,
-                name: if is_top_level { self.rename_name(&name) } else { name },
+                name: if is_top_level {
+                    self.rename_name(&name)
+                } else {
+                    name
+                },
                 parameters,
                 return_type,
                 span,
@@ -355,19 +368,32 @@ impl ModuleRewriter {
                 Stmt::VarDecl {
                     is_public: false,
                     binding_kind,
-                    name: if is_top_level { self.rename_name(&name) } else { name },
+                    name: if is_top_level {
+                        self.rename_name(&name)
+                    } else {
+                        name
+                    },
                     annotation,
                     initializer,
                     span,
                 }
             }
-            Stmt::Assign { target, op, value, span } => Stmt::Assign {
+            Stmt::Assign {
+                target,
+                op,
+                value,
+                span,
+            } => Stmt::Assign {
                 target: self.rewrite_target(target),
                 op,
                 value: self.rewrite_expr(value),
                 span,
             },
-            Stmt::If { branches, else_branch, span } => Stmt::If {
+            Stmt::If {
+                branches,
+                else_branch,
+                span,
+            } => Stmt::If {
                 branches: branches
                     .into_iter()
                     .map(|branch| ConditionalBranch {
@@ -379,14 +405,27 @@ impl ModuleRewriter {
                 else_branch: else_branch.map(|body| self.rewrite_block(body)),
                 span,
             },
-            Stmt::While { condition, body, span } => Stmt::While {
+            Stmt::While {
+                condition,
+                body,
+                span,
+            } => Stmt::While {
                 condition: self.rewrite_expr(condition),
                 body: self.rewrite_block(body),
                 span,
             },
-            Stmt::ForRange { name, start, end, body, span } => {
+            Stmt::ForRange {
+                name,
+                start,
+                end,
+                body,
+                span,
+            } => {
                 self.local_scopes.push(HashSet::from([name.clone()]));
-                let body = body.into_iter().map(|item| self.rewrite_stmt(item, false)).collect();
+                let body = body
+                    .into_iter()
+                    .map(|item| self.rewrite_stmt(item, false))
+                    .collect();
                 self.local_scopes.pop();
                 Stmt::ForRange {
                     name,
@@ -396,13 +435,22 @@ impl ModuleRewriter {
                     span,
                 }
             }
-            Stmt::ForEach { key_name, value_name, iterable, body, span } => {
+            Stmt::ForEach {
+                key_name,
+                value_name,
+                iterable,
+                body,
+                span,
+            } => {
                 let mut scope = HashSet::from([key_name.clone()]);
                 if let Some(value_name) = &value_name {
                     scope.insert(value_name.clone());
                 }
                 self.local_scopes.push(scope);
-                let body = body.into_iter().map(|item| self.rewrite_stmt(item, false)).collect();
+                let body = body
+                    .into_iter()
+                    .map(|item| self.rewrite_stmt(item, false))
+                    .collect();
                 self.local_scopes.pop();
                 Stmt::ForEach {
                     key_name,
@@ -427,7 +475,10 @@ impl ModuleRewriter {
     /// 为嵌套代码块创建独立的局部作用域，避免错误替换局部变量名。
     fn rewrite_block(&mut self, body: Vec<Stmt>) -> Vec<Stmt> {
         self.local_scopes.push(HashSet::new());
-        let rewritten = body.into_iter().map(|item| self.rewrite_stmt(item, false)).collect();
+        let rewritten = body
+            .into_iter()
+            .map(|item| self.rewrite_stmt(item, false))
+            .collect();
         self.local_scopes.pop();
         rewritten
     }
@@ -439,7 +490,11 @@ impl ModuleRewriter {
                 name: self.rewrite_identifier(name),
                 span,
             },
-            AssignTarget::Index { target, index, span } => AssignTarget::Index {
+            AssignTarget::Index {
+                target,
+                index,
+                span,
+            } => AssignTarget::Index {
                 target: Box::new(self.rewrite_expr(*target)),
                 index: Box::new(self.rewrite_expr(*index)),
                 span,
@@ -454,7 +509,12 @@ impl ModuleRewriter {
                 name: self.rewrite_identifier(name),
                 span,
             },
-            Expr::Binary { left, op, right, span } => Expr::Binary {
+            Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => Expr::Binary {
                 left: Box::new(self.rewrite_expr(*left)),
                 op,
                 right: Box::new(self.rewrite_expr(*right)),
@@ -465,47 +525,89 @@ impl ModuleRewriter {
                 operand: Box::new(self.rewrite_expr(*operand)),
                 span,
             },
-            Expr::Call { callee, arguments, span } => Expr::Call {
+            Expr::Call {
+                callee,
+                arguments,
+                span,
+            } => Expr::Call {
                 callee: Box::new(self.rewrite_expr(*callee)),
-                arguments: arguments.into_iter().map(|item| self.rewrite_expr(item)).collect(),
+                arguments: arguments
+                    .into_iter()
+                    .map(|item| self.rewrite_expr(item))
+                    .collect(),
                 span,
             },
             Expr::ListLiteral { elements, span } => Expr::ListLiteral {
-                elements: elements.into_iter().map(|item| self.rewrite_expr(item)).collect(),
+                elements: elements
+                    .into_iter()
+                    .map(|item| self.rewrite_expr(item))
+                    .collect(),
                 span,
             },
             Expr::MapLiteral { entries, span } => Expr::MapLiteral {
-                entries: entries.into_iter().map(|entry| MapEntry {
-                    key: self.rewrite_expr(entry.key),
-                    value: self.rewrite_expr(entry.value),
-                    span: entry.span,
-                }).collect(),
+                entries: entries
+                    .into_iter()
+                    .map(|entry| MapEntry {
+                        key: self.rewrite_expr(entry.key),
+                        value: self.rewrite_expr(entry.value),
+                        span: entry.span,
+                    })
+                    .collect(),
                 span,
             },
-            Expr::ArrayInitializer { element_type, size, elements, span } => Expr::ArrayInitializer {
+            Expr::ArrayInitializer {
                 element_type,
                 size,
-                elements: elements.into_iter().map(|item| self.rewrite_expr(item)).collect(),
+                elements,
+                span,
+            } => Expr::ArrayInitializer {
+                element_type,
+                size,
+                elements: elements
+                    .into_iter()
+                    .map(|item| self.rewrite_expr(item))
+                    .collect(),
                 span,
             },
-            Expr::Index { target, index, span } => Expr::Index {
+            Expr::Index {
+                target,
+                index,
+                span,
+            } => Expr::Index {
                 target: Box::new(self.rewrite_expr(*target)),
                 index: Box::new(self.rewrite_expr(*index)),
                 span,
             },
-            Expr::Slice { target, start, end, span } => Expr::Slice {
+            Expr::Slice {
+                target,
+                start,
+                end,
+                span,
+            } => Expr::Slice {
                 target: Box::new(self.rewrite_expr(*target)),
                 start: start.map(|expr| Box::new(self.rewrite_expr(*expr))),
                 end: end.map(|expr| Box::new(self.rewrite_expr(*expr))),
                 span,
             },
-            Expr::MethodCall { target, method, arguments, span } => Expr::MethodCall {
+            Expr::MethodCall {
+                target,
+                method,
+                arguments,
+                span,
+            } => Expr::MethodCall {
                 target: Box::new(self.rewrite_expr(*target)),
                 method,
-                arguments: arguments.into_iter().map(|item| self.rewrite_expr(item)).collect(),
+                arguments: arguments
+                    .into_iter()
+                    .map(|item| self.rewrite_expr(item))
+                    .collect(),
                 span,
             },
-            Expr::PropertyAccess { target, property, span } => Expr::PropertyAccess {
+            Expr::PropertyAccess {
+                target,
+                property,
+                span,
+            } => Expr::PropertyAccess {
                 target: Box::new(self.rewrite_expr(*target)),
                 property,
                 span,
@@ -529,12 +631,18 @@ impl ModuleRewriter {
 
     /// 返回当前名称在模块内部对应的稳定重写结果，不存在时保留原名。
     fn rename_name(&self, name: &str) -> String {
-        self.bindings.get(name).cloned().unwrap_or_else(|| name.to_string())
+        self.bindings
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 
     /// 判断给定名称是否已在当前局部作用域中声明，从而不应被重写。
     fn is_local_name(&self, name: &str) -> bool {
-        self.local_scopes.iter().rev().any(|scope| scope.contains(name))
+        self.local_scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
     }
 
     /// 返回当前可写局部作用域，用于登记新声明的局部变量名。
@@ -583,7 +691,10 @@ fn merge_imports(
         ImportKind::Named(items) => {
             for ImportItem { name, alias, .. } in items {
                 let internal = exports.get(name).ok_or_else(|| {
-                    CompilerError::build_message(format!("导入的符号 `{name}` 不存在或未公开"), span)
+                    CompilerError::build_message(
+                        format!("导入的符号 `{name}` 不存在或未公开"),
+                        span,
+                    )
                 })?;
                 let visible_name = alias.clone().unwrap_or_else(|| name.clone());
                 imports.insert(visible_name.clone(), internal.clone());
@@ -607,14 +718,22 @@ fn parse_dependency_names(text: &str) -> BTreeSet<String> {
         if !raw_line.starts_with("  ") {
             in_dependencies = false;
         }
-        if in_dependencies && raw_line.starts_with("  ") && !raw_line.starts_with("    ") && trimmed.ends_with(':') {
+        if in_dependencies
+            && raw_line.starts_with("  ")
+            && !raw_line.starts_with("    ")
+            && trimmed.ends_with(':')
+        {
             dependencies.insert(trimmed.trim_end_matches(':').to_string());
         }
     }
     dependencies
 }
 
-fn resolve_module_file(module_root: &Path, segments: &[String], span: Span) -> Result<PathBuf, CompilerError> {
+fn resolve_module_file(
+    module_root: &Path,
+    segments: &[String],
+    span: Span,
+) -> Result<PathBuf, CompilerError> {
     let mut path = module_root.to_path_buf();
     for segment in segments {
         path.push(segment);
@@ -647,7 +766,10 @@ fn append_module_source(output: &mut String, module_path: &Path, source: &Source
 
 fn read_module_source(path: &Path) -> Result<SourceFile, CompilerError> {
     let text = fs::read_to_string(path).map_err(|error| {
-        CompilerError::build_message(format!("读取模块失败：{}: {error}", path.display()), Span::new(0, 0))
+        CompilerError::build_message(
+            format!("读取模块失败：{}: {error}", path.display()),
+            Span::new(0, 0),
+        )
     })?;
     Ok(SourceFile::new(path.display().to_string(), text))
 }
@@ -663,7 +785,10 @@ fn discover_project_root(entry_path: &Path) -> Option<PathBuf> {
     None
 }
 
-fn discover_package_root(module_path: &Path, project_root: &Path) -> Result<PathBuf, CompilerError> {
+fn discover_package_root(
+    module_path: &Path,
+    project_root: &Path,
+) -> Result<PathBuf, CompilerError> {
     let mut current = module_path.parent();
     while let Some(path) = current {
         if path.join("mod.yml").is_file() && path.join("src").is_dir() {
@@ -682,7 +807,10 @@ fn discover_package_root(module_path: &Path, project_root: &Path) -> Result<Path
 
 fn canonicalize_path(path: &Path) -> Result<PathBuf, CompilerError> {
     fs::canonicalize(path).map_err(|error| {
-        CompilerError::build_message(format!("解析路径失败：{}: {error}", path.display()), Span::new(0, 0))
+        CompilerError::build_message(
+            format!("解析路径失败：{}: {error}", path.display()),
+            Span::new(0, 0),
+        )
     })
 }
 
@@ -710,28 +838,69 @@ fn sanitize_module_name(module_path: &Path) -> String {
     module_path
         .to_string_lossy()
         .chars()
-        .map(|character| if character.is_ascii_alphanumeric() { character } else { '_' })
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
 fn shift_stmt(statement: Stmt, offset: usize) -> Stmt {
     match statement {
-        Stmt::FunctionDecl { is_public, name, parameters, return_type, body, span } => Stmt::FunctionDecl {
+        Stmt::FunctionDecl {
             is_public,
             name,
-            parameters: parameters.into_iter().map(|mut item| { item.span = shift_span(item.span, offset); item }).collect(),
+            parameters,
             return_type,
-            body: body.into_iter().map(|item| shift_stmt(item, offset)).collect(),
-            span: shift_span(span, offset),
-        },
-        Stmt::ExternFunctionDecl { is_public, name, parameters, return_type, span } => Stmt::ExternFunctionDecl {
+            body,
+            span,
+        } => Stmt::FunctionDecl {
             is_public,
             name,
-            parameters: parameters.into_iter().map(|mut item| { item.span = shift_span(item.span, offset); item }).collect(),
+            parameters: parameters
+                .into_iter()
+                .map(|mut item| {
+                    item.span = shift_span(item.span, offset);
+                    item
+                })
+                .collect(),
+            return_type,
+            body: body
+                .into_iter()
+                .map(|item| shift_stmt(item, offset))
+                .collect(),
+            span: shift_span(span, offset),
+        },
+        Stmt::ExternFunctionDecl {
+            is_public,
+            name,
+            parameters,
+            return_type,
+            span,
+        } => Stmt::ExternFunctionDecl {
+            is_public,
+            name,
+            parameters: parameters
+                .into_iter()
+                .map(|mut item| {
+                    item.span = shift_span(item.span, offset);
+                    item
+                })
+                .collect(),
             return_type,
             span: shift_span(span, offset),
         },
-        Stmt::VarDecl { is_public, binding_kind, name, annotation, initializer, span } => Stmt::VarDecl {
+        Stmt::VarDecl {
+            is_public,
+            binding_kind,
+            name,
+            annotation,
+            initializer,
+            span,
+        } => Stmt::VarDecl {
             is_public,
             binding_kind,
             name,
@@ -739,38 +908,83 @@ fn shift_stmt(statement: Stmt, offset: usize) -> Stmt {
             initializer: initializer.map(|expr| shift_expr(expr, offset)),
             span: shift_span(span, offset),
         },
-        Stmt::Assign { target, op, value, span } => Stmt::Assign {
+        Stmt::Assign {
+            target,
+            op,
+            value,
+            span,
+        } => Stmt::Assign {
             target: shift_target(target, offset),
             op,
             value: shift_expr(value, offset),
             span: shift_span(span, offset),
         },
-        Stmt::If { branches, else_branch, span } => Stmt::If {
-            branches: branches.into_iter().map(|branch| ConditionalBranch {
-                condition: shift_expr(branch.condition, offset),
-                body: branch.body.into_iter().map(|item| shift_stmt(item, offset)).collect(),
-                span: shift_span(branch.span, offset),
-            }).collect(),
-            else_branch: else_branch.map(|body| body.into_iter().map(|item| shift_stmt(item, offset)).collect()),
+        Stmt::If {
+            branches,
+            else_branch,
+            span,
+        } => Stmt::If {
+            branches: branches
+                .into_iter()
+                .map(|branch| ConditionalBranch {
+                    condition: shift_expr(branch.condition, offset),
+                    body: branch
+                        .body
+                        .into_iter()
+                        .map(|item| shift_stmt(item, offset))
+                        .collect(),
+                    span: shift_span(branch.span, offset),
+                })
+                .collect(),
+            else_branch: else_branch.map(|body| {
+                body.into_iter()
+                    .map(|item| shift_stmt(item, offset))
+                    .collect()
+            }),
             span: shift_span(span, offset),
         },
-        Stmt::While { condition, body, span } => Stmt::While {
+        Stmt::While {
+            condition,
+            body,
+            span,
+        } => Stmt::While {
             condition: shift_expr(condition, offset),
-            body: body.into_iter().map(|item| shift_stmt(item, offset)).collect(),
+            body: body
+                .into_iter()
+                .map(|item| shift_stmt(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
-        Stmt::ForRange { name, start, end, body, span } => Stmt::ForRange {
+        Stmt::ForRange {
+            name,
+            start,
+            end,
+            body,
+            span,
+        } => Stmt::ForRange {
             name,
             start: shift_expr(start, offset),
             end: shift_expr(end, offset),
-            body: body.into_iter().map(|item| shift_stmt(item, offset)).collect(),
+            body: body
+                .into_iter()
+                .map(|item| shift_stmt(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
-        Stmt::ForEach { key_name, value_name, iterable, body, span } => Stmt::ForEach {
+        Stmt::ForEach {
+            key_name,
+            value_name,
+            iterable,
+            body,
+            span,
+        } => Stmt::ForEach {
             key_name,
             value_name,
             iterable: shift_expr(iterable, offset),
-            body: body.into_iter().map(|item| shift_stmt(item, offset)).collect(),
+            body: body
+                .into_iter()
+                .map(|item| shift_stmt(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
         Stmt::Return { value, span } => Stmt::Return {
@@ -787,8 +1001,15 @@ fn shift_stmt(statement: Stmt, offset: usize) -> Stmt {
 
 fn shift_target(target: AssignTarget, offset: usize) -> AssignTarget {
     match target {
-        AssignTarget::Identifier { name, span } => AssignTarget::Identifier { name, span: shift_span(span, offset) },
-        AssignTarget::Index { target, index, span } => AssignTarget::Index {
+        AssignTarget::Identifier { name, span } => AssignTarget::Identifier {
+            name,
+            span: shift_span(span, offset),
+        },
+        AssignTarget::Index {
+            target,
+            index,
+            span,
+        } => AssignTarget::Index {
             target: Box::new(shift_expr(*target, offset)),
             index: Box::new(shift_expr(*index, offset)),
             span: shift_span(span, offset),
@@ -798,9 +1019,20 @@ fn shift_target(target: AssignTarget, offset: usize) -> AssignTarget {
 
 fn shift_expr(expr: Expr, offset: usize) -> Expr {
     match expr {
-        Expr::Literal { value, span } => Expr::Literal { value, span: shift_span(span, offset) },
-        Expr::Identifier { name, span } => Expr::Identifier { name, span: shift_span(span, offset) },
-        Expr::Binary { left, op, right, span } => Expr::Binary {
+        Expr::Literal { value, span } => Expr::Literal {
+            value,
+            span: shift_span(span, offset),
+        },
+        Expr::Identifier { name, span } => Expr::Identifier {
+            name,
+            span: shift_span(span, offset),
+        },
+        Expr::Binary {
+            left,
+            op,
+            right,
+            span,
+        } => Expr::Binary {
             left: Box::new(shift_expr(*left, offset)),
             op,
             right: Box::new(shift_expr(*right, offset)),
@@ -811,47 +1043,89 @@ fn shift_expr(expr: Expr, offset: usize) -> Expr {
             operand: Box::new(shift_expr(*operand, offset)),
             span: shift_span(span, offset),
         },
-        Expr::Call { callee, arguments, span } => Expr::Call {
+        Expr::Call {
+            callee,
+            arguments,
+            span,
+        } => Expr::Call {
             callee: Box::new(shift_expr(*callee, offset)),
-            arguments: arguments.into_iter().map(|item| shift_expr(item, offset)).collect(),
+            arguments: arguments
+                .into_iter()
+                .map(|item| shift_expr(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
         Expr::ListLiteral { elements, span } => Expr::ListLiteral {
-            elements: elements.into_iter().map(|item| shift_expr(item, offset)).collect(),
+            elements: elements
+                .into_iter()
+                .map(|item| shift_expr(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
         Expr::MapLiteral { entries, span } => Expr::MapLiteral {
-            entries: entries.into_iter().map(|entry| MapEntry {
-                key: shift_expr(entry.key, offset),
-                value: shift_expr(entry.value, offset),
-                span: shift_span(entry.span, offset),
-            }).collect(),
+            entries: entries
+                .into_iter()
+                .map(|entry| MapEntry {
+                    key: shift_expr(entry.key, offset),
+                    value: shift_expr(entry.value, offset),
+                    span: shift_span(entry.span, offset),
+                })
+                .collect(),
             span: shift_span(span, offset),
         },
-        Expr::ArrayInitializer { element_type, size, elements, span } => Expr::ArrayInitializer {
+        Expr::ArrayInitializer {
             element_type,
             size,
-            elements: elements.into_iter().map(|item| shift_expr(item, offset)).collect(),
+            elements,
+            span,
+        } => Expr::ArrayInitializer {
+            element_type,
+            size,
+            elements: elements
+                .into_iter()
+                .map(|item| shift_expr(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
-        Expr::Index { target, index, span } => Expr::Index {
+        Expr::Index {
+            target,
+            index,
+            span,
+        } => Expr::Index {
             target: Box::new(shift_expr(*target, offset)),
             index: Box::new(shift_expr(*index, offset)),
             span: shift_span(span, offset),
         },
-        Expr::Slice { target, start, end, span } => Expr::Slice {
+        Expr::Slice {
+            target,
+            start,
+            end,
+            span,
+        } => Expr::Slice {
             target: Box::new(shift_expr(*target, offset)),
             start: start.map(|expr| Box::new(shift_expr(*expr, offset))),
             end: end.map(|expr| Box::new(shift_expr(*expr, offset))),
             span: shift_span(span, offset),
         },
-        Expr::MethodCall { target, method, arguments, span } => Expr::MethodCall {
+        Expr::MethodCall {
+            target,
+            method,
+            arguments,
+            span,
+        } => Expr::MethodCall {
             target: Box::new(shift_expr(*target, offset)),
             method,
-            arguments: arguments.into_iter().map(|item| shift_expr(item, offset)).collect(),
+            arguments: arguments
+                .into_iter()
+                .map(|item| shift_expr(item, offset))
+                .collect(),
             span: shift_span(span, offset),
         },
-        Expr::PropertyAccess { target, property, span } => Expr::PropertyAccess {
+        Expr::PropertyAccess {
+            target,
+            property,
+            span,
+        } => Expr::PropertyAccess {
             target: Box::new(shift_expr(*target, offset)),
             property,
             span: shift_span(span, offset),

@@ -15,9 +15,11 @@ enum CliCommand {
     Build {
         file: PathBuf,
         output: Option<PathBuf>,
+        allow_native_source_build: bool,
     },
     Run {
         file: PathBuf,
+        allow_native_source_build: bool,
     },
 }
 
@@ -48,8 +50,15 @@ pub fn run() -> ExitCode {
             println!("{}", render_help(&program_name, settings.language));
             ExitCode::SUCCESS
         }
-        CliCommand::Build { file, output } => build_file(&settings, file, output),
-        CliCommand::Run { file } => run_file(&settings, file),
+        CliCommand::Build {
+            file,
+            output,
+            allow_native_source_build,
+        } => build_file(&settings, file, output, allow_native_source_build),
+        CliCommand::Run {
+            file,
+            allow_native_source_build,
+        } => run_file(&settings, file, allow_native_source_build),
     }
 }
 
@@ -78,6 +87,7 @@ fn parse_build_args(args: &[String]) -> Result<CliCommand, CompilerError> {
 
     let file = PathBuf::from(&args[0]);
     let mut output = None;
+    let mut allow_native_source_build = false;
     let mut index = 1usize;
 
     while index < args.len() {
@@ -89,6 +99,10 @@ fn parse_build_args(args: &[String]) -> Result<CliCommand, CompilerError> {
                 output = Some(PathBuf::from(path));
                 index += 2;
             }
+            "--allow-native-source-build" => {
+                allow_native_source_build = true;
+                index += 1;
+            }
             other => {
                 return Err(CompilerError::cli(
                     MessageId::CliUnexpectedArgument,
@@ -98,7 +112,11 @@ fn parse_build_args(args: &[String]) -> Result<CliCommand, CompilerError> {
         }
     }
 
-    Ok(CliCommand::Build { file, output })
+    Ok(CliCommand::Build {
+        file,
+        output,
+        allow_native_source_build,
+    })
 }
 
 /// 解析 `run` 子命令参数。
@@ -106,19 +124,36 @@ fn parse_run_args(args: &[String]) -> Result<CliCommand, CompilerError> {
     if args.is_empty() {
         return Err(CompilerError::cli(MessageId::CliMissingInputFile, vec![]));
     }
-    if args.len() > 1 {
-        return Err(CompilerError::cli(
-            MessageId::CliUnexpectedArgument,
-            vec![args[1].clone()],
-        ));
+    let file = PathBuf::from(&args[0]);
+    let mut allow_native_source_build = false;
+    let mut index = 1usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--allow-native-source-build" => {
+                allow_native_source_build = true;
+                index += 1;
+            }
+            other => {
+                return Err(CompilerError::cli(
+                    MessageId::CliUnexpectedArgument,
+                    vec![other.to_string()],
+                ));
+            }
+        }
     }
     Ok(CliCommand::Run {
-        file: PathBuf::from(&args[0]),
+        file,
+        allow_native_source_build,
     })
 }
 
 /// 读取源码并执行编译命令，把结果输出到终端。
-fn build_file(settings: &CompilerSettings, path: PathBuf, output: Option<PathBuf>) -> ExitCode {
+fn build_file(
+    settings: &CompilerSettings,
+    path: PathBuf,
+    output: Option<PathBuf>,
+    allow_native_source_build: bool,
+) -> ExitCode {
     let source = match read_source(&path) {
         Ok(source) => source,
         Err(error) => {
@@ -127,7 +162,9 @@ fn build_file(settings: &CompilerSettings, path: PathBuf, output: Option<PathBuf
         }
     };
 
-    match compile_to_executable(&source, settings, &CompileOptions::new(output)) {
+    let options =
+        CompileOptions::new(output).with_allow_native_source_build(allow_native_source_build);
+    match compile_to_executable(&source, settings, &options) {
         Ok(binary) => {
             println!("{}", binary.display());
             ExitCode::SUCCESS
@@ -140,7 +177,11 @@ fn build_file(settings: &CompilerSettings, path: PathBuf, output: Option<PathBuf
 }
 
 /// 读取源码、编译临时可执行文件并立即运行。
-fn run_file(settings: &CompilerSettings, path: PathBuf) -> ExitCode {
+fn run_file(
+    settings: &CompilerSettings,
+    path: PathBuf,
+    allow_native_source_build: bool,
+) -> ExitCode {
     let source = match read_source(&path) {
         Ok(source) => source,
         Err(error) => {
@@ -150,14 +191,15 @@ fn run_file(settings: &CompilerSettings, path: PathBuf) -> ExitCode {
     };
 
     let output_path = temp_run_binary_path();
-    let binary =
-        match compile_to_executable(&source, settings, &CompileOptions::new(Some(output_path))) {
-            Ok(binary) => binary,
-            Err(error) => {
-                eprintln!("{}", error.render(settings.language, Some(&source)));
-                return ExitCode::FAILURE;
-            }
-        };
+    let options = CompileOptions::new(Some(output_path))
+        .with_allow_native_source_build(allow_native_source_build);
+    let binary = match compile_to_executable(&source, settings, &options) {
+        Ok(binary) => binary,
+        Err(error) => {
+            eprintln!("{}", error.render(settings.language, Some(&source)));
+            return ExitCode::FAILURE;
+        }
+    };
 
     match Command::new(binary).output() {
         Ok(output) if output.status.success() => {
@@ -239,14 +281,21 @@ fn render_help(program_name: &str, language: UiLanguage) -> String {
         UiLanguage::ZhCn => "  -o, --output <path>      指定输出文件路径",
         UiLanguage::EnUs => "  -o, --output <path>      Set the output executable path",
     };
+    let native_option_line = match language {
+        UiLanguage::ZhCn => "  --allow-native-source-build  允许维护者以源码方式刷新原生产物",
+        UiLanguage::EnUs => {
+            "  --allow-native-source-build  Allow maintainers to refresh native artifacts from C sources"
+        }
+    };
 
     format!(
-        "{title}\n{usage}\n\n{commands}\n\n{options_title}:\n{option_line}",
+        "{title}\n{usage}\n\n{commands}\n\n{options_title}:\n{option_line}\n{native_option_line}",
         title = render_message(language, MessageId::CliHelpTitle, &[]),
         usage = usage,
         commands = commands,
         options_title = options_title,
-        option_line = option_line
+        option_line = option_line,
+        native_option_line = native_option_line
     )
 }
 
