@@ -8,9 +8,18 @@ output = "build"
 opt-level = 2
 
 [native]
+abi = 1
+source_fallback = "explicit"
 include = ["native/include"]
 
 [native.sources]
 common = ["native/common/time_common.c"]
 windows = ["native/platform/windows/time_windows.c"]
 posix = ["native/platform/posix/time_posix.c"]
+
+[native.prebuilt.x86_64-pc-windows-msvc]
+manifest = "native/artifacts/x86_64-pc-windows-msvc/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-pc-windows-msvc/time_common.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/time_windows.obj",
+]
