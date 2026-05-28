@@ -12,6 +12,7 @@ pub fn run(args: RunArgs) -> Result<(), FamaError> {
     super::build::run(BuildArgs {
         project_dir: args.project_dir.clone(),
         output: None,
+        allow_native_source_build: args.allow_native_source_build,
     })?;
 
     let status = Command::new(&binary_path)

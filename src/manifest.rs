@@ -94,7 +94,9 @@ pub fn lock_file_path(project_root: &Path) -> PathBuf {
 
 /// 返回指定依赖在 `mod_module/` 下的平铺缓存目录路径。
 pub fn dependency_store_dir(project_root: &Path, name: &str, version: &str) -> PathBuf {
-    project_root.join("mod_module").join(format!("{name}@{version}"))
+    project_root
+        .join("mod_module")
+        .join(format!("{name}@{version}"))
 }
 
 /// 把依赖源路径转换为尽量稳定的相对路径字符串，便于写入清单和锁文件。
@@ -141,8 +143,9 @@ fn parse_project_manifest(path: &Path, text: &str) -> Result<ProjectManifest, Fa
 
         if let Some(rest) = trimmed.strip_prefix("version:") {
             if raw_line.starts_with("    ") {
-                let dependency_name =
-                    current_dependency.as_ref().ok_or_else(|| invalid_manifest(path, "依赖 version 缺少所属依赖名"))?;
+                let dependency_name = current_dependency
+                    .as_ref()
+                    .ok_or_else(|| invalid_manifest(path, "依赖 version 缺少所属依赖名"))?;
                 let dependency = dependencies
                     .get_mut(dependency_name)
                     .ok_or_else(|| invalid_manifest(path, "依赖 version 缺少初始化节点"))?;
@@ -173,8 +176,9 @@ fn parse_project_manifest(path: &Path, text: &str) -> Result<ProjectManifest, Fa
         }
 
         if let Some(rest) = trimmed.strip_prefix("path:") {
-            let dependency_name =
-                current_dependency.as_ref().ok_or_else(|| invalid_manifest(path, "依赖 path 缺少所属依赖名"))?;
+            let dependency_name = current_dependency
+                .as_ref()
+                .ok_or_else(|| invalid_manifest(path, "依赖 path 缺少所属依赖名"))?;
             let dependency = dependencies
                 .get_mut(dependency_name)
                 .ok_or_else(|| invalid_manifest(path, "依赖 path 缺少初始化节点"))?;
@@ -391,12 +395,12 @@ fn diff_paths(path: &Path, base: &Path) -> Option<PathBuf> {
         .count();
 
     if common_len == 0
-        && path_components.first().is_some_and(|component| {
-            matches!(component, Component::Prefix(_) | Component::RootDir)
-        })
-        && base_components.first().is_some_and(|component| {
-            matches!(component, Component::Prefix(_) | Component::RootDir)
-        })
+        && path_components
+            .first()
+            .is_some_and(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+        && base_components
+            .first()
+            .is_some_and(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
         && path_components.first() != base_components.first()
     {
         return None;

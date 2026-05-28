@@ -87,7 +87,7 @@ impl Installer {
             &source_root,
         )?;
 
-        if self.should_reuse_locked_dependency(dependency_name) {
+        if self.should_reuse_locked_dependency(dependency_name, &source_root)? {
             return Ok(());
         }
 
@@ -97,8 +97,11 @@ impl Installer {
         }
         self.active_stack.remove(&source_root);
 
-        let store_dir =
-            dependency_store_dir(&self.project_root, dependency_name, &dependency_manifest.version);
+        let store_dir = dependency_store_dir(
+            &self.project_root,
+            dependency_name,
+            &dependency_manifest.version,
+        );
         prepare_dependency_store(&store_dir)?;
         copy_dependency_project(&source_root, &store_dir)?;
 
@@ -177,14 +180,23 @@ impl Installer {
         Ok(())
     }
 
-    /// 判断锁文件中的依赖是否可以直接复用，避免锁文件存在但缓存缺失时被错误短路。
-    fn should_reuse_locked_dependency(&self, dependency_name: &str) -> bool {
-        self.locked_dependencies
-            .get(dependency_name)
-            .is_some_and(|dependency| {
-                resolve_locked_store_dir(&self.project_root, dependency)
-                    .is_some_and(|store_dir| is_dependency_store_usable(&store_dir))
-            })
+    /// 判断锁文件中的依赖是否可以直接复用，只有缓存存在且内容仍与源依赖一致时才允许短路。
+    fn should_reuse_locked_dependency(
+        &self,
+        dependency_name: &str,
+        source_root: &Path,
+    ) -> Result<bool, FamaError> {
+        let Some(dependency) = self.locked_dependencies.get(dependency_name) else {
+            return Ok(false);
+        };
+        let Some(store_dir) = resolve_locked_store_dir(&self.project_root, dependency) else {
+            return Ok(false);
+        };
+        if !is_dependency_store_usable(&store_dir) {
+            return Ok(false);
+        }
+
+        is_dependency_store_fresh(source_root, &store_dir)
     }
 }
 
@@ -201,8 +213,8 @@ fn copy_dependency_project(source_root: &Path, target_root: &Path) -> Result<(),
 
 /// 递归复制依赖项目目录树，并过滤掉不应该进入缓存的目录。
 fn copy_directory_recursive(source_root: &Path, target_root: &Path) -> Result<(), FamaError> {
-    for entry in
-        fs::read_dir(source_root).map_err(|source| FamaError::io(source_root.to_path_buf(), source))?
+    for entry in fs::read_dir(source_root)
+        .map_err(|source| FamaError::io(source_root.to_path_buf(), source))?
     {
         let entry = entry.map_err(|source| FamaError::io(source_root.to_path_buf(), source))?;
         let source_path = entry.path();
@@ -244,10 +256,103 @@ fn is_dependency_store_usable(store_dir: &Path) -> bool {
     store_dir.is_dir() && store_dir.join("mod.yml").is_file() && store_dir.join("src").is_dir()
 }
 
+/// 比较源依赖目录与缓存目录是否仍然一致，避免路径依赖更新后继续复用陈旧缓存。
+fn is_dependency_store_fresh(source_root: &Path, store_dir: &Path) -> Result<bool, FamaError> {
+    compare_dependency_directories(source_root, store_dir)
+}
+
+/// 递归比较两个依赖目录的有效内容，忽略 `build/`、`target/` 等不应进入缓存的目录。
+fn compare_dependency_directories(
+    source_root: &Path,
+    store_root: &Path,
+) -> Result<bool, FamaError> {
+    let source_entries = list_dependency_entries(source_root)?;
+    let store_entries = list_dependency_entries(store_root)?;
+    if source_entries.len() != store_entries.len() {
+        return Ok(false);
+    }
+
+    for (source_entry, store_entry) in source_entries.iter().zip(store_entries.iter()) {
+        if source_entry.name != store_entry.name
+            || source_entry.is_dir != store_entry.is_dir
+            || source_entry.is_file != store_entry.is_file
+        {
+            return Ok(false);
+        }
+
+        if source_entry.is_dir {
+            if !compare_dependency_directories(&source_entry.path, &store_entry.path)? {
+                return Ok(false);
+            }
+            continue;
+        }
+
+        if !source_entry.is_file {
+            return Ok(false);
+        }
+
+        if !files_have_same_content(&source_entry.path, &store_entry.path)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+/// 读取单层目录下所有应参与缓存比较的条目，并按名称排序保证遍历顺序稳定。
+fn list_dependency_entries(root: &Path) -> Result<Vec<DependencyEntrySnapshot>, FamaError> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(root).map_err(|source| FamaError::io(root.to_path_buf(), source))? {
+        let entry = entry.map_err(|source| FamaError::io(root.to_path_buf(), source))?;
+        let path = entry.path();
+        if should_skip_dependency_entry(&path) {
+            continue;
+        }
+
+        let file_type = entry
+            .file_type()
+            .map_err(|source| FamaError::io(path.clone(), source))?;
+        entries.push(DependencyEntrySnapshot {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            path,
+            is_dir: file_type.is_dir(),
+            is_file: file_type.is_file(),
+        });
+    }
+
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(entries)
+}
+
+/// 通过文件大小和字节内容双重比较两个文件，确保缓存命中时不会漏掉内容变化。
+fn files_have_same_content(left: &Path, right: &Path) -> Result<bool, FamaError> {
+    let left_meta =
+        fs::metadata(left).map_err(|source| FamaError::io(left.to_path_buf(), source))?;
+    let right_meta =
+        fs::metadata(right).map_err(|source| FamaError::io(right.to_path_buf(), source))?;
+    if left_meta.len() != right_meta.len() {
+        return Ok(false);
+    }
+
+    let left_bytes = fs::read(left).map_err(|source| FamaError::io(left.to_path_buf(), source))?;
+    let right_bytes =
+        fs::read(right).map_err(|source| FamaError::io(right.to_path_buf(), source))?;
+    Ok(left_bytes == right_bytes)
+}
+
+/// 保存目录比较时最小必需的条目快照，避免在递归过程里反复读取同一元信息。
+struct DependencyEntrySnapshot {
+    name: String,
+    path: PathBuf,
+    is_dir: bool,
+    is_file: bool,
+}
+
 /// 在重新复制依赖前清理残缺缓存目录，保证目标目录处于干净状态。
 fn prepare_dependency_store(store_dir: &Path) -> Result<(), FamaError> {
     if is_dependency_store_usable(store_dir) {
-        fs::remove_dir_all(store_dir).map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
+        fs::remove_dir_all(store_dir)
+            .map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
         return Ok(());
     }
 
@@ -256,7 +361,8 @@ fn prepare_dependency_store(store_dir: &Path) -> Result<(), FamaError> {
             fs::remove_dir_all(store_dir)
                 .map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
         } else {
-            fs::remove_file(store_dir).map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
+            fs::remove_file(store_dir)
+                .map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
         }
     }
 
@@ -294,8 +400,7 @@ mod tests {
     /// 创建带最小 `src/main.ms` 的测试项目，并写入依赖清单。
     fn create_project(root: &std::path::Path, name: &str, version: &str) {
         fs::create_dir_all(root.join("src")).expect("创建 src 目录失败");
-        fs::write(root.join("src").join("main.ms"), "print(\"hello\")\n")
-            .expect("写入源码失败");
+        fs::write(root.join("src").join("main.ms"), "print(\"hello\")\n").expect("写入源码失败");
         save_project_manifest(
             root,
             &ProjectManifest {
@@ -437,5 +542,117 @@ mod tests {
         assert!(store_dir.is_dir());
         assert!(store_dir.join("mod.yml").is_file());
         assert!(store_dir.join("src").is_dir());
+    }
+
+    /// 校验依赖缓存复制会保留包内稳定预编译目录，而不会把 `native/artifacts` 当成构建垃圾跳过。
+    #[test]
+    fn should_keep_native_artifacts_when_installing_dependency() {
+        let workspace = create_temp_dir("native-artifacts");
+        let app_root = workspace.join("app");
+        let lib_root = workspace.join("time");
+        create_project(&app_root, "app", "0.1.0");
+        create_project(&lib_root, "time", "0.1.0");
+        let artifact_root = lib_root
+            .join("native")
+            .join("artifacts")
+            .join("x86_64-pc-windows-msvc");
+        fs::create_dir_all(&artifact_root).expect("创建预编译目录失败");
+        fs::write(artifact_root.join("manifest.toml"), "target = \"x\"\n")
+            .expect("写入预编译清单失败");
+        fs::write(artifact_root.join("time_common.obj"), [1u8, 2, 3]).expect("写入预编译对象失败");
+
+        save_project_manifest(
+            &app_root,
+            &ProjectManifest {
+                name: "app".to_string(),
+                version: "0.1.0".to_string(),
+                dependencies: std::collections::BTreeMap::from([(
+                    "time".to_string(),
+                    DependencySpec {
+                        path: "../time".to_string(),
+                        version: "0.1.0".to_string(),
+                    },
+                )]),
+            },
+        )
+        .expect("更新应用依赖失败");
+
+        install_project_dependencies(&app_root).expect("安装依赖失败");
+
+        let installed_artifact_root = app_root
+            .join("mod_module")
+            .join("time@0.1.0")
+            .join("native")
+            .join("artifacts")
+            .join("x86_64-pc-windows-msvc");
+        assert!(installed_artifact_root.join("manifest.toml").is_file());
+        assert!(installed_artifact_root.join("time_common.obj").is_file());
+    }
+
+    /// 校验路径依赖源内容发生变化后，重复安装会刷新缓存而不是继续复用旧副本。
+    #[test]
+    fn should_refresh_store_when_dependency_source_changes() {
+        let workspace = create_temp_dir("refresh-store-on-source-change");
+        let app_root = workspace.join("app");
+        let lib_root = workspace.join("time");
+        create_project(&app_root, "app", "0.1.0");
+        create_project(&lib_root, "time", "0.1.0");
+
+        save_project_manifest(
+            &app_root,
+            &ProjectManifest {
+                name: "app".to_string(),
+                version: "0.1.0".to_string(),
+                dependencies: std::collections::BTreeMap::from([(
+                    "time".to_string(),
+                    DependencySpec {
+                        path: "../time".to_string(),
+                        version: "0.1.0".to_string(),
+                    },
+                )]),
+            },
+        )
+        .expect("更新应用依赖失败");
+
+        install_project_dependencies(&app_root).expect("首次安装依赖失败");
+
+        let artifact_root = lib_root
+            .join("native")
+            .join("artifacts")
+            .join("x86_64-pc-windows-msvc");
+        fs::create_dir_all(&artifact_root).expect("创建新增预编译目录失败");
+        fs::write(
+            lib_root.join("settings.toml"),
+            "[native.prebuilt.x86_64-pc-windows-msvc]\nmanifest = \"native/artifacts/x86_64-pc-windows-msvc/manifest.toml\"\nobjects = [\"native/artifacts/x86_64-pc-windows-msvc/time_common.obj\"]\n",
+        )
+        .expect("写入 settings.toml 失败");
+        fs::write(artifact_root.join("manifest.toml"), "target = \"x\"\n")
+            .expect("写入新增预编译清单失败");
+        fs::write(artifact_root.join("time_common.obj"), [9u8, 8, 7])
+            .expect("写入新增预编译对象失败");
+
+        install_project_dependencies(&app_root).expect("刷新依赖缓存失败");
+
+        let installed_root = app_root.join("mod_module").join("time@0.1.0");
+        assert!(installed_root.join("settings.toml").is_file());
+        assert!(
+            installed_root
+                .join("native")
+                .join("artifacts")
+                .join("x86_64-pc-windows-msvc")
+                .join("manifest.toml")
+                .is_file()
+        );
+        assert_eq!(
+            fs::read(
+                installed_root
+                    .join("native")
+                    .join("artifacts")
+                    .join("x86_64-pc-windows-msvc")
+                    .join("time_common.obj")
+            )
+            .expect("读取缓存对象文件失败"),
+            vec![9u8, 8, 7]
+        );
     }
 }

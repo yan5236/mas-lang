@@ -7,15 +7,17 @@ use mascript_compiler_llvm::{CompileOptions, compile_to_executable};
 use crate::cli::BuildArgs;
 use crate::config::load_settings;
 use crate::error::FamaError;
+use crate::install::install_project_dependencies;
 use crate::project::ProjectContext;
 
 /// 执行 `fama build`，读取项目配置并把入口源码编译成可执行文件。
 pub fn run(args: BuildArgs) -> Result<(), FamaError> {
     let context = ProjectContext::load(&args.project_dir)?;
+    install_project_dependencies(&context.root)?;
     let global_settings = load_settings()?;
     let source = load_entry_source(&context)?;
     let output_path = context.resolve_output_path(args.output.as_deref());
-    compile_project(&global_settings, &context, &source, &output_path)?;
+    compile_project(&global_settings, &args, &context, &source, &output_path)?;
 
     println!("已生成可执行文件: {}", output_path.display());
     Ok(())
@@ -24,12 +26,18 @@ pub fn run(args: BuildArgs) -> Result<(), FamaError> {
 /// 根据全局设置选择外部编译器或嵌入式主力编译器来构建当前项目。
 fn compile_project(
     global_settings: &crate::config::FamaSettings,
+    args: &BuildArgs,
     context: &ProjectContext,
     source: &SourceFile,
     output_path: &std::path::Path,
 ) -> Result<(), FamaError> {
     if let Some(binary_path) = &global_settings.compiler_binary {
-        run_external_compiler(binary_path, context, output_path)?;
+        run_external_compiler(
+            binary_path,
+            context,
+            output_path,
+            args.allow_native_source_build,
+        )?;
         return Ok(());
     }
 
@@ -37,7 +45,8 @@ fn compile_project(
     compile_to_executable(
         source,
         &settings,
-        &CompileOptions::new(Some(output_path.to_path_buf())),
+        &CompileOptions::new(Some(output_path.to_path_buf()))
+            .with_allow_native_source_build(args.allow_native_source_build),
     )
     .map_err(|error| FamaError::Compiler(error.render(settings.language, Some(source))))?;
     Ok(())
@@ -48,17 +57,23 @@ fn run_external_compiler(
     binary_path: &std::path::Path,
     context: &ProjectContext,
     output_path: &std::path::Path,
+    allow_native_source_build: bool,
 ) -> Result<(), FamaError> {
     if !binary_path.is_file() {
         return Err(FamaError::MissingFile(binary_path.to_path_buf()));
     }
 
-    let status = Command::new(binary_path)
+    let mut command = Command::new(binary_path);
+    command
         .arg("build")
         .arg(&context.entry_path)
         .arg("-o")
         .arg(output_path)
-        .current_dir(&context.root)
+        .current_dir(&context.root);
+    if allow_native_source_build {
+        command.arg("--allow-native-source-build");
+    }
+    let status = command
         .status()
         .map_err(|source| FamaError::io(binary_path.to_path_buf(), source))?;
 

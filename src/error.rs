@@ -9,19 +9,37 @@ pub enum FamaError {
     InvalidProjectName(String),
     ProjectAlreadyExists(PathBuf),
     MissingFile(PathBuf),
-    InvalidSettings { path: PathBuf, message: String },
-    InvalidManifest { path: PathBuf, message: String },
-    InvalidLockFile { path: PathBuf, message: String },
-    InvalidGlobalSettings { path: PathBuf, message: String },
+    InvalidSettings {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidManifest {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidLockFile {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidGlobalSettings {
+        path: PathBuf,
+        message: String,
+    },
     DependencyConflict {
         name: String,
         existing: String,
         incoming: String,
     },
     DependencyInstall(String),
-    CommandFailed { command: String, code: Option<i32> },
+    CommandFailed {
+        command: String,
+        code: Option<i32>,
+    },
     Compiler(String),
-    Io { path: PathBuf, source: io::Error },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
 }
 
 impl FamaError {

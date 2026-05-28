@@ -220,8 +220,11 @@ mod tests {
     #[test]
     fn should_load_compiler_binary_from_global_settings() {
         let path = create_temp_file("binary");
-        fs::write(&path, "[compiler]\nbinary = \"C:/tools/mascript-compiler-llvm.exe\"\n")
-            .expect("写入临时全局配置失败");
+        fs::write(
+            &path,
+            "[compiler]\nbinary = \"C:/tools/mascript-compiler-llvm.exe\"\n",
+        )
+        .expect("写入临时全局配置失败");
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(

@@ -250,7 +250,13 @@ fn should_install_local_dependency_and_run_imported_module() {
     assert!(stdout.contains("3"));
     assert!(read_to_string(&workdir.join("app").join("mod.yml")).contains("path: ../math"));
     assert!(read_to_string(&workdir.join("app").join("mod-lock.yml")).contains("math@0.1.0"));
-    assert!(workdir.join("app").join("mod_module").join("math@0.1.0").is_dir());
+    assert!(
+        workdir
+            .join("app")
+            .join("mod_module")
+            .join("math@0.1.0")
+            .is_dir()
+    );
 
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
 }

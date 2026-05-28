@@ -58,6 +58,9 @@ pub struct BuildArgs {
     /// 覆盖 `settings.toml` 中的默认输出文件位置。
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+    /// 允许维护者从 C 源文件刷新包内预编译原生产物。
+    #[arg(long)]
+    pub allow_native_source_build: bool,
 }
 
 /// 定义 `fama run` 子命令支持的项目路径参数。
@@ -66,4 +69,7 @@ pub struct RunArgs {
     /// 指向 Mascript 项目根目录，默认使用当前目录。
     #[arg(default_value = ".")]
     pub project_dir: PathBuf,
+    /// 允许维护者从 C 源文件刷新包内预编译原生产物。
+    #[arg(long)]
+    pub allow_native_source_build: bool,
 }
