@@ -1,0 +1,34 @@
+---
+sidebar_position: 4
+---
+
+# Timing and Sleep
+
+Monotonic clock timing and thread sleep.
+
+## monotonic_millis — Monotonic Clock Milliseconds
+
+The monotonic clock measures time intervals without being affected by system clock adjustments.
+
+```mas-lang
+let start: int = monotonic_millis()
+
+// perform some work...
+let elapsed: int = monotonic_millis() - start
+// elapsed is the duration in milliseconds
+```
+
+Returns the number of milliseconds since system boot, guaranteed to be monotonically non-decreasing within the same process.
+
+**Note**: `monotonic_millis` starts at system boot, not the Unix epoch — **do not** use it as a wall-clock time source.
+
+## sleep — Thread Sleep
+
+Blocks the current thread for at least the specified number of milliseconds.
+
+```mas-lang
+sleep(1000)   // sleep for at least 1000 ms (1 second)
+sleep(500)    // sleep for at least 500 ms
+```
+
+**Note**: Passing a negative value causes a runtime error. Actual sleep duration may slightly exceed the specified value depending on OS scheduling precision.
