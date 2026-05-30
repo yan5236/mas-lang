@@ -1,24 +1,47 @@
+use std::sync::Arc;
+
+use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    CompletionOptions, CompletionParams, CompletionResponse, DocumentSymbolParams,
+    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
     DocumentSymbolResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
     InitializeResult, InitializedParams, MessageType, OneOf, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer};
 
 use crate::completion::keyword_items;
+use crate::documents::{DocumentStore, is_mas_document};
 
 /// 保存 LSP 后端运行时需要的协议客户端句柄。
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
+    documents: Arc<RwLock<DocumentStore>>,
 }
 
 impl Backend {
     /// 创建新的语言服务器后端实例，供 `tower-lsp` 在建立服务时注入客户端句柄。
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            documents: Arc::new(RwLock::new(DocumentStore::new())),
+        }
+    }
+
+    /// 判断 URI 是否对应当前已经缓存的打开文档，主要供协议级测试和后续能力复用。
+    pub async fn has_document(&self, uri: &Url) -> bool {
+        self.documents.read().await.get(uri).is_some()
+    }
+
+    /// 读取指定 URI 的当前文档文本，供请求型能力在后续阶段复用最新编辑器内容。
+    pub async fn document_text(&self, uri: &Url) -> Option<String> {
+        self.documents
+            .read()
+            .await
+            .get(uri)
+            .map(|document| document.text.clone())
     }
 }
 
@@ -59,6 +82,45 @@ impl LanguageServer for Backend {
     /// 响应标准关闭请求，当前阶段不持有需要额外释放的外部资源。
     async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// 处理文档打开事件，缓存 `.ms` 文档的完整文本并为后续分析保留当前版本。
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let document = params.text_document;
+        if !is_mas_document(&document.language_id, &document.uri) {
+            return;
+        }
+
+        self.documents
+            .write()
+            .await
+            .upsert(document.uri, document.version, document.text);
+    }
+
+    /// 处理完整文本变更事件，按 LSP FULL sync 语义用最后一条完整文本替换缓存。
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let Some(change) = params.content_changes.into_iter().last() else {
+            return;
+        };
+
+        let uri = params.text_document.uri;
+        if !self.has_document(&uri).await {
+            return;
+        }
+
+        self.documents
+            .write()
+            .await
+            .upsert(uri, params.text_document.version, change.text);
+    }
+
+    /// 处理文档关闭事件，删除缓存并发布空诊断以清理客户端旧问题列表。
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let removed = self.documents.write().await.remove(&uri);
+        if removed.is_some() {
+            self.client.publish_diagnostics(uri, Vec::new(), None).await;
+        }
     }
 
     /// 返回一阶段的基础补全候选，后续阶段会合并当前文件符号和类型信息。

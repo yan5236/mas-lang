@@ -137,6 +137,127 @@ fn should_handle_stdio_initialize_completion_and_shutdown() {
     assert!(status.is_some_and(|status| status.success()));
 }
 
+/// 验证真实 stdio 语言服务器能用验证项目样例完成打开、完整变更和关闭事件链路。
+#[test]
+fn should_handle_validation_project_document_lifecycle() {
+    let sample_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../mskaifa/yanzhenglsp/src/main.ms");
+    let sample_text = std::fs::read_to_string(&sample_path).unwrap();
+    let document_uri = "file:///E:/xiangmu/mascript/mskaifa/yanzhenglsp/src/main.ms";
+
+    let mut server = Command::new(env!("CARGO_BIN_EXE_mas-lang-lsp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = server.stdin.take().unwrap();
+    let stdout = server.stdout.take().unwrap();
+    let (sender, receiver) = channel();
+    std::thread::spawn(move || {
+        let mut stdout = BufReader::new(stdout);
+        while let Ok(message) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_lsp_message(&mut stdout)
+        })) {
+            if sender.send(message).is_err() {
+                break;
+            }
+        }
+    });
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "initialize",
+            "params": {
+                "processId": null,
+                "rootUri": "file:///E:/xiangmu/mascript/mskaifa/yanzhenglsp",
+                "capabilities": {}
+            }
+        }),
+    );
+    let initialize = recv_response_with_id(&receiver, 10);
+    assert_eq!(initialize["result"]["serverInfo"]["name"], "mas-lang-lsp");
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "initialized",
+            "params": {}
+        }),
+    );
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": document_uri,
+                    "languageId": "mas-lang",
+                    "version": 1,
+                    "text": sample_text
+                }
+            }
+        }),
+    );
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": {
+                    "uri": document_uri,
+                    "version": 2
+                },
+                "contentChanges": [{
+                    "text": sample_text + "\n"
+                }]
+            }
+        }),
+    );
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didClose",
+            "params": {
+                "textDocument": {
+                    "uri": document_uri
+                }
+            }
+        }),
+    );
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "shutdown",
+            "params": null
+        }),
+    );
+    let shutdown = recv_response_with_id(&receiver, 11);
+    assert!(shutdown["result"].is_null());
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "exit",
+            "params": null
+        }),
+    );
+    drop(stdin);
+    let status = server.wait_timeout(Duration::from_secs(5)).unwrap();
+    assert!(status.is_some_and(|status| status.success()));
+}
+
 trait ChildWaitTimeout {
     fn wait_timeout(
         &mut self,
