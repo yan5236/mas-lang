@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{Client, LanguageServer};
 
+use crate::analysis::AnalysisService;
 use crate::completion::keyword_items;
 use crate::documents::{DocumentStore, is_mas_document};
 
@@ -19,6 +20,7 @@ use crate::documents::{DocumentStore, is_mas_document};
 pub struct Backend {
     client: Client,
     documents: Arc<RwLock<DocumentStore>>,
+    analysis: Arc<AnalysisService>,
 }
 
 impl Backend {
@@ -27,6 +29,7 @@ impl Backend {
         Self {
             client,
             documents: Arc::new(RwLock::new(DocumentStore::new())),
+            analysis: Arc::new(AnalysisService::new()),
         }
     }
 
@@ -42,6 +45,17 @@ impl Backend {
             .await
             .get(uri)
             .map(|document| document.text.clone())
+    }
+
+    /// 分析指定打开文档并向客户端发布最新诊断，避免事件处理器重复诊断流程。
+    async fn publish_document_diagnostics(&self, uri: &Url) {
+        let Some(document) = self.documents.read().await.get(uri).cloned() else {
+            return;
+        };
+        let analysis = self.analysis.analyze_document(&document);
+        self.client
+            .publish_diagnostics(uri.clone(), analysis.diagnostics, Some(document.version))
+            .await;
     }
 }
 
@@ -91,10 +105,12 @@ impl LanguageServer for Backend {
             return;
         }
 
+        let uri = document.uri.clone();
         self.documents
             .write()
             .await
             .upsert(document.uri, document.version, document.text);
+        self.publish_document_diagnostics(&uri).await;
     }
 
     /// 处理完整文本变更事件，按 LSP FULL sync 语义用最后一条完整文本替换缓存。
@@ -111,7 +127,8 @@ impl LanguageServer for Backend {
         self.documents
             .write()
             .await
-            .upsert(uri, params.text_document.version, change.text);
+            .upsert(uri.clone(), params.text_document.version, change.text);
+        self.publish_document_diagnostics(&uri).await;
     }
 
     /// 处理文档关闭事件，删除缓存并发布空诊断以清理客户端旧问题列表。

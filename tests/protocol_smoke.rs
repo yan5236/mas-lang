@@ -43,6 +43,18 @@ fn recv_response_with_id(receiver: &Receiver<Value>, id: i64) -> Value {
     }
 }
 
+/// 持续接收服务端消息，直到找到指定方法的通知为止。
+fn recv_notification_with_method(receiver: &Receiver<Value>, method: &str) -> Value {
+    loop {
+        let message = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|_| panic!("等待 LSP 通知超时: method={method}"));
+        if message.get("method").and_then(Value::as_str) == Some(method) {
+            return message;
+        }
+    }
+}
+
 /// 验证真实 stdio 语言服务器能完成初始化、基础补全和关闭协议往返。
 #[test]
 fn should_handle_stdio_initialize_completion_and_shutdown() {
@@ -243,6 +255,123 @@ fn should_handle_validation_project_document_lifecycle() {
         }),
     );
     let shutdown = recv_response_with_id(&receiver, 11);
+    assert!(shutdown["result"].is_null());
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "exit",
+            "params": null
+        }),
+    );
+    drop(stdin);
+    let status = server.wait_timeout(Duration::from_secs(5)).unwrap();
+    assert!(status.is_some_and(|status| status.success()));
+}
+
+/// 验证真实 stdio 语言服务器会在打开和修改 `.ms` 文档后发布编译器诊断。
+#[test]
+fn should_publish_diagnostics_after_open_and_change() {
+    let document_uri = "file:///E:/xiangmu/mascript/mskaifa/yanzhenglsp/src/main.ms";
+
+    let mut server = Command::new(env!("CARGO_BIN_EXE_mas-lang-lsp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = server.stdin.take().unwrap();
+    let stdout = server.stdout.take().unwrap();
+    let (sender, receiver) = channel();
+    std::thread::spawn(move || {
+        let mut stdout = BufReader::new(stdout);
+        while let Ok(message) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            read_lsp_message(&mut stdout)
+        })) {
+            if sender.send(message).is_err() {
+                break;
+            }
+        }
+    });
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "initialize",
+            "params": {
+                "processId": null,
+                "rootUri": "file:///E:/xiangmu/mascript/mskaifa/yanzhenglsp",
+                "capabilities": {}
+            }
+        }),
+    );
+    let initialize = recv_response_with_id(&receiver, 20);
+    assert_eq!(initialize["result"]["serverInfo"]["name"], "mas-lang-lsp");
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": document_uri,
+                    "languageId": "mas-lang",
+                    "version": 1,
+                    "text": "func main():\n    print(@)\n"
+                }
+            }
+        }),
+    );
+    let open_diagnostics = recv_notification_with_method(&receiver, "textDocument/publishDiagnostics");
+    assert_eq!(open_diagnostics["params"]["uri"], document_uri);
+    assert_eq!(open_diagnostics["params"]["diagnostics"].as_array().unwrap().len(), 1);
+    assert!(
+        open_diagnostics["params"]["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("无法识别的字符")
+    );
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": {
+                    "uri": document_uri,
+                    "version": 2
+                },
+                "contentChanges": [{
+                    "text": "func main():\n    print(1)\n"
+                }]
+            }
+        }),
+    );
+    let change_diagnostics =
+        recv_notification_with_method(&receiver, "textDocument/publishDiagnostics");
+    assert_eq!(
+        change_diagnostics["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    write_lsp_message(
+        &mut stdin,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "shutdown",
+            "params": null
+        }),
+    );
+    let shutdown = recv_response_with_id(&receiver, 21);
     assert!(shutdown["result"].is_null());
 
     write_lsp_message(
