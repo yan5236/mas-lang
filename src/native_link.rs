@@ -258,12 +258,6 @@ fn resolve_package_native_inputs(
     if let Some(prebuilt) = config.prebuilt.get(DEFAULT_TARGET_TRIPLE) {
         match validate_prebuilt_target(package_root, config, prebuilt, source) {
             Ok(objects) => {
-                eprintln!(
-                    "已命中预编译原生产物：包 `{}`，目标 `{}`，来源 `{}`",
-                    config.package_name,
-                    DEFAULT_TARGET_TRIPLE,
-                    prebuilt.manifest_path.display()
-                );
                 return Ok(objects);
             }
             Err(error) if !allow_native_source_build => return Err(error),

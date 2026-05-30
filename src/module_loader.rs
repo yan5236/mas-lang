@@ -32,7 +32,7 @@ pub fn load_module_graph(
     };
     let entry_package_root = discover_package_root(&entry_path, &project_root)?;
     let mut loader = ModuleLoader::new(settings, project_root);
-    loader.load_module(&entry_path, &entry_package_root, true)?;
+    loader.load_module_with_source(&entry_path, &entry_package_root, true, Some(entry.clone()))?;
     Ok(ModuleLoadResult {
         source: SourceFile::new(entry.path(), loader.synthetic_source),
         program: Program {
@@ -88,6 +88,17 @@ impl<'a> ModuleLoader<'a> {
         package_root: &Path,
         is_entry: bool,
     ) -> Result<LoadedModule, CompilerError> {
+        self.load_module_with_source(module_path, package_root, is_entry, None)
+    }
+
+    /// 装载模块时允许调用方为入口模块提供内存源码，确保编辑器未保存文本也能参与分析。
+    fn load_module_with_source(
+        &mut self,
+        module_path: &Path,
+        package_root: &Path,
+        is_entry: bool,
+        source_override: Option<SourceFile>,
+    ) -> Result<LoadedModule, CompilerError> {
         if let Some(loaded) = self.loaded_modules.get(module_path) {
             return Ok(loaded.clone());
         }
@@ -101,7 +112,10 @@ impl<'a> ModuleLoader<'a> {
             ));
         }
 
-        let source = read_module_source(module_path)?;
+        let source = match source_override {
+            Some(source) => source,
+            None => read_module_source(module_path)?,
+        };
         let tokens = Lexer::new(&source, self.settings).tokenize()?;
         let program = Parser::new(tokens, self.settings).parse_program()?;
         let renamed_declarations = collect_top_level_declarations(&program, module_path, is_entry);
