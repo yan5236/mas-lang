@@ -5,6 +5,9 @@ import * as path from 'path';
 
 import * as vscode from 'vscode';
 
+const EXTENSION_ROOT = path.resolve(__dirname, '..', '..');
+const LANGUAGE_CONFIGURATION_PATH = path.join(EXTENSION_ROOT, 'language-configuration.json');
+
 suite('Mascript Extension Test Suite', () => {
 	/**
 	 * 为每个测试用例创建临时 `.ms` 文件并返回对应文档对象。
@@ -18,62 +21,37 @@ suite('Mascript Extension Test Suite', () => {
 		return document;
 	}
 
-	/**
-	 * 调用 VS Code 的补全命令，并把结果统一转成字符串标签列表。
-	 */
-	async function getCompletionLabels(
-		document: vscode.TextDocument,
-		position: vscode.Position,
-	): Promise<string[]> {
-		const completionList = await vscode.commands.executeCommand<vscode.CompletionList>(
-			'vscode.executeCompletionItemProvider',
-			document.uri,
-			position,
-		);
-
-		return (completionList?.items ?? []).map((item) =>
-			typeof item.label === 'string' ? item.label : item.label.label,
-		);
-	}
-
 	test('should detect mascript language for ms file', async () => {
 		const document = await openMascriptDocument('func main() :\n    print("hello")\n');
 		assert.strictEqual(document.languageId, 'mascript');
 	});
 
-	test('should provide type completions in annotation context', async () => {
-		const document = await openMascriptDocument('var value :\n');
-		const labels = await getCompletionLabels(document, new vscode.Position(0, 'var value :'.length));
+	test('should keep mascript file content available for language server', async () => {
+		const source = 'func main() :\n    print("hello")\n';
+		const document = await openMascriptDocument(source);
 
-		assert.ok(labels.includes('int'));
-		assert.ok(labels.includes('float'));
-		assert.ok(labels.includes('bool'));
-		assert.ok(labels.includes('string'));
-		assert.ok(!labels.includes('print'));
+		assert.strictEqual(document.getText(), source);
 	});
 
-	test('should provide statement completions at line start', async () => {
-		const document = await openMascriptDocument('\n');
-		const labels = await getCompletionLabels(document, new vscode.Position(0, 0));
+	test('should declare colon block on-enter indentation rules', async () => {
+		const rawConfiguration = await fs.readFile(LANGUAGE_CONFIGURATION_PATH, 'utf8');
+		const configuration = JSON.parse(rawConfiguration) as {
+			indentationRules?: {
+				decreaseIndentPattern?: string;
+			};
+			onEnterRules?: Array<{
+				beforeText?: string;
+				action?: { indent?: string };
+			}>;
+		};
 
-		assert.ok(labels.includes('func'));
-		assert.ok(labels.includes('if'));
-		assert.ok(labels.includes('while'));
-		assert.ok(labels.includes('for'));
-		assert.ok(labels.includes('var'));
-		assert.ok(labels.includes('const'));
-	});
-
-	test('should provide expression completions inside assignment value', async () => {
-		const document = await openMascriptDocument('func main() :\n    var result = \n');
-		const labels = await getCompletionLabels(
-			document,
-			new vscode.Position(1, '    var result = '.length),
-		);
-
-		assert.ok(labels.includes('print'));
-		assert.ok(labels.includes('true'));
-		assert.ok(labels.includes('false'));
-		assert.ok(labels.includes('not'));
+		assert.ok(configuration.onEnterRules?.some((rule) => {
+			return rule.action?.indent === 'indent'
+				&& typeof rule.beforeText === 'string'
+				&& rule.beforeText.includes('func')
+				&& rule.beforeText.includes('if')
+				&& rule.beforeText.includes(':');
+		}));
+		assert.notStrictEqual(configuration.indentationRules?.decreaseIndentPattern, '^\\s*$');
 	});
 });

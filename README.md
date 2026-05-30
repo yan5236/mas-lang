@@ -1,8 +1,8 @@
 # mascript-lang
 
-`mascript-lang` 为 VS Code 提供 Mascript 语言支持。
+`mascript-lang` 为 VS Code 提供 Mascript / mas-lang 语言支持。
 
-当前版本只覆盖编译器已经实现的语法能力，不会把设计文档中的未来特性提前加入高亮和补全。
+当前扩展通过内置的 `server/mas-lang-lsp.exe` 启动 mas-lang LSP server，不依赖相邻源码仓库路径。安装带有 `server` 目录的扩展后，`.ms` 文件可以直接获得编辑器语言能力。
 
 ## 支持内容
 
@@ -10,50 +10,65 @@
 - TextMate 语法高亮
 - 基础语言配置
   - `//` 行注释
-  - `()` 自动闭合
-  - 以 `:` 结尾的代码块缩进
-- 轻上下文补全
-  - 关键字：`var` `const` `func` `if` `elif` `else` `while` `for` `in` `break` `continue` `return` `and` `or` `not`
-  - 类型：`int` `float` `bool` `string`
-  - 内建：`print`
-  - 布尔字面量：`true` `false`
-  - 代码骨架：`func` `if` `elif` `else` `while` `for` `main`
+  - `()`、`[]`、`{}` 自动闭合
+  - `func`、`if`、`elif`、`else`、`while`、`for` 冒号块回车缩进
+- LSP 语言能力
+  - 编译器同源诊断
+  - 关键字、类型、内建函数和当前文件符号补全，`func`、`main`、`if` 等代码骨架由 LSP snippet 提供
+  - 符号悬停信息
+  - 文档符号列表，语法错误时会使用降级符号扫描保持 Outline 可用
 
-## 当前语法范围
+## 补全与缩进
 
-本扩展只按当前编译器真实支持的语法高亮和补全，主要包括：
+插件不注册额外的本地补全 provider，补全候选统一来自内置 LSP server，避免 VS Code 侧和 LSP 侧维护两套规则。输入 `func` 后接受补全会插入函数骨架，输入 `main` 会插入 `func main() :` 代码块；函数名和 `print` 等内建函数会补齐调用括号。
 
-- 变量与常量声明
-- 函数定义与调用
-- `if / elif / else`
-- `while`
-- `for ... in start..end`
-- `break / continue / return`
-- 基础类型 `int / float / bool / string`
-- 字符串、整数、浮点数、布尔值
-- 运算符 `= + - * / % %/% += -= *= /= %= == != < <= > >= .. ->`
+语言配置会在冒号结尾的块头后自动缩进，例如：
 
-以下设计文档中的内容本版本不纳入扩展能力范围：
-
-- `import`
-- `list / array / map`
-- 字符串模板
-- 标准库模块补全
-- LSP 语义分析能力
-
-## 示例
-
-```ms
-func add(a:int, b:int) -> int :
-    return a + b
-
+```text
 func main() :
-    var result :int = add(3, 4)
-    if result >= 7 :
-        print("ok")
+    print("hello")
 ```
 
-## 说明
+## 内置 LSP server
 
-- 扩展不会修改或依赖编译器实现。
-- 当前不提供格式化、诊断、跳转定义或语义高亮。
+扩展启动时会从自身安装目录读取：
+
+```text
+server/mas-lang-lsp.exe
+```
+
+如果该文件缺失，扩展会提示当前版本缺少 mas-lang LSP server，但 `.ms` 文件识别和语法高亮仍可继续使用。
+
+## 更新内置 server
+
+在本地构建 `mas-lang-lsp`：
+
+```powershell
+cd ..\mas-lang-lsp
+cargo build
+```
+
+复制到 VS Code 扩展目录：
+
+```powershell
+cd ..\mas-lang-vscode
+pnpm run copy-lsp-server
+```
+
+如果 LSP 构建产物不在默认位置，可以指定：
+
+```powershell
+$env:MAS_LANG_LSP_EXE="D:\tools\mas-lang-lsp.exe"
+pnpm run copy-lsp-server
+```
+
+## 验证步骤
+
+```powershell
+pnpm install
+pnpm run check-types
+pnpm run lint
+pnpm run compile
+```
+
+然后在 VS Code 中启动 Extension Host，打开 `.ms` 文件，检查诊断、snippet 补全、冒号块回车缩进、悬停和文档符号是否可见；可临时输入不完整函数声明，确认右下角不再持续弹出 `textDocument/documentSymbol` 请求失败。

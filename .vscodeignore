@@ -3,9 +3,11 @@
 out/**
 node_modules/**
 src/**
+!server/**
 .gitignore
 .yarnrc
 esbuild.js
+scripts/**
 vsc-extension-quickstart.md
 **/tsconfig.json
 **/eslint.config.mjs

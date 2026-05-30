@@ -1,5 +1,5 @@
 {
-  "name": "mascript-lang",
+  "name": "mas-lang-vscode",
   "displayName": "mascript-lang",
   "description": "Mascript language support for Visual Studio Code.",
   "version": "0.0.1",
@@ -8,9 +8,6 @@
   },
   "categories": [
     "Programming Languages"
-  ],
-  "activationEvents": [
-    "onLanguage:mascript"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -37,6 +34,7 @@
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
+    "copy-lsp-server": "node scripts/copy-lsp-server.js",
     "compile": "pnpm run check-types && pnpm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
@@ -48,6 +46,9 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
     "@types/vscode": "^1.107.0",

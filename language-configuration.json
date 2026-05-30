@@ -6,12 +6,28 @@
     [
       "(",
       ")"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "{",
+      "}"
     ]
   ],
   "autoClosingPairs": [
     {
       "open": "(",
       "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
     },
     {
       "open": "\"",
@@ -28,13 +44,28 @@
       ")"
     ],
     [
+      "[",
+      "]"
+    ],
+    [
+      "{",
+      "}"
+    ],
+    [
       "\"",
       "\""
     ]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^((?!//).)*:\\s*(//.*)?$",
-    "decreaseIndentPattern": "^\\s*$"
+    "increaseIndentPattern": "^((?!//).)*:\\s*(//.*)?$"
   },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*(?:func|if|elif|else|while|for)\\b.*:\\s*(?://.*)?$",
+      "action": {
+        "indent": "indent"
+      }
+    }
+  ],
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\s\\`\\~\\!\\@\\#\\$\\^\\&\\*\\(\\)\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\<\\>\\/\\?%]+)"
 }

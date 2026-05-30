@@ -50,18 +50,18 @@ function buildCompletionItems(
 	if (context === 'statement') {
 		return [
 			...KEYWORDS.map((keyword) => createKeywordItem(keyword, range)),
-			createSnippetItem('func', '函数骨架', 'func ${1:name}(${2}) :\n    ${0}', range),
-			createSnippetItem('if', 'if 代码块', 'if ${1:condition} :\n    ${0}', range),
-			createSnippetItem('elif', 'elif 代码块', 'elif ${1:condition} :\n    ${0}', range),
+			createSnippetItem('func', '函数骨架', 'func ${1}(${2}) :\n    ${0}', range),
+			createSnippetItem('if', 'if 代码块', 'if ${1} :\n    ${0}', range),
+			createSnippetItem('elif', 'elif 代码块', 'elif ${1} :\n    ${0}', range),
 			createSnippetItem('else', 'else 代码块', 'else :\n    ${0}', range),
-			createSnippetItem('while', 'while 循环', 'while ${1:condition} :\n    ${0}', range),
-			createSnippetItem('for', 'for 范围循环', 'for ${1:item} in ${2:0}..${3:10} :\n    ${0}', range),
+			createSnippetItem('while', 'while 循环', 'while ${1} :\n    ${0}', range),
+			createSnippetItem('for', 'for 范围循环', 'for ${1} in ${2}..${3} :\n    ${0}', range),
 			createSnippetItem('main', 'main 函数', 'func main() :\n    ${0}', range),
 		];
 	}
 
 	return [
-		createBuiltinFunctionItem('print', '内建输出函数', 'print(${1:value})', range),
+		createBuiltinFunctionItem('print', '内建输出函数', 'print(${1})', range),
 		...BOOLEAN_LITERALS.map((literal) => createLiteralItem(literal, range)),
 		createKeywordItem('not', range),
 		createKeywordItem('and', range),
