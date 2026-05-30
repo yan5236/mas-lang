@@ -1,0 +1,36 @@
+---
+sidebar_position: 4
+---
+
+# Comments and Indentation
+
+## Comments
+
+Use `//` for single-line comments. Everything from `//` to the end of the line is ignored:
+
+```mas-lang
+// This is a comment
+var x = 42  // end-of-line comment
+```
+
+Comments can appear anywhere. Multi-line comments (`/* */`) are not supported.
+
+## Indentation Rules
+
+mas-lang uses indentation to define code blocks, similar to Python.
+
+- **Each indentation level is 4 spaces**. Tabs are not allowed.
+- A colon `:` starts a new indented block.
+- All statements in the same block must have the same indentation.
+
+```mas-lang
+if x > 0:
+    print("positive")    // 4-space indent
+    x = x - 1            // same block, same 4-space indent
+else:
+    print("non-positive") // new block, 4 spaces
+```
+
+- Blank lines do not affect indentation state.
+- Lines containing only a comment (whitespace + `//`) do not affect indentation.
+- Blocks cannot be empty.

@@ -1,0 +1,50 @@
+---
+sidebar_position: 3
+---
+
+# 安全转换
+
+安全转换函数在转换失败时不会产生运行时错误，而是返回一个结果对象，可通过 `.ok` 和 `.value` 判断转换是否成功。
+
+## try_int()
+
+```mas-lang
+var result = try_int("123")
+if result.ok:
+    print(result.value)   // 123
+else:
+    print("转换失败")
+```
+
+## try_float()
+
+```mas-lang
+var result = try_float("3.14")
+if result.ok:
+    print(result.value)   // 3.14
+```
+
+## try_bool()
+
+```mas-lang
+var result = try_bool("true")
+if result.ok:
+    print(result.value)   // true
+```
+
+## 返回值结构
+
+安全转换函数返回 `SafeConvertResult<T>` 类型，包含两个属性：
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `.ok` | bool | 转换是否成功 |
+| `.value` | T | 转换后的值（仅在 ok 为 true 时有效） |
+
+`try_string()` 不存在，因为字符串转换几乎不会失败。
+
+对于非字符串类型的转换（如 `try_int(true)`），总是成功，不会产生错误结果：
+
+```mas-lang
+var result = try_int(true)   // result.ok == true, result.value == 1
+```

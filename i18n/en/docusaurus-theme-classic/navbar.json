@@ -1,19 +1,15 @@
 {
   "title": {
-    "message": "My Site",
+    "message": "mas-lang",
     "description": "The title in the navbar"
   },
   "logo.alt": {
-    "message": "My Site Logo",
+    "message": "mas-lang Logo",
     "description": "The alt text of navbar logo"
   },
-  "item.label.Tutorial": {
-    "message": "Tutorial",
-    "description": "Navbar item with label Tutorial"
-  },
-  "item.label.Blog": {
-    "message": "Blog",
-    "description": "Navbar item with label Blog"
+  "item.label.文档": {
+    "message": "Docs",
+    "description": "Navbar item with label Docs"
   },
   "item.label.GitHub": {
     "message": "GitHub",

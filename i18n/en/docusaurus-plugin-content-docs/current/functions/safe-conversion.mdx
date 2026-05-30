@@ -1,0 +1,50 @@
+---
+sidebar_position: 3
+---
+
+# Safe Conversion
+
+Safe conversion functions return a result object instead of producing a runtime error. Use `.ok` and `.value` to check success and access the converted value.
+
+## try_int()
+
+```mas-lang
+var result = try_int("123")
+if result.ok:
+    print(result.value)   // 123
+else:
+    print("conversion failed")
+```
+
+## try_float()
+
+```mas-lang
+var result = try_float("3.14")
+if result.ok:
+    print(result.value)   // 3.14
+```
+
+## try_bool()
+
+```mas-lang
+var result = try_bool("true")
+if result.ok:
+    print(result.value)   // true
+```
+
+## Return Type
+
+Safe conversion functions return `SafeConvertResult<T>`, which has two fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `.ok` | bool | Whether the conversion succeeded |
+| `.value` | T | The converted value (only valid when ok is true) |
+
+`try_string()` does not exist because string conversion almost never fails.
+
+Conversions from non-string types (e.g., `try_int(true)`) always succeed:
+
+```mas-lang
+var result = try_int(true)   // result.ok == true, result.value == 1
+```

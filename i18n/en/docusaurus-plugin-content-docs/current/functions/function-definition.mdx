@@ -1,0 +1,61 @@
+---
+sidebar_position: 1
+---
+
+# Function Definition
+
+## Basic Syntax
+
+Use the `func` keyword to define a function:
+
+```mas-lang
+func name(parameter: type, ...) -> return_type:
+    body
+```
+
+## No Parameters, No Return
+
+```mas-lang
+func hello():
+    print("Hello!")
+```
+
+## With Parameters
+
+Parameters require type annotations:
+
+```mas-lang
+func greet(name: string):
+    print("Hello " + name)
+
+func add(a: int, b: int):
+    print(a + b)
+```
+
+## With Return Value
+
+Use `-> type` for the return type and `return` to return a value:
+
+```mas-lang
+func add(a: int, b: int) -> int:
+    return a + b
+
+func max(a: int, b: int) -> int:
+    if a > b:
+        return a
+    return b
+```
+
+## Calling Functions
+
+```mas-lang
+var result = add(3, 5)   // result = 8
+greet("mas-lang")
+```
+
+## Rules
+
+- Parameters must have type annotations
+- Functions with a declared return type must have a `return` statement
+- Functions without a return type annotation return `unit` (no `return` needed)
+- Function overloading (same name, different parameters) is not supported

@@ -1,0 +1,42 @@
+---
+sidebar_position: 1
+---
+
+# Conditionals
+
+## if / elif / else
+
+Use `if`, `elif`, `else` for conditional branching:
+
+```mas-lang
+if score >= 90:
+    print("A")
+elif score >= 80:
+    print("B")
+elif score >= 60:
+    print("C")
+else:
+    print("F")
+```
+
+Note: use `elif`, not `else if`.
+
+## Rules
+
+- The condition must evaluate to `bool`
+- `elif` and `else` are optional
+- Branches can be nested
+
+```mas-lang
+if x > 0:
+    if x > 100:
+        print("large positive")
+    else:
+        print("small positive")
+elif x < 0:
+    print("negative")
+else:
+    print("zero")
+```
+
+There is no ternary operator (`a ? b : c`).

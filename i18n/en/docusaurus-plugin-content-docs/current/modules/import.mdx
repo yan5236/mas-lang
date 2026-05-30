@@ -1,0 +1,43 @@
+---
+sidebar_position: 1
+---
+
+# Import
+
+## Import Syntax
+
+Use `import` to bring symbols from other modules into scope:
+
+```mas-lang
+// Named import
+import utils.math { add, sub }
+
+// Aliased import
+import utils.math { add as plus }
+
+// Wildcard import
+import utils.math.*
+
+// Standard library
+import std.io { print }
+```
+
+## Module Paths
+
+- Paths are dot-separated: `utils.math` maps to `src/utils/math.ms`
+- `index.ms` is the directory entry file; `utils` maps to `src/utils/index.ms`
+- The `std` prefix refers to the standard library
+
+## The local Prefix
+
+When a local module conflicts with an external package name, use `local.` to force local resolution:
+
+```mas-lang
+import local.time { format }
+```
+
+## Resolution Order
+
+1. `std.xxx` refers to the standard library
+2. Top-level names matching `mod.yml` entries are external packages
+3. Otherwise, resolved as local modules under `src/`

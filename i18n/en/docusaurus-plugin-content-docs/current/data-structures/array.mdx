@@ -1,0 +1,43 @@
+---
+sidebar_position: 4
+---
+
+# Fixed Arrays
+
+## Type
+
+`array<T,N>` is a fixed-length array. The length N is determined at compile time:
+
+```mas-lang
+var arr: array<int, 3>
+```
+
+## Initialization
+
+```mas-lang
+var arr = array<int, 3>(1, 2, 3)
+```
+
+## Index Access
+
+```mas-lang
+arr[0]   // 1
+arr[2]   // 3
+```
+
+## Difference from List
+
+| Feature | list | array |
+|---------|------|-------|
+| Length | Dynamic | Fixed at compile time |
+| Methods | append, remove, pop, etc. | No add/remove methods |
+| Storage | Heap | Stack |
+| Iteration | Supported | Supported |
+
+```mas-lang
+var arr = array<int, 3>(1, 2, 3)
+len(arr)          // 3
+
+for item in arr:
+    print(item)
+```

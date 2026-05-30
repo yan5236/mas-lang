@@ -1,0 +1,76 @@
+---
+sidebar_position: 2
+---
+
+# Built-in Functions
+
+Built-in functions are globally available without any import.
+
+## print — Print Output
+
+```mas-lang
+print(42)
+print(3.14)
+print(true)
+print("hello")
+```
+
+`print` accepts any value and outputs it to stdout.
+
+## len — Get Length
+
+```mas-lang
+len("hello")      // 5
+len([1, 2, 3])    // 3
+len({"a": 1})     // 1
+```
+
+`len` works with string, list, map, and array.
+
+## Type Conversion
+
+Convert a value from one type to another. Failed conversions produce a runtime error.
+
+### int()
+
+```mas-lang
+int(3.14)     // 3 (truncation)
+int("123")    // 123
+int(true)     // 1
+int(false)    // 0
+```
+
+### float()
+
+```mas-lang
+float(42)     // 42.0
+float("3.14") // 3.14
+float(true)   // 1.0
+```
+
+### string()
+
+```mas-lang
+string(42)    // "42"
+string(3.14)  // "3.14"
+string(true)  // "true"
+```
+
+### bool()
+
+```mas-lang
+bool(0)       // false
+bool(42)      // true
+bool(0.0)     // false
+bool("")      // false
+bool("abc")   // true
+```
+
+### Failed Conversions
+
+```mas-lang
+int("abc")     // runtime error: cannot convert
+float("xyz")   // runtime error: cannot convert
+```
+
+For safe conversions that avoid runtime errors, see Safe Conversion.

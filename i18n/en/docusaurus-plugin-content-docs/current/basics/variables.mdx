@@ -1,0 +1,55 @@
+---
+sidebar_position: 2
+---
+
+# Variables and Constants
+
+## var — Mutable Variables
+
+Declare mutable variables with `var`. They can be reassigned:
+
+```mas-lang
+var x = 42
+x = 100           // reassign
+
+var name: string = "mas-lang"
+name = "new value"  // reassign
+```
+
+## const — Immutable Constants
+
+Declare constants with `const`. They cannot be changed after initialization:
+
+```mas-lang
+const PI = 3.14159
+const MAX_SIZE: int = 100
+
+// PI = 3.14      // error: constant cannot be reassigned
+```
+
+Constants must be initialized at declaration.
+
+## Compound Assignment
+
+```mas-lang
+var a = 10
+a += 5    // a = 15
+a -= 3    // a = 12
+a *= 2    // a = 24
+a /= 4    // a = 6
+a %= 3    // a = 0
+```
+
+## Index Assignment
+
+Assign values to elements in lists and maps:
+
+```mas-lang
+var list = [1, 2, 3]
+list[0] = 10       // list becomes [10, 2, 3]
+
+var map = {"name": "Alice"}
+map["name"] = "Bob"
+```
+
+Index assignment does not support compound operators (e.g., `list[0] += 1` is invalid).

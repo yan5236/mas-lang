@@ -1,0 +1,42 @@
+---
+sidebar_position: 1
+---
+
+# 条件判断
+
+## if / elif / else
+
+使用 `if`、`elif`、`else` 进行条件分支：
+
+```mas-lang
+if score >= 90:
+    print("A")
+elif score >= 80:
+    print("B")
+elif score >= 60:
+    print("C")
+else:
+    print("F")
+```
+
+注意使用 `elif` 而非 `else if`。
+
+## 规则
+
+- 条件表达式必须返回 `bool` 类型
+- `elif` 和 `else` 是可选的
+- 分支可以嵌套
+
+```mas-lang
+if x > 0:
+    if x > 100:
+        print("大正数")
+    else:
+        print("小正数")
+elif x < 0:
+    print("负数")
+else:
+    print("零")
+```
+
+不支持三元运算符（如 `a ? b : c`）。

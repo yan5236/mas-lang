@@ -1,0 +1,57 @@
+---
+sidebar_position: 3
+---
+
+# 字典
+
+## 类型与字面量
+
+`map<K,V>` 是键值对字典：
+
+```mas-lang
+var user = {"name": "张三", "age": 18}   // map<string, int>
+var scores: map<string, int> = {}
+```
+
+多行书写：
+
+```mas-lang
+var config = {
+    "host": "localhost",
+    "port": 8080,
+    "debug": true,
+}
+```
+
+## 键访问
+
+```mas-lang
+var user = {"name": "张三", "age": 18}
+user["name"]   // "张三"
+```
+
+## 添加和更新
+
+```mas-lang
+user["email"] = "zhang@example.com"   // 添加新键
+user["age"] = 19                       // 更新已有键
+```
+
+## 字典方法
+
+```mas-lang
+var map = {"a": 1, "b": 2, "c": 3}
+
+map.remove("b")           // 删除键 "b"
+map.contains("a")         // true
+map.keys()                // ["a", "c"]（键的列表）
+map.values()              // [1, 3]（值的列表）
+len(map)                  // 元素个数
+```
+
+## 遍历
+
+```mas-lang
+for key, value in map:
+    print("${key}: ${value}")
+```

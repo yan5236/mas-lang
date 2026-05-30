@@ -1,0 +1,49 @@
+---
+sidebar_position: 2
+---
+
+# while 循环
+
+## 基本语法
+
+```mas-lang
+while condition:
+    // 循环体
+```
+
+当条件为 `true` 时重复执行循环体：
+
+```mas-lang
+var i = 0
+while i < 5:
+    print(i)
+    i += 1
+// 输出 0 1 2 3 4
+```
+
+## break
+
+`break` 立即退出循环：
+
+```mas-lang
+var i = 0
+while i < 10:
+    if i == 5:
+        break
+    i += 1
+// i 最终为 5
+```
+
+## continue
+
+`continue` 跳过当前迭代，进入下一次循环：
+
+```mas-lang
+var i = 0
+while i < 5:
+    i += 1
+    if i == 3:
+        continue
+    print(i)
+// 输出 1 2 4 5（跳过了 3）
+```

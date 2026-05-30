@@ -1,0 +1,59 @@
+---
+sidebar_position: 2
+---
+
+# 列表
+
+## 类型与字面量
+
+`list<T>` 是动态数组，存储同类型元素：
+
+```mas-lang
+var list = [1, 2, 3, 4]           // list<int>
+var names: list<string> = ["a", "b"]
+var empty: list<int> = []
+```
+
+## 索引访问
+
+索引从 0 开始：
+
+```mas-lang
+var list = [10, 20, 30]
+list[0]   // 10
+list[2]   // 30
+```
+
+## 切片
+
+```mas-lang
+var list = [1, 2, 3, 4, 5]
+list[1:3]   // [2, 3]
+list[:3]    // [1, 2, 3]
+list[2:]    // [3, 4, 5]
+```
+
+切片范围左闭右开。
+
+## 列表方法
+
+```mas-lang
+var list = [1, 2, 3]
+
+list.append(4)              // [1, 2, 3, 4]
+list.remove(2)              // [1, 3, 4]
+list.pop()                  // 返回 4，list 变为 [1, 3]
+list.pop(0)                 // 返回 1，list 变为 [3]
+list.sort()                 // 排序
+list.reverse()              // 反转
+list.index(3)               // 返回元素索引（不存在时报错）
+list.contains(3)            // true
+len(list)                   // 长度
+```
+
+## 遍历
+
+```mas-lang
+for item in list:
+    print(item)
+```

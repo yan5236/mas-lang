@@ -1,0 +1,76 @@
+---
+sidebar_position: 2
+---
+
+# 内置函数
+
+内置函数全局可用，无需导入。
+
+## print — 打印输出
+
+```mas-lang
+print(42)
+print(3.14)
+print(true)
+print("你好")
+```
+
+`print` 接受任意类型的值并输出到标准输出。
+
+## len — 获取长度
+
+```mas-lang
+len("hello")      // 5
+len([1, 2, 3])    // 3
+len({"a": 1})     // 1
+```
+
+`len` 可用于 string、list、map、array。
+
+## 类型转换
+
+将值从一种类型转换为另一种类型。转换失败时会产生运行时错误。
+
+### int()
+
+```mas-lang
+int(3.14)     // 3（截断小数）
+int("123")    // 123
+int(true)     // 1
+int(false)    // 0
+```
+
+### float()
+
+```mas-lang
+float(42)     // 42.0
+float("3.14") // 3.14
+float(true)   // 1.0
+```
+
+### string()
+
+```mas-lang
+string(42)    // "42"
+string(3.14)  // "3.14"
+string(true)  // "true"
+```
+
+### bool()
+
+```mas-lang
+bool(0)       // false
+bool(42)      // true
+bool(0.0)     // false
+bool("")      // false
+bool("abc")   // true
+```
+
+### 失效转换
+
+```mas-lang
+int("abc")     // 运行时错误：无法转换
+float("xyz")   // 运行时错误：无法转换
+```
+
+若需安全转换避免运行时错误，参见安全转换。

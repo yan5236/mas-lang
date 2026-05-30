@@ -1,0 +1,43 @@
+---
+sidebar_position: 4
+---
+
+# 固定数组
+
+## 类型
+
+`array<T,N>` 是固定长度的数组，长度 N 在编译期确定：
+
+```mas-lang
+var arr: array<int, 3>
+```
+
+## 初始化
+
+```mas-lang
+var arr = array<int, 3>(1, 2, 3)
+```
+
+## 索引访问
+
+```mas-lang
+arr[0]   // 1
+arr[2]   // 3
+```
+
+## 与列表的区别
+
+| 特性 | list | array |
+|------|------|-------|
+| 长度 | 动态增长 | 编译期固定 |
+| 方法 | 支持 append、remove、pop 等 | 无增删方法 |
+| 存储 | 堆分配 | 栈分配 |
+| 遍历 | 支持 | 支持 |
+
+```mas-lang
+var arr = array<int, 3>(1, 2, 3)
+len(arr)          // 3
+
+for item in arr:
+    print(item)
+```

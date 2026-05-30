@@ -1,0 +1,41 @@
+---
+sidebar_position: 1
+---
+
+# Introduction
+
+mas-lang is a statically-typed, compiled programming language. It uses Python-like indentation syntax for clean and readable code, while compiling to efficient native binaries via LLVM.
+
+## Hello World
+
+```mas-lang
+print("Hello, mas-lang!")
+```
+
+Build and run:
+
+```
+fama build
+./build/output
+```
+
+## Features
+
+- **Static typing**: All variable and expression types are checked at compile time
+- **Type inference**: Type annotations can be omitted when the type can be inferred
+- **Python-like syntax**: Indentation-based blocks, no braces or semicolons
+- **Native compilation**: Compiles to machine code via LLVM, no runtime required
+- **Rich data structures**: list, map, array container types
+- **Module system**: File-based module organization with import/export
+
+## Quick Start
+
+Create a new project:
+
+```
+fama new hello
+cd hello
+fama run
+```
+
+`src/main.ms` is the entry point. Write your code there and run `fama run` to see the output.
