@@ -326,9 +326,16 @@ fn should_publish_diagnostics_after_open_and_change() {
             }
         }),
     );
-    let open_diagnostics = recv_notification_with_method(&receiver, "textDocument/publishDiagnostics");
+    let open_diagnostics =
+        recv_notification_with_method(&receiver, "textDocument/publishDiagnostics");
     assert_eq!(open_diagnostics["params"]["uri"], document_uri);
-    assert_eq!(open_diagnostics["params"]["diagnostics"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        open_diagnostics["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(
         open_diagnostics["params"]["diagnostics"][0]["message"]
             .as_str()

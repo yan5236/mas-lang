@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
+use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
+
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
@@ -12,14 +14,17 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::AnalysisService;
-use crate::completion::keyword_items;
+use crate::completion::completion_items_for;
 use crate::documents::{DocumentStore, is_mas_document};
+use crate::hover::hover_for;
+use crate::symbols::{SymbolSnapshot, document_symbols_for};
 
 /// 保存 LSP 后端运行时需要的协议客户端句柄。
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
     documents: Arc<RwLock<DocumentStore>>,
+    snapshots: Arc<RwLock<HashMap<Url, SymbolSnapshot>>>,
     analysis: Arc<AnalysisService>,
 }
 
@@ -29,6 +34,7 @@ impl Backend {
         Self {
             client,
             documents: Arc::new(RwLock::new(DocumentStore::new())),
+            snapshots: Arc::new(RwLock::new(HashMap::new())),
             analysis: Arc::new(AnalysisService::new()),
         }
     }
@@ -53,6 +59,10 @@ impl Backend {
             return;
         };
         let analysis = self.analysis.analyze_document(&document);
+        self.snapshots
+            .write()
+            .await
+            .insert(uri.clone(), analysis.symbols);
         self.client
             .publish_diagnostics(uri.clone(), analysis.diagnostics, Some(document.version))
             .await;
@@ -136,25 +146,66 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let removed = self.documents.write().await.remove(&uri);
         if removed.is_some() {
+            self.snapshots.write().await.remove(&uri);
             self.client.publish_diagnostics(uri, Vec::new(), None).await;
         }
     }
 
-    /// 返回一阶段的基础补全候选，后续阶段会合并当前文件符号和类型信息。
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        Ok(Some(CompletionResponse::Array(keyword_items())))
+    /// 返回关键字、类型、内建函数和当前文件符号组成的补全列表。
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let Some(text) = self.document_text(&uri).await else {
+            return Ok(Some(CompletionResponse::Array(completion_items_for(
+                "",
+                &SymbolSnapshot::default(),
+                position,
+            ))));
+        };
+        let snapshot = self
+            .snapshots
+            .read()
+            .await
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Ok(Some(CompletionResponse::Array(completion_items_for(
+            &text, &snapshot, position,
+        ))))
     }
 
-    /// 当前阶段先返回空悬停，保持能力通道可用且不伪造尚未分析出的符号信息。
-    async fn hover(&self, _params: HoverParams) -> Result<Option<Hover>> {
-        Ok(None)
+    /// 根据当前文件符号快照返回光标处符号的声明种类和详情。
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let Some(text) = self.document_text(&uri).await else {
+            return Ok(None);
+        };
+        let snapshot = self
+            .snapshots
+            .read()
+            .await
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Ok(hover_for(&text, &snapshot, position))
     }
 
-    /// 当前阶段先返回空文档符号列表，后续符号模型接入后在同一 handler 内填充。
+    /// 返回当前文档中已经分析出的函数、变量、常量和导入符号。
     async fn document_symbol(
         &self,
-        _params: DocumentSymbolParams,
+        params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        Ok(Some(DocumentSymbolResponse::Nested(Vec::new())))
+        let uri = params.text_document.uri;
+        let snapshot = self
+            .snapshots
+            .read()
+            .await
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Ok(Some(DocumentSymbolResponse::Nested(document_symbols_for(
+            &snapshot,
+        ))))
     }
 }

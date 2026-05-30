@@ -4,11 +4,13 @@ use tower_lsp::lsp_types::Diagnostic;
 
 use crate::diagnostics::compiler_error_to_diagnostic;
 use crate::documents::OpenDocument;
+use crate::symbols::{SymbolSnapshot, fallback_symbols_from_source, symbols_from_program};
 
 /// 保存单个文档最近一次分析结果，供诊断发布和后续语言能力复用。
 #[derive(Clone, Debug, Default)]
 pub struct DocumentAnalysis {
     pub diagnostics: Vec<Diagnostic>,
+    pub symbols: SymbolSnapshot,
 }
 
 /// 封装分析服务需要共享的编译器设置，并统一调用主力编译器前端。
@@ -39,9 +41,13 @@ impl AnalysisService {
     pub fn analyze_document(&self, document: &OpenDocument) -> DocumentAnalysis {
         let source = SourceFile::new(document.path.display().to_string(), document.text.clone());
         match mascript_compiler_llvm::analyze_source(&source, &self.settings) {
-            Ok(_) => DocumentAnalysis::default(),
+            Ok(output) => DocumentAnalysis {
+                diagnostics: Vec::new(),
+                symbols: symbols_from_program(output.source.text(), &output.program),
+            },
             Err(error) => DocumentAnalysis {
                 diagnostics: vec![compiler_error_to_diagnostic(&error, &source, self.settings)],
+                symbols: fallback_symbols_from_source(&source, &self.settings),
             },
         }
     }

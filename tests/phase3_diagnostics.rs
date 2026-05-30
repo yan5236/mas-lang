@@ -86,15 +86,19 @@ fn should_return_empty_diagnostics_for_valid_source() {
 #[test]
 fn should_return_diagnostic_for_compiler_frontend_error() {
     let service = AnalysisService::with_settings(CompilerSettings::new(UiLanguage::ZhCn));
-    let analysis = service.analyze_document(&open_document(
-        "func main():\n    print(@)\n",
-    ));
+    let analysis = service.analyze_document(&open_document("func main():\n    print(@)\n"));
 
     assert_eq!(analysis.diagnostics.len(), 1);
     let diagnostic = &analysis.diagnostics[0];
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
     assert!(diagnostic.message.contains("无法识别的字符"));
-    assert!(diagnostic.source.as_deref().unwrap_or("").contains("词法错误"));
+    assert!(
+        diagnostic
+            .source
+            .as_deref()
+            .unwrap_or("")
+            .contains("词法错误")
+    );
 }
 
 /// 验证模块装载或文件系统错误会被收敛成诊断，不会让分析服务 panic。
@@ -109,5 +113,11 @@ fn should_return_diagnostic_for_missing_module_error() {
     let diagnostic = &analysis.diagnostics[0];
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
     assert!(diagnostic.message.contains("找不到模块"));
-    assert!(diagnostic.source.as_deref().unwrap_or("").contains("构建错误"));
+    assert!(
+        diagnostic
+            .source
+            .as_deref()
+            .unwrap_or("")
+            .contains("构建错误")
+    );
 }
