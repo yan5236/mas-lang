@@ -59,16 +59,19 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(())
     }
 
-    /// 为局部变量创建栈内存槽位。
+    /// 在函数入口为局部变量创建固定槽位；托管类型同时登记为待初始化的精确 GC 根。
     pub(super) fn allocate_local(
         &self,
         value_type: &ValueType,
         name: &str,
     ) -> Result<PointerValue<'ctx>, CompilerError> {
-        self.map_builder(
-            self.builder
-                .build_alloca(self.basic_type_for(value_type)?, name),
-        )
+        let pointer = self.allocate_entry_slot(self.basic_type_for(value_type)?, name)?;
+        if Self::gc_layout(value_type).is_some() {
+            self.gc_roots
+                .borrow_mut()
+                .push((value_type.clone(), pointer));
+        }
+        Ok(pointer)
     }
 
     /// 从变量指针中加载值。
@@ -224,9 +227,21 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.scopes.push(HashMap::new());
     }
 
-    /// 弹出当前块级作用域。
-    pub(super) fn pop_scope(&mut self) {
-        self.scopes.pop();
+    /// 弹出块级作用域并清空已失效的托管局部根；终结块由返回帧或循环出口负责清理。
+    pub(super) fn pop_scope(&mut self) -> Result<(), CompilerError> {
+        if let Some(scope) = self.scopes.pop() {
+            if !self.current_block_has_terminator() {
+                for variable in scope.values() {
+                    if Self::gc_layout(&variable.value_type).is_some() {
+                        self.map_builder(self.builder.build_store(
+                            variable.pointer,
+                            self.basic_type_for(&variable.value_type)?.const_zero(),
+                        ))?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 返回当前最内层作用域的可变引用。

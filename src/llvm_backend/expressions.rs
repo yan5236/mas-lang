@@ -4,8 +4,20 @@ use super::*;
 use crate::ast::{Expr, Literal, MethodName, PropertyName, TypeName, UnaryOp};
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 编译表达式，并把 LLVM 值与静态类型一起返回给调用方。
+    /// 编译表达式并保护托管结果，确保后续嵌套调用触发 GC 时临时值仍然存活。
     pub(super) fn compile_expr(
+        &mut self,
+        expression: &Expr,
+    ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        let result = self.compile_expr_inner(expression)?;
+        if let CodegenValue::Value(value) = &result {
+            self.protect_gc_value(value)?;
+        }
+        Ok(result)
+    }
+
+    /// 按语法类别生成表达式；返回值的 GC 保护由外层统一完成。
+    fn compile_expr_inner(
         &mut self,
         expression: &Expr,
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
@@ -870,10 +882,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         &mut self,
         value: inkwell::values::StructValue<'ctx>,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
-        let out_ptr = self.map_builder(
-            self.builder
-                .build_alloca(self.context.i8_type(), "try.bool.out.raw"),
-        )?;
+        let out_ptr =
+            self.allocate_entry_slot(self.context.i8_type().into(), "try.bool.out.raw")?;
         self.map_builder(
             self.builder
                 .build_store(out_ptr, self.context.i8_type().const_zero()),

@@ -74,7 +74,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(())
     }
 
-    /// 编译顶层入口函数，并在末尾自动调用无参 `main()`。
+    /// 编译顶层入口与自动 main 调用，并为全局和局部托管值安装 GC 根帧。
     pub(super) fn compile_entry(&mut self, program: &Program) -> Result<(), CompilerError> {
         let entry_function = self.module.add_function(
             "mascript_entry",
@@ -89,6 +89,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.current_return_type = ValueType::Unit;
         self.scopes = vec![HashMap::new()];
         self.loop_stack.clear();
+        self.gc_roots.borrow_mut().clear();
+        self.gc_temporaries.borrow_mut().clear();
 
         let terminated = self.compile_statements(&program.statements)?;
         if !terminated {
@@ -96,10 +98,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             self.map_builder(self.builder.build_return(None))?;
         }
 
+        self.finish_gc_frame()?;
         Ok(())
     }
 
-    /// 编译单个用户函数，并把参数写入局部变量作用域。
+    /// 编译用户函数并将参数写入根槽；所有返回路径在交还结果前移除当前 GC 帧。
     pub(super) fn compile_user_function(
         &mut self,
         name: &str,
@@ -121,6 +124,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             .unwrap_or(ValueType::Unit);
         self.scopes = vec![HashMap::new()];
         self.loop_stack.clear();
+        self.gc_roots.borrow_mut().clear();
+        self.gc_temporaries.borrow_mut().clear();
 
         for (index, parameter) in parameters.iter().enumerate() {
             let value = info.function.get_nth_param(index as u32).ok_or_else(|| {
@@ -157,6 +162,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             }
         }
 
+        self.finish_gc_frame()?;
         Ok(())
     }
 

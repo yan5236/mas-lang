@@ -19,8 +19,19 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(terminated)
     }
 
-    /// 编译单条语句，并返回当前基本块是否已经结束。
+    /// 在语句边界插入 GC 安全点后生成语句，返回当前基本块是否已经结束。
     pub(super) fn compile_statement(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
+        self.emit_gc_poll()?;
+        let temporary_start = self.gc_temporaries.borrow().len();
+        let terminated = self.compile_statement_inner(statement)?;
+        if !terminated {
+            self.clear_gc_temporaries(temporary_start)?;
+        }
+        Ok(terminated)
+    }
+
+    /// 生成具体语句的控制流；外层负责安全点和语句临时根的失效处理。
+    fn compile_statement_inner(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
         match statement {
             Stmt::Import { .. } | Stmt::ExportImport { .. } => Ok(false),
             Stmt::FunctionDecl { .. } | Stmt::ExternFunctionDecl { .. } => Ok(false),
@@ -122,6 +133,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         }
                         _ => {
                             let current = self.load_variable(variable.clone())?;
+                            self.protect_gc_value(&current)?;
                             let compiled = self.compile_expr(value)?;
                             let right = self.expect_value(compiled)?;
                             let binary_op = match op {
@@ -289,7 +301,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             self.builder.position_at_end(then_block);
             self.push_scope();
             let terminated = self.compile_statements(&branch.body)?;
-            self.pop_scope();
+            self.pop_scope()?;
             if !terminated && !self.current_block_has_terminator() {
                 let target = *after_block
                     .get_or_insert_with(|| self.context.append_basic_block(function, "if.after"));
@@ -303,7 +315,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             self.builder.position_at_end(else_block);
             self.push_scope();
             let terminated = self.compile_statements(else_branch)?;
-            self.pop_scope();
+            self.pop_scope()?;
             if !terminated && !self.current_block_has_terminator() {
                 let target = *after_block
                     .get_or_insert_with(|| self.context.append_basic_block(function, "if.after"));
@@ -322,7 +334,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
-    /// 编译 `while` 循环，并设置 `break/continue` 的目标块。
+    /// 编译 while 循环，在循环头插入 GC 安全点并设置 break/continue 目标块。
     pub(super) fn compile_while(
         &mut self,
         condition: &Expr,
@@ -335,6 +347,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
         self.builder.position_at_end(header_block);
+        self.emit_gc_poll()?;
         let compiled = self.compile_expr(condition)?;
         let condition = self.expect_value(compiled)?;
         self.map_builder(self.builder.build_conditional_branch(
@@ -350,7 +363,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         });
         self.push_scope();
         let terminated = self.compile_statements(body)?;
-        self.pop_scope();
+        self.pop_scope()?;
         self.loop_stack.pop();
         if !terminated && !self.current_block_has_terminator() {
             self.map_builder(self.builder.build_unconditional_branch(header_block))?;
@@ -360,7 +373,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(false)
     }
 
-    /// 编译整数半开区间 `for` 循环。
+    /// 编译整数半开区间 for 循环；固定槽位在入口创建，每轮在循环头检查 GC。
     pub(super) fn compile_for_range(
         &mut self,
         name: &str,
@@ -399,6 +412,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
         self.builder.position_at_end(header_block);
+        self.emit_gc_poll()?;
         let current = self
             .map_builder(self.builder.build_load(
                 self.context.i64_type(),
@@ -451,7 +465,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
 
         self.builder.position_at_end(exit_block);
-        self.pop_scope();
+        self.pop_scope()?;
         Ok(false)
     }
 
@@ -519,6 +533,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
         self.builder.position_at_end(header_block);
+        self.emit_gc_poll()?;
         let current = self
             .map_builder(self.builder.build_load(
                 self.context.i64_type(),
@@ -576,11 +591,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
 
         self.builder.position_at_end(exit_block);
-        self.pop_scope();
+        self.pop_scope()?;
         Ok(false)
     }
 
-    /// 编译 `for key, value in map` 形式的字典遍历循环。
+    /// 编译字典遍历并保护隐式 keys 快照，使循环体中的 GC 不会回收快照或其字符串。
     pub(super) fn compile_for_each_map(
         &mut self,
         key_name: &str,
@@ -601,6 +616,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             .unwrap_basic()
             .into_pointer_value();
 
+        self.protect_gc_value(&TypedValue {
+            value_type: ValueType::List(Box::new(key_type.clone())),
+            value: keys_list.into(),
+        })?;
         self.push_scope();
         let iter_pointer = self.allocate_local(&ValueType::Int, &format!("{key_name}.iter"))?;
         let key_pointer = self.allocate_local(&key_type, key_name)?;
@@ -641,6 +660,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
         self.builder.position_at_end(header_block);
+        self.emit_gc_poll()?;
         let current = self
             .map_builder(self.builder.build_load(
                 self.context.i64_type(),
@@ -700,7 +720,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(self.builder.build_unconditional_branch(header_block))?;
 
         self.builder.position_at_end(exit_block);
-        self.pop_scope();
+        self.pop_scope()?;
         Ok(false)
     }
 }

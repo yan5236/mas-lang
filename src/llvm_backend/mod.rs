@@ -19,6 +19,7 @@ use crate::source::{SourceFile, Span};
 
 mod expressions;
 mod functions;
+mod gc;
 mod operations;
 mod output;
 mod runtime;
@@ -126,6 +127,8 @@ struct CodeGenerator<'ctx, 'src> {
     current_return_type: ValueType,
     scopes: Vec<HashMap<String, VariableInfo<'ctx>>>,
     loop_stack: Vec<LoopContext<'ctx>>,
+    gc_roots: std::cell::RefCell<Vec<(ValueType, PointerValue<'ctx>)>>,
+    gc_temporaries: std::cell::RefCell<Vec<(ValueType, PointerValue<'ctx>)>>,
 }
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
@@ -172,6 +175,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             current_return_type: ValueType::Unit,
             scopes: Vec::new(),
             loop_stack: Vec::new(),
+            gc_roots: std::cell::RefCell::new(Vec::new()),
+            gc_temporaries: std::cell::RefCell::new(Vec::new()),
         })
     }
 
