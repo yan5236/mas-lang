@@ -7,11 +7,12 @@ use crate::config::load_settings;
 use crate::error::FamaError;
 use crate::project::ProjectContext;
 
-/// 执行 `fama run`，把项目编译到临时可执行文件后立即启动，避免污染项目 build 目录。
+/// 执行 `fama run`；内嵌或外部编译器运行前均刷新依赖，使用临时可执行文件避免污染项目 build 目录。
 pub fn run(args: RunArgs) -> Result<(), FamaError> {
     let context = ProjectContext::load(&args.project_dir)?;
     let global_settings = load_settings()?;
     if let Some(binary_path) = &global_settings.compiler_binary {
+        crate::install::install_project_dependencies(&context.root)?;
         return super::build::run_external_compiler_entry(
             binary_path,
             &context,
