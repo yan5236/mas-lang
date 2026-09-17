@@ -171,9 +171,9 @@ fn should_build_project_binary_into_configured_output_directory() {
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
 }
 
-/// 校验 `fama run` 能够完整跑通编译和执行流程，并输出程序结果。
+/// 校验 `fama run` 使用临时产物执行程序，不把运行产物写入项目 build 目录。
 #[test]
-fn should_run_project_binary_after_building() {
+fn should_run_project_binary_without_writing_configured_build_output() {
     let workdir = create_temp_dir("run");
     let new_output = Command::new(fama_bin())
         .arg("new")
@@ -199,6 +199,7 @@ fn should_run_project_binary_after_building() {
     assert!(run_output.status.success(), "{run_output:?}");
     let stdout = String::from_utf8_lossy(&run_output.stdout);
     assert!(stdout.contains("Hello Mascript"));
+    assert!(!workdir.join("demo").join("build").join("demo.exe").exists());
 
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
 }
@@ -248,6 +249,8 @@ fn should_install_local_dependency_and_run_imported_module() {
     assert!(run_output.status.success(), "{run_output:?}");
     let stdout = String::from_utf8_lossy(&run_output.stdout);
     assert!(stdout.contains("3"));
+    assert!(!stdout.contains("已生成可执行文件"));
+    assert!(!stdout.contains("已命中预编译原生产物"));
     assert!(read_to_string(&workdir.join("app").join("mod.yml")).contains("path: ../math"));
     assert!(read_to_string(&workdir.join("app").join("mod-lock.yml")).contains("math@0.1.0"));
     assert!(
