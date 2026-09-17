@@ -43,8 +43,19 @@ if result.ok:
 
 `try_string()` 不存在，因为字符串转换几乎不会失败。
 
-对于非字符串类型的转换（如 `try_int(true)`），总是成功，不会产生错误结果：
+`try_int` 接受整数、布尔值、字符串和浮点数。整数与布尔值转换总是成功；浮点数先检查范围，向零截断小数部分。NaN、正负无穷，以及小于 `-9223372036854775808.0` 或大于等于 `9223372036854775808.0` 的值返回 `ok=false`，失败时 `value` 为 `0`。
+
+`int(float)` 使用同一范围检查，失败时报告带源码位置的运行时错误并以状态码 1 退出。
+
+例如：
 
 ```mas-lang
 var result = try_int(true)   // result.ok == true, result.value == 1
+```
+
+```mas-lang
+var huge = try_int(float("1e20"))
+print(huge.ok)      // false
+var small = try_int(-3.9)
+print(small.value)  // -3
 ```
