@@ -25,7 +25,7 @@ len([1, 2, 3])    // 3
 len({"a": 1})     // 1
 ```
 
-`len` 可用于 string、list、map、array。
+`len` 可用于 string、list、map、array。字符串按 Unicode 标量（字符）计数，不是 UTF-8 字节数，例如 `len("你好")` 为 `2`。组合字符与复合 emoji 可能由多个标量组成，例如 `len("é")` 为 `2`。数组返回固定长度，实参表达式仍正常执行。
 
 ## 类型转换
 
