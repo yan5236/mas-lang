@@ -61,3 +61,7 @@ native/
 1. `native/artifacts/<target>/manifest.toml` 中的 `package_version`、`abi`、`source_hash`、`header_hash` 已更新。
 2. `settings.toml` 中的 `native.prebuilt.<target>` 路径与目录内对象文件一致。
 3. 普通 `fama build` 在不加 `--allow-native-source-build` 的情况下可以直接消费 `time`。
+
+## 版本控制边界
+
+`build/`、`src/build/` 和 `mod_module/` 是本地构建输出或依赖缓存，由 `.gitignore` 排除。`native/artifacts/` 是调用方默认链接所需的发布内容，继续跟踪其中的清单和 OBJ 文件；不要全局忽略所有 `*.obj`。
