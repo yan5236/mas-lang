@@ -166,3 +166,20 @@ fn valid_arithmetic_and_array_edges_work() {
         "10\n30\n9223372036854775807\n-9223372036854775807\n-2\n-1\n-21\n-3\n"
     );
 }
+
+/// 十进制输入先舍入为 f64；恰好 -2^63 仍应成功，下一可表示的更小浮点值必须失败。
+#[test]
+fn float_rounding_preserves_exact_minimum_contract() {
+    let output = execute(
+        "var minimum = -9223372036854775808.0\nprint(-9223372036854776000.0 == minimum)\nprint(-9223372036854775809.0 == minimum)\nprint(int(-9223372036854776000.0))\nvar rounded = try_int(-9223372036854775809.0)\nprint(rounded.ok)\nprint(rounded.value)\nvar below = try_int(-9223372036854777856.0)\nprint(below.ok)\nprint(9223372036854775807.0 == 9223372036854775808.0)\nvar above = try_int(9223372036854775807.0)\nprint(above.ok)\n",
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "true\ntrue\n-9223372036854775808\ntrue\n-9223372036854775808\nfalse\ntrue\nfalse\n"
+    );
+    fails_at_source(
+        "print(int(-9223372036854777856.0))\n",
+        "浮点数无法转换为整数",
+    );
+}

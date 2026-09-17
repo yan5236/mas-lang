@@ -158,7 +158,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    /// 校验内建函数与用户函数调用是否合法，并返回其结果类型。
+    /// 校验函数实参与返回类型；len 接受字符串、列表、字典和定长数组。
     pub(super) fn infer_call_type(
         &mut self,
         callee: &Expr,
@@ -204,9 +204,15 @@ impl<'a> SemanticAnalyzer<'a> {
                 ));
             }
             let argument_type = self.infer_expression_type(&arguments[0])?;
-            if !matches!(argument_type, ValueType::List(_) | ValueType::Map(_, _)) {
+            if !matches!(
+                argument_type,
+                ValueType::String
+                    | ValueType::Array(_, _)
+                    | ValueType::List(_)
+                    | ValueType::Map(_, _)
+            ) {
                 return Err(CompilerError::semantic_message(
-                    "当前阶段 `len` 只支持列表或字典类型",
+                    "内建函数 `len` 只支持字符串、列表、字典或数组类型",
                     arguments[0].span(),
                 ));
             }

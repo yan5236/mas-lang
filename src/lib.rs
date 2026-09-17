@@ -11,6 +11,7 @@ pub mod runtime_bootstrap;
 pub mod semantic;
 pub mod settings;
 pub mod source;
+pub mod temp_directory;
 pub mod token;
 
 use std::path::PathBuf;

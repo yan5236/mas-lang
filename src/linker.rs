@@ -2,7 +2,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::CompileOptions;
 use crate::ast::Program;
@@ -12,6 +11,7 @@ use crate::native_link::{DEFAULT_TARGET_TRIPLE, resolve_native_link_inputs};
 use crate::runtime_bootstrap;
 use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
+use crate::temp_directory::TemporaryDirectory;
 
 /// 执行完整的对象文件生成与本机链接流程，并返回最终可执行文件路径。
 pub fn compile_to_executable(
@@ -163,37 +163,26 @@ fn write_bytes(path: &Path, bytes: &[u8], source: &SourceFile) -> Result<(), Com
 
 /// 管理单次构建使用的临时目录和中间文件路径。
 struct BuildWorkspace {
-    _root: PathBuf,
+    _root: TemporaryDirectory,
     object_path: PathBuf,
     bootstrap_path: PathBuf,
     native_root: PathBuf,
 }
 
 impl BuildWorkspace {
-    /// 创建新的唯一临时工作目录，并分配目标文件和引导源码路径。
+    /// 原子创建独占临时目录并分配中间文件路径；守卫在成功、失败或栈展开后统一清理。
     fn create() -> Result<Self, CompilerError> {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| {
-                CompilerError::build(
-                    MessageId::BuildRustcFailed,
-                    vec![error.to_string()],
-                    Span::new(0, 0),
-                )
-            })?
-            .as_nanos();
-        let root = env::temp_dir().join(format!("mascript-llvm-build-{unique}"));
-        fs::create_dir_all(&root).map_err(|error| {
+        let root = TemporaryDirectory::create("mascript-llvm-build").map_err(|error| {
             CompilerError::build(
                 MessageId::BuildCreateOutputDirFailed,
-                vec![root.display().to_string(), error.to_string()],
+                vec![env::temp_dir().display().to_string(), error.to_string()],
                 Span::new(0, 0),
             )
         })?;
         Ok(Self {
-            object_path: root.join("program.obj"),
-            bootstrap_path: root.join("bootstrap.rs"),
-            native_root: root.join("native"),
+            object_path: root.path().join("program.obj"),
+            bootstrap_path: root.path().join("bootstrap.rs"),
+            native_root: root.path().join("native"),
             _root: root,
         })
     }
@@ -202,20 +191,17 @@ impl BuildWorkspace {
 #[cfg(test)]
 mod tests {
     use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::CompileOptions;
     use crate::settings::{CompilerSettings, UiLanguage};
     use crate::source::SourceFile;
+    use crate::temp_directory::TemporaryDirectory;
     use crate::{analyze_source, compile_to_executable};
 
-    /// 编译源码并立即运行产物，返回收集到的标准输出文本。
+    /// 在独占目录编译运行源码，返回标准输出并清理 EXE、PDB 和测试中间文件。
     fn build_and_run(name: &str, text: &str) -> String {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let temp_root = std::env::temp_dir().join(format!("mascript-llvm-e2e-{name}-{unique}"));
+        let workspace = TemporaryDirectory::create("mascript-llvm-e2e").unwrap();
+        let temp_root = workspace.path();
         let source_path = temp_root.join(format!("{name}.ms"));
         let output_path = temp_root.join(format!("{name}.exe"));
         let source = SourceFile::new(source_path.display().to_string(), text.to_string());
@@ -229,13 +215,10 @@ mod tests {
         String::from_utf8(output.stdout).unwrap()
     }
 
-    /// 编译源码并运行产物，返回失败进程的标准错误文本，用于断言运行时边界错误。
+    /// 在独占目录运行预期失败的程序，返回诊断后清理全部测试产物。
     fn build_and_run_expect_failure(name: &str, text: &str) -> String {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let temp_root = std::env::temp_dir().join(format!("mascript-llvm-e2e-{name}-{unique}"));
+        let workspace = TemporaryDirectory::create("mascript-llvm-e2e").unwrap();
+        let temp_root = workspace.path();
         let source_path = temp_root.join(format!("{name}.ms"));
         let output_path = temp_root.join(format!("{name}.exe"));
         let source = SourceFile::new(source_path.display().to_string(), text.to_string());
@@ -264,7 +247,7 @@ mod tests {
         }
     }
 
-    /// 读取内嵌的 `msceshi` 样例源码，先做前端分析再编译运行，最终返回标准输出文本。
+    /// 分析并运行内嵌样例，返回标准输出；临时目录在成功或失败时均由守卫清理。
     fn build_and_run_msceshi_fixture(name: &str) -> String {
         let source = SourceFile::new(
             format!("<msceshi/compiler-stress/{name}>"),
@@ -274,13 +257,8 @@ mod tests {
 
         analyze_source(&source, &settings).unwrap();
 
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let output_path = std::env::temp_dir()
-            .join(format!("mascript-llvm-msceshi-{unique}"))
-            .join(name.replace(".ms", ".exe"));
+        let workspace = TemporaryDirectory::create("mascript-llvm-msceshi").unwrap();
+        let output_path = workspace.path().join(name.replace(".ms", ".exe"));
         let binary =
             compile_to_executable(&source, &settings, &CompileOptions::new(Some(output_path)))
                 .unwrap();

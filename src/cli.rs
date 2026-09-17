@@ -1,9 +1,9 @@
+use crate::temp_directory::TemporaryDirectory;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::diagnostic::{CompilerError, MessageId, render_message};
 use crate::settings::{CompilerSettings, UiLanguage, load_settings_with_diagnostic};
@@ -176,7 +176,7 @@ fn build_file(
     }
 }
 
-/// 读取源码、编译临时可执行文件并立即运行。
+/// 在独占临时目录编译并运行源码；子进程结束或任何错误返回后清理 EXE 与 PDB。
 fn run_file(
     settings: &CompilerSettings,
     path: PathBuf,
@@ -190,7 +190,18 @@ fn run_file(
         }
     };
 
-    let output_path = temp_run_binary_path();
+    let workspace = match TemporaryDirectory::create("mascript-llvm-run") {
+        Ok(workspace) => workspace,
+        Err(error) => {
+            eprintln!(
+                "{}",
+                CompilerError::cli(MessageId::CliRunBinaryFailed, vec![error.to_string()])
+                    .render(settings.language, None)
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    let output_path = workspace.path().join("program.exe");
     let options = CompileOptions::new(Some(output_path))
         .with_allow_native_source_build(allow_native_source_build);
     let binary = match compile_to_executable(&source, settings, &options) {
@@ -258,15 +269,6 @@ fn read_source(path: &PathBuf) -> Result<SourceFile, CompilerError> {
         )
     })?;
     Ok(SourceFile::new(path.display().to_string(), text))
-}
-
-/// 为 `run` 子命令生成一个唯一的临时可执行文件路径。
-fn temp_run_binary_path() -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    env::temp_dir().join(format!("mascript-llvm-run-{unique}.exe"))
 }
 
 /// 根据当前语言生成完整的命令行帮助文本。

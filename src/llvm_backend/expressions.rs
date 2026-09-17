@@ -166,7 +166,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(CodegenValue::Value(result))
     }
 
-    /// 编译内建函数与用户函数调用。
+    /// 编译内建与用户函数调用；len 对字符串计数 Unicode 标量，对数组返回静态长度但仍求值实参。
     pub(super) fn compile_call(
         &mut self,
         callee: &Expr,
@@ -225,6 +225,37 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 Vec<BasicMetadataValueEnum<'ctx>>,
                 &str,
             ) = match argument.value_type {
+                ValueType::Array(_, size) => {
+                    return Ok(CodegenValue::Value(TypedValue {
+                        value_type: ValueType::Int,
+                        value: self.context.i64_type().const_int(size as u64, false).into(),
+                    }));
+                }
+                ValueType::String => {
+                    let function = self.module.get_function("string_len").unwrap_or_else(|| {
+                        self.module.add_function(
+                            "string_len",
+                            self.context.i64_type().fn_type(
+                                &[
+                                    self.context.ptr_type(AddressSpace::default()).into(),
+                                    self.context.i64_type().into(),
+                                ],
+                                false,
+                            ),
+                            None,
+                        )
+                    });
+                    let value = argument.value.into_struct_value();
+                    (
+                        function,
+                        vec![
+                            self.extract_string_part(value, 0, "len.string.ptr")?.into(),
+                            self.extract_string_part(value, 1, "len.string.bytes")?
+                                .into(),
+                        ],
+                        "call.string_len",
+                    )
+                }
                 ValueType::List(_) => {
                     let (list_value, _) = self.expect_list_value(argument, span)?;
                     (
@@ -239,7 +270,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 }
                 _ => {
                     return Err(CompilerError::build_message(
-                        "len 只支持列表或字典类型",
+                        "len 只支持字符串、列表、字典或数组类型",
                         span,
                     ));
                 }

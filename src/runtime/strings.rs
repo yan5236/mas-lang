@@ -420,3 +420,9 @@ pub extern "C" fn mas_global_uninitialized(
         ),
     )
 }
+
+/// 返回 UTF-8 字符串的 Unicode 标量数量；组合字符分别计数，不修改字符串或触发 GC。
+#[unsafe(no_mangle)]
+pub extern "C" fn string_len(ptr: *const u8, len: u64) -> i64 {
+    parse_runtime_text(ptr, len).chars().count() as i64
+}
