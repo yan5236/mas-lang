@@ -466,10 +466,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析冒号加缩进构成的代码块。
+    /// 解析冒号后的缩进块；先跳过空行和纯注释行留下的换行，再要求真实语句的缩进，空块仍报错。
     fn parse_suite(&mut self, message: &str) -> Result<(Vec<Stmt>, Span), CompilerError> {
         self.consume(TokenTag::Colon, "代码块缺少冒号 `:`")?;
         self.consume(TokenTag::Newline, "冒号后必须换行开始代码块")?;
+        self.skip_newlines();
         self.consume(TokenTag::Indent, message)?;
 
         let block_start = self.previous().span;
