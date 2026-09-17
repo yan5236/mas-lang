@@ -620,10 +620,17 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// 解析一元负号和逻辑非。
+    /// 解析一元负号和逻辑非；负号直接跟随 2^63 幅值时构造精确 i64 最小值。
     fn parse_unary(&mut self) -> Result<Expr, CompilerError> {
         if self.match_tag(TokenTag::Minus) {
             let operator = self.previous().span;
+            if matches!(self.peek().kind, TokenKind::IntMinMagnitude) {
+                let magnitude = self.advance().span;
+                return Ok(Expr::Literal {
+                    value: Literal::Int(i64::MIN),
+                    span: Span::merge(operator, magnitude),
+                });
+            }
             let operand = self.parse_unary()?;
             return Ok(Expr::Unary {
                 op: UnaryOp::Negate,
@@ -777,11 +784,15 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析字面量、标识符、列表字面量和分组表达式等基础节点。
+    /// 解析基础表达式；未被负号消费的 2^63 幅值不属于合法 i64，必须报告越界。
     fn parse_primary(&mut self) -> Result<Expr, CompilerError> {
         let token = self.advance().clone();
 
         match token.kind {
+            TokenKind::IntMinMagnitude => Err(CompilerError::syntax_message(
+                "整数字面量超出 i64 范围",
+                token.span,
+            )),
             TokenKind::IntLiteral(value) => Ok(Expr::Literal {
                 value: Literal::Int(value),
                 span: token.span,

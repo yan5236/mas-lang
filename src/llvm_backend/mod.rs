@@ -20,6 +20,8 @@ use crate::source::{SourceFile, Span};
 mod expressions;
 mod functions;
 mod gc;
+mod global_state;
+mod numeric_safety;
 mod operations;
 mod output;
 mod runtime;
@@ -121,6 +123,7 @@ struct CodeGenerator<'ctx, 'src> {
     source_path_value: Option<StructValue<'ctx>>,
     source_text_value: Option<StructValue<'ctx>>,
     globals: HashMap<String, VariableInfo<'ctx>>,
+    global_initialized: HashMap<String, PointerValue<'ctx>>,
     functions: HashMap<String, FunctionInfo<'ctx>>,
     current_function: Option<FunctionValue<'ctx>>,
     entry_function: Option<FunctionValue<'ctx>>,
@@ -169,6 +172,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             source_path_value: None,
             source_text_value: None,
             globals: HashMap::new(),
+            global_initialized: HashMap::new(),
             functions: HashMap::new(),
             current_function: None,
             entry_function: None,

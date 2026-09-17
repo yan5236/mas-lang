@@ -105,19 +105,19 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
-    /// 从变量指针中加载一个已声明变量的当前值。
+    /// 加载变量当前值；全局声明尚未执行时报告访问位置，局部遮蔽变量不受影响。
     pub(super) fn compile_identifier(
-        &self,
+        &mut self,
         name: &str,
         span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         let variable = self.lookup_variable(name).ok_or_else(|| {
             CompilerError::build_message(format!("代码生成阶段找不到变量 `{name}`"), span)
         })?;
-        self.load_variable(variable)
+        self.load_variable(variable, span)
     }
 
-    /// 编译一元表达式，并生成对应的 LLVM 指令。
+    /// 编译一元表达式；整数取负通过受检减法拒绝 MIN 溢出。
     pub(super) fn compile_unary(
         &mut self,
         op: UnaryOp,
@@ -130,9 +130,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             (UnaryOp::Negate, ValueType::Int) => TypedValue {
                 value_type: ValueType::Int,
                 value: self
-                    .map_builder(
-                        self.builder
-                            .build_int_neg(value.value.into_int_value(), "neg.int"),
+                    .checked_int_arithmetic(
+                        crate::ast::BinaryOp::Subtract,
+                        self.context.i64_type().const_zero(),
+                        value.value.into_int_value(),
+                        span,
                     )?
                     .into(),
             },
@@ -399,7 +401,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
-    /// 把基础类型值转换为 `int`，其中字符串分支通过运行时解析十进制文本。
+    /// 转换基础类型为整数；浮点输入检查有限性与 i64 范围，非法输入报告源码位置。
     fn compile_int_conversion(
         &mut self,
         arguments: &[Expr],
@@ -408,16 +410,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let argument = self.compile_scalar_convert_argument("int", arguments, span)?;
         match argument.value_type {
             ValueType::Int => Ok(argument),
-            ValueType::Float => Ok(TypedValue {
-                value_type: ValueType::Int,
-                value: self
-                    .map_builder(self.builder.build_float_to_signed_int(
-                        argument.value.into_float_value(),
-                        self.context.i64_type(),
-                        "float.to.int",
-                    ))?
-                    .into(),
-            }),
+            ValueType::Float => {
+                let (ok, value) = self.checked_float_to_int(argument.value.into_float_value())?;
+                self.emit_safety_check(ok, 4, span)?;
+                Ok(TypedValue {
+                    value_type: ValueType::Int,
+                    value: value.into(),
+                })
+            }
             ValueType::Bool => Ok(TypedValue {
                 value_type: ValueType::Int,
                 value: self
@@ -606,7 +606,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
-    /// 编译 `try_int`，字符串分支返回失败标记而不是直接触发运行时错误。
+    /// 编译 try_int；字符串解析失败或浮点越界、非有限时返回 ok=false 和零值。
     fn compile_try_int_conversion(
         &mut self,
         arguments: &[Expr],
@@ -615,15 +615,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let argument = self.compile_scalar_convert_argument("try_int", arguments, span)?;
         match argument.value_type {
             ValueType::Int => self.build_safe_convert_success(ValueType::Int, argument.value),
-            ValueType::Float => self.build_safe_convert_success(
-                ValueType::Int,
-                self.map_builder(self.builder.build_float_to_signed_int(
-                    argument.value.into_float_value(),
-                    self.context.i64_type(),
-                    "try.float.to.int",
-                ))?
-                .into(),
-            ),
+            ValueType::Float => {
+                let (ok, value) = self.checked_float_to_int(argument.value.into_float_value())?;
+                self.build_safe_convert_result(ValueType::Int, ok, value.into())
+            }
             ValueType::Bool => self.build_safe_convert_success(
                 ValueType::Int,
                 self.map_builder(self.builder.build_int_z_extend(
@@ -1118,6 +1113,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     element_type.as_ref(),
                     size,
                     index_value.value.into_int_value(),
+                    span,
                 )?))
             }
             ValueType::Map(key_type, value_type) => {
@@ -1951,14 +1947,22 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(())
     }
 
-    /// 从固定长度数组指定下标读取单个元素。
+    /// 读取数组元素前检查 0 <= index < size；失败报告访问位置，避免越界 GEP 或任意内存读取。
     pub(super) fn build_array_get(
         &mut self,
         array_pointer: PointerValue<'ctx>,
         element_type: &ValueType,
         size: usize,
         index_value: inkwell::values::IntValue<'ctx>,
+        span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let valid = self.map_builder(self.builder.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            index_value,
+            self.context.i64_type().const_int(size as u64, false),
+            "array.in_range",
+        ))?;
+        self.emit_safety_check(valid, 3, span)?;
         let zero = self.context.i64_type().const_zero();
         let element_pointer = unsafe {
             self.map_builder(self.builder.build_in_bounds_gep(

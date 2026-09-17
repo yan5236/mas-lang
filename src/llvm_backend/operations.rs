@@ -157,7 +157,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.compile_numeric_binary(left, right, BinaryOp::Add, span)
     }
 
-    /// 编译数值二元运算，并在必要时把整数提升为浮点数。
+    /// 编译数值二元运算；整数加减乘检测溢出，混合运算保持浮点提升语义。
     pub(super) fn compile_numeric_binary(
         &mut self,
         left: TypedValue<'ctx>,
@@ -168,30 +168,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         match op {
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply => {
                 if left.value_type == ValueType::Int && right.value_type == ValueType::Int {
-                    let value = match op {
-                        BinaryOp::Add => self
-                            .map_builder(self.builder.build_int_add(
-                                left.value.into_int_value(),
-                                right.value.into_int_value(),
-                                "add.int",
-                            ))?
-                            .into(),
-                        BinaryOp::Subtract => self
-                            .map_builder(self.builder.build_int_sub(
-                                left.value.into_int_value(),
-                                right.value.into_int_value(),
-                                "sub.int",
-                            ))?
-                            .into(),
-                        BinaryOp::Multiply => self
-                            .map_builder(self.builder.build_int_mul(
-                                left.value.into_int_value(),
-                                right.value.into_int_value(),
-                                "mul.int",
-                            ))?
-                            .into(),
-                        _ => unreachable!(),
-                    };
+                    let value = self
+                        .checked_int_arithmetic(
+                            op,
+                            left.value.into_int_value(),
+                            right.value.into_int_value(),
+                            span,
+                        )?
+                        .into();
                     return Ok(TypedValue {
                         value_type: ValueType::Int,
                         value,
@@ -236,7 +220,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
-    /// 编译只接受整数的取模与整数除法表达式。
+    /// 编译整数取余和除法，先检查零除数与 MIN/-1，再生成对应 LLVM 指令。
     pub(super) fn compile_integer_binary(
         &mut self,
         left: TypedValue<'ctx>,
@@ -252,6 +236,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
         let left = left.value.into_int_value();
         let right = right.value.into_int_value();
+        self.check_int_division(left, right, span)?;
         let value = match op {
             BinaryOp::Modulo => {
                 self.map_builder(self.builder.build_int_signed_rem(left, right, "mod.int"))?
@@ -267,7 +252,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
-    /// 编译相等比较表达式。
+    /// 编译相等比较；浮点不等包含无序情形，使 NaN != 任意浮点值恒为真。
     pub(super) fn compile_equality(
         &mut self,
         left: TypedValue<'ctx>,
@@ -322,7 +307,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     if op == BinaryOp::Equal {
                         FloatPredicate::OEQ
                     } else {
-                        FloatPredicate::ONE
+                        FloatPredicate::UNE
                     },
                     left_float,
                     right_float,

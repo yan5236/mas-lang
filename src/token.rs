@@ -88,6 +88,8 @@ pub enum TokenKind {
     Not,
     Identifier(String),
     IntLiteral(i64),
+    /// 仅允许被紧邻的一元负号消费的 2^63 幅值，不是合法正整数。
+    IntMinMagnitude,
     FloatLiteral(f64),
     StringLiteral(String),
     BoolLiteral(bool),
@@ -127,7 +129,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
-    /// 返回词法单元所属的粗粒度类别，便于忽略其内部载荷参与判断。
+    /// 返回词法类别；最小整数幅值归入整数字面量类，具体合法性由一元负号解析处理。
     pub fn tag(&self) -> TokenTag {
         match self {
             Self::Import => TokenTag::Import,
@@ -151,7 +153,7 @@ impl TokenKind {
             Self::Or => TokenTag::Or,
             Self::Not => TokenTag::Not,
             Self::Identifier(_) => TokenTag::Identifier,
-            Self::IntLiteral(_) => TokenTag::IntLiteral,
+            Self::IntLiteral(_) | Self::IntMinMagnitude => TokenTag::IntLiteral,
             Self::FloatLiteral(_) => TokenTag::FloatLiteral,
             Self::StringLiteral(_) => TokenTag::StringLiteral,
             Self::BoolLiteral(_) => TokenTag::BoolLiteral,

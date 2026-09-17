@@ -30,7 +30,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(terminated)
     }
 
-    /// 生成具体语句的控制流；外层负责安全点和语句临时根的失效处理。
+    /// 生成语句控制流并在全局声明完成后标记可访问；赋值须检查声明已执行，外层负责 GC 安全点。
     fn compile_statement_inner(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
         match statement {
             Stmt::Import { .. } | Stmt::ExportImport { .. } => Ok(false),
@@ -91,6 +91,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     let variable =
                         self.declare_global(name, expected.clone(), binding_kind.is_mutable())?;
                     self.store_variable(variable, value.value)?;
+                    self.map_builder(self.builder.build_store(
+                        self.global_initialized[name],
+                        self.context.i8_type().const_int(1, false),
+                    ))?;
                 } else {
                     let pointer = self.allocate_local(&expected, name)?;
                     self.map_builder(self.builder.build_store(pointer, value.value))?;
@@ -128,11 +132,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
                     let assigned = match op {
                         AssignOp::Assign => {
+                            self.check_global_initialized(&variable, *span)?;
                             let compiled = self.compile_expr(value)?;
                             self.expect_value(compiled)?
                         }
                         _ => {
-                            let current = self.load_variable(variable.clone())?;
+                            let current = self.load_variable(variable.clone(), *span)?;
                             self.protect_gc_value(&current)?;
                             let compiled = self.compile_expr(value)?;
                             let right = self.expect_value(compiled)?;

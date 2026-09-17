@@ -268,7 +268,7 @@ impl<'a> Lexer<'a> {
         ))
     }
 
-    /// 解析整数或浮点数字面量，并避免把 `0..5` 误识别为浮点数。
+    /// 解析数字并避免误吞范围运算符；单独保留 2^63 幅值交由负号处理，其他越界整数仍拒绝。
     fn lex_number(&mut self, line_end: usize) -> Result<Token, CompilerError> {
         let start = self.position;
         let mut seen_dot = false;
@@ -303,6 +303,8 @@ impl<'a> Lexer<'a> {
                     Span::new(start, self.position),
                 )
             })?)
+        } else if text.parse::<u64>() == Ok(1u64 << 63) {
+            TokenKind::IntMinMagnitude
         } else {
             TokenKind::IntLiteral(text.parse().map_err(|_| {
                 CompilerError::lexical(

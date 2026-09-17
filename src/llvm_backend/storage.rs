@@ -7,7 +7,7 @@ use inkwell::values::{BasicValueEnum, GlobalValue, PointerValue};
 use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 为新的全局变量创建可寻址的 LLVM 全局对象。
+    /// 为全局变量创建零值存储及独立初始化标记；声明执行完成前禁止读取或赋值。
     pub(super) fn declare_global(
         &mut self,
         name: &str,
@@ -24,6 +24,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             .module
             .add_global(self.basic_type_for(&value_type)?, None, &symbol);
         self.initialize_global(&global, &value_type)?;
+        let initialized = self.module.add_global(
+            self.context.i8_type(),
+            None,
+            &format!("{symbol}_initialized"),
+        );
+        initialized.set_initializer(&self.context.i8_type().const_zero());
+        self.global_initialized
+            .insert(name.to_string(), initialized.as_pointer_value());
         let variable = VariableInfo {
             value_type,
             pointer: global.as_pointer_value(),
@@ -74,11 +82,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(pointer)
     }
 
-    /// 从变量指针中加载值。
+    /// 检查全局声明已执行后加载变量；未初始化访问通过运行时诊断报告给定源码位置。
     pub(super) fn load_variable(
-        &self,
+        &mut self,
         variable: VariableInfo<'ctx>,
+        span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
+        self.check_global_initialized(&variable, span)?;
         let value = self.map_builder(self.builder.build_load(
             self.basic_type_for(&variable.value_type)?,
             variable.pointer,

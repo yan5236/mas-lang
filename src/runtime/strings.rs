@@ -402,3 +402,21 @@ fn make_runtime_error_site(
         span_end,
     }
 }
+
+/// 全局声明执行前的访问统一终止为语言错误，六个参数指定源码文本和访问范围。
+#[unsafe(no_mangle)]
+pub extern "C" fn mas_global_uninitialized(
+    path_ptr: *const u8,
+    path_len: u64,
+    source_ptr: *const u8,
+    source_len: u64,
+    span_start: u64,
+    span_end: u64,
+) -> ! {
+    abort_runtime_at(
+        "全局变量尚未初始化",
+        make_runtime_error_site(
+            path_ptr, path_len, source_ptr, source_len, span_start, span_end,
+        ),
+    )
+}
