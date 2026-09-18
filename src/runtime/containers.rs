@@ -114,35 +114,62 @@ fn cmp_strings(left: MsString, right: MsString) -> std::cmp::Ordering {
     string_bytes(left).cmp(string_bytes(right))
 }
 
-/// 使用哈希索引查询字典槽位下标，避免每次读取都线性扫描整个字典。
+/// 查询键对应的条目位置；字符串先按内容验证最近命中的条目，再回退到随机哈希索引。
+/// 缓存仅保存位置，不延长查询字符串寿命；单线程中通过 Cell 更新，不分配或触发 GC。
 unsafe fn map_find_index(map: *const MsMap, key: ScalarCell) -> Option<usize> {
-    (*map).indexes.get(&scalar_to_map_key(key)).copied()
+    match key {
+        ScalarCell::String(value) => {
+            let map = &*map;
+            let bytes = string_bytes(value);
+            if let Some(index) = map.last_string_index.get() {
+                if let Some(Some((ScalarCell::String(stored), _))) = map.entries.get(index) {
+                    if string_bytes(*stored) == bytes {
+                        return Some(index);
+                    }
+                }
+            }
+            let index = map.string_indexes.get(bytes).copied();
+            map.last_string_index.set(index);
+            index
+        }
+        _ => (*map).indexes.get(&scalar_to_map_key(key)).copied(),
+    }
 }
 
-/// 写入或更新字典并保持插入顺序；新增键和容量扩张计入 GC 分配预算。
+/// 写入或更新字典并保持插入顺序；数字键用 entry 合并查询与插入，字符串复用经过内容验证的查询缓存。
+/// 新增条目才结算容量增长并计入 GC 预算；内部不收集，更新保留原键以维持字符串可达性。
 unsafe fn map_set_cell(map: *mut MsMap, key: ScalarCell, value: ScalarCell) {
     let map = &mut *map;
     let old_capacity = map.entries.capacity()
         * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
-        + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>();
-    if let Some(index) = map_find_index(map, key) {
-        if let Some((_, entry_value)) = map.entries.get_mut(index).and_then(Option::as_mut) {
-            *entry_value = value;
+        + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>()
+        + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>();
+    let next = map.entries.len();
+    let index = if let ScalarCell::String(text) = key {
+        if let Some(index) = map_find_index(map, key) {
+            index
         } else {
-            abort_runtime("内部字典索引失效");
+            let bytes = string_bytes(text).to_vec();
+            gc_charge(bytes.capacity());
+            map.string_indexes.insert(bytes, next);
+            map.last_string_index.set(Some(next));
+            next
         }
     } else {
-        let index = map.entries.len();
-        map.entries.push(Some((key, value)));
-        let owned_key = scalar_to_map_key(key);
-        if let MapKey::String(bytes) = &owned_key {
-            gc_charge(bytes.capacity());
-        }
-        map.indexes.insert(owned_key, index);
-        map.len += 1;
+        *map.indexes.entry(scalar_to_map_key(key)).or_insert(next)
+    };
+    if index != next {
+        let (_, entry_value) = map.entries[index]
+            .as_mut()
+            .unwrap_or_else(|| abort_runtime("内部字典索引失效"));
+        *entry_value = value;
+        return;
     }
+    map.entries.push(Some((key, value)));
+    map.len += 1;
     let capacity = map.entries.capacity() * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
-        + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>();
+        + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>()
+        + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>();
     gc_charge(capacity.saturating_sub(old_capacity));
 }
 
@@ -157,14 +184,15 @@ unsafe fn map_get_cell(map: *const MsMap, key: ScalarCell, site: RuntimeErrorSit
         .unwrap_or_else(|| abort_runtime("内部字典索引失效"))
 }
 
-/// 删除键并在墓碑过多时按原顺序压缩存储，避免仍存活的空字典随历史操作无限增长。
+/// 删除键前失效查询缓存；墓碑过多时按原顺序压缩，避免缓存指向重排后的其他键或历史槽无限增长。
 unsafe fn map_remove_cell(map: *mut MsMap, key: ScalarCell, site: RuntimeErrorSite) {
     let map = &mut *map;
-    let map_key = scalar_to_map_key(key);
-    let index = map
-        .indexes
-        .remove(&map_key)
-        .unwrap_or_else(|| abort_runtime_at("字典中不存在要删除的键", site));
+    map.last_string_index.set(None);
+    let index = match key {
+        ScalarCell::String(value) => map.string_indexes.remove(string_bytes(value)),
+        _ => map.indexes.remove(&scalar_to_map_key(key)),
+    }
+    .unwrap_or_else(|| abort_runtime_at("字典中不存在要删除的键", site));
     let removed = map.entries.get_mut(index).and_then(Option::take);
     if removed.is_none() {
         abort_runtime("内部字典索引失效");
@@ -172,13 +200,18 @@ unsafe fn map_remove_cell(map: *mut MsMap, key: ScalarCell, site: RuntimeErrorSi
     map.len -= 1;
     if map.entries.len() > 32 && map.entries.len() > (map.len as usize).saturating_mul(2) {
         map.entries.retain(Option::is_some);
-        // 更新现有索引值，保持剩余元素原有顺序；临时字符串查找键用后即释放。
+        // 更新现有索引而不分配临时键，持久字符串索引仍拥有独立字节。
         for (index, entry) in map.entries.iter().enumerate() {
-            let key = scalar_to_map_key(entry.as_ref().expect("live entry").0);
-            *map.indexes.get_mut(&key).expect("live key") = index;
+            let key = entry.as_ref().expect("live entry").0;
+            let slot = match key {
+                ScalarCell::String(value) => map.string_indexes.get_mut(string_bytes(value)),
+                _ => map.indexes.get_mut(&scalar_to_map_key(key)),
+            };
+            *slot.expect("live key") = index;
         }
         map.entries.shrink_to((map.len as usize).max(32));
         map.indexes.shrink_to((map.len as usize).max(32));
+        map.string_indexes.shrink_to((map.len as usize).max(32));
     }
 }
 

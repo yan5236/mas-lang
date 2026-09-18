@@ -22,7 +22,8 @@ pub fn compile_to_executable(
     options: &CompileOptions,
 ) -> Result<PathBuf, CompilerError> {
     let output_path = resolve_output_path(source, options)?;
-    let generated_object = llvm_backend::compile_program(source, settings, program)?;
+    let generated_object =
+        llvm_backend::compile_program_with_options(source, settings, program, options)?;
     let workspace = BuildWorkspace::create()?;
 
     write_bytes(
@@ -48,6 +49,7 @@ pub fn compile_to_executable(
         &native_objects,
         &output_path,
         source,
+        options.opt_level,
     )?;
     Ok(output_path)
 }
@@ -81,13 +83,14 @@ fn resolve_output_path(
         .join(format!("{}.exe", source_name.to_string_lossy())))
 }
 
-/// 调用 `rustc` 把目标文件和引导源码链接为最终的 `.exe`。
+/// 以生成程序的显式档位优化完整 Rust 运行时，再与目标文件及原生依赖链接；失败返回构建诊断。
 fn link_executable(
     object_path: &Path,
     bootstrap_path: &Path,
     native_objects: &[PathBuf],
     output_path: &Path,
     source: &SourceFile,
+    opt_level: crate::optimization::OptLevel,
 ) -> Result<(), CompilerError> {
     let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
     let mut command = Command::new(rustc);
@@ -96,6 +99,8 @@ fn link_executable(
         .arg("2024")
         .arg("--target")
         .arg(DEFAULT_TARGET_TRIPLE)
+        .arg("-C")
+        .arg(format!("opt-level={}", opt_level.as_str()))
         .arg(bootstrap_path)
         .arg("-o")
         .arg(output_path)

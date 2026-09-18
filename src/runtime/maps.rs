@@ -1,4 +1,4 @@
-/// 创建容器并移交 GC 管理；返回地址稳定的共享句柄，不在分配内部触发回收。
+/// 创建容器、空索引与空查询缓存并移交 GC；索引拥有字符串字节，空索引不分配，不在此处回收。
 #[unsafe(no_mangle)]
 pub extern "C" fn map_create(key_kind: u8, value_kind: u8) -> *mut MsMap {
     let ptr = Box::into_raw(Box::new(MsMap {
@@ -7,6 +7,8 @@ pub extern "C" fn map_create(key_kind: u8, value_kind: u8) -> *mut MsMap {
         len: 0,
         entries: Vec::new(),
         indexes: HashMap::new(),
+        string_indexes: HashMap::new(),
+        last_string_index: std::cell::Cell::new(None),
     }));
     gc_track(ptr as usize, GcObject::Map(ptr));
     ptr

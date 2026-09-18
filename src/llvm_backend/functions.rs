@@ -90,6 +90,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.scopes = vec![HashMap::new()];
         self.loop_stack.clear();
         self.gc_roots.borrow_mut().clear();
+        self.gc_handle_roots.borrow_mut().clear();
+        self.string_builders.clear();
         self.gc_temporaries.borrow_mut().clear();
 
         let terminated = self.compile_statements(&program.statements)?;
@@ -125,6 +127,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.scopes = vec![HashMap::new()];
         self.loop_stack.clear();
         self.gc_roots.borrow_mut().clear();
+        self.gc_handle_roots.borrow_mut().clear();
+        self.string_builders.clear();
         self.gc_temporaries.borrow_mut().clear();
 
         for (index, parameter) in parameters.iter().enumerate() {

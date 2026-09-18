@@ -24,13 +24,8 @@ enum ScalarCell {
     String(MsString),
 }
 
-#[derive(Clone, Eq, Hash, PartialEq)]
-enum MapKey {
-    Int(i64),
-    Float(u64),
-    Bool(u8),
-    String(Vec<u8>),
-}
+// 字典键类型由 key_kind 固定；索引只存位模式，避免每个桶重复存储类型标签。
+type MapKey = u64;
 
 #[derive(Clone, Copy)]
 struct RuntimeErrorSite {
@@ -47,6 +42,9 @@ pub struct MsMap {
     len: u64,
     entries: Vec<Option<(ScalarCell, ScalarCell)>>,
     indexes: HashMap<MapKey, usize>,
+    string_indexes: HashMap<Vec<u8>, usize>,
+    // 仅缓存条目位置，不持有查询字符串；每次命中仍比较字节，删除时失效。
+    last_string_index: std::cell::Cell<Option<usize>>,
 }
 
 const KIND_INT: u8 = 1;
@@ -271,10 +269,20 @@ pub extern "C" fn try_string_to_bool(ptr: *const u8, len: u64, out_value: *mut u
     }
 }
 
-/// 把整数值格式化成新的运行时字符串，供 `string(int)` 内建函数直接返回。
+/// 在足够容纳 i64（含负号）的栈缓冲区中按标准 Display 格式化，再一次分配精确长度的托管字节。
+/// 写出结果长度并返回 GC 管理地址；避免 String 转 Box 时额外缩容，不改变整数极值或负数文本。
 #[unsafe(no_mangle)]
 pub extern "C" fn int_to_string(value: i64, out_len: *mut u64) -> *const u8 {
-    boxed_string_into_raw(value.to_string(), out_len)
+    let mut buffer = [0u8; 20];
+    let mut cursor = std::io::Cursor::new(buffer.as_mut_slice());
+    std::io::Write::write_fmt(&mut cursor, format_args!("{value}"))
+        .expect("i64 text fits in 20 bytes");
+    let len = cursor.position() as usize;
+    let ptr = gc_allocate_string(buffer[..len].into());
+    unsafe {
+        *out_len = len as u64;
+    }
+    ptr
 }
 
 /// 把浮点值格式化成新的运行时字符串，保持和 Rust `Display` 一致的输出格式。
@@ -370,13 +378,14 @@ fn runtime_line_text<'a>(source: &'a str, target_line: usize) -> &'a str {
         .unwrap_or("")
 }
 
-/// 把运行时可复制的标量键转换为可放入哈希表的稳定键对象。
+/// 将同一静态键类型转换为无损位模式，保留浮点正负零及 NaN 位模式的既有区分。
+/// 字符串使用独立字节索引，误入此路径时终止为运行时错误。
 fn scalar_to_map_key(value: ScalarCell) -> MapKey {
     match value {
-        ScalarCell::Int(value) => MapKey::Int(value),
-        ScalarCell::Float(value) => MapKey::Float(value.to_bits()),
-        ScalarCell::Bool(value) => MapKey::Bool(value),
-        ScalarCell::String(value) => MapKey::String(string_bytes(value).to_vec()),
+        ScalarCell::Int(value) => value as u64,
+        ScalarCell::Float(value) => value.to_bits(),
+        ScalarCell::Bool(value) => value as u64,
+        ScalarCell::String(_) => abort_runtime("字符串键必须使用字节索引"),
     }
 }
 

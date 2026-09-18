@@ -3,15 +3,17 @@ use std::cell::RefCell;
 /// 非移动托管对象；容器独占缓冲区，字符串独占字节存储。
 enum GcObject {
     String(Box<[u8]>),
+    StringBuilder(Box<Vec<u8>>),
     List(*mut MsList),
     Map(*mut MsMap),
 }
 
 impl GcObject {
-    /// 返回主要堆容量，用于回收阈值，不包含分配器元数据。
+    /// 返回主要堆容量，含构建缓冲区、两类索引和拥有的字符串字节，用于回收阈值；不含分配器元数据。
     fn bytes(&self) -> usize {
         match self {
             Self::String(bytes) => bytes.len(),
+            Self::StringBuilder(bytes) => std::mem::size_of::<Vec<u8>>() + bytes.capacity(),
             Self::List(ptr) => unsafe {
                 std::mem::size_of::<MsList>()
                     + (**ptr).capacity as usize * elem_size((**ptr).elem_kind)
@@ -22,22 +24,16 @@ impl GcObject {
                     + map.entries.capacity()
                         * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
                     + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>()
-                    + map
-                        .indexes
-                        .keys()
-                        .map(|key| match key {
-                            MapKey::String(bytes) => bytes.capacity(),
-                            _ => 0,
-                        })
-                        .sum::<usize>()
+                    + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>()
+                    + map.string_indexes.keys().map(Vec::capacity).sum::<usize>()
             },
         }
     }
 
-    /// 枚举容器内有效字符串引用；空槽和已删除元素不参与标记。
+    /// 枚举容器内有效字符串引用；无字符串的字典跳过条目扫描，空槽及已删除元素不参与标记。
     fn children(&self, output: &mut Vec<usize>) {
         match self {
-            Self::String(_) => {}
+            Self::String(_) | Self::StringBuilder(_) => {}
             Self::List(ptr) => unsafe {
                 let list = &**ptr;
                 if list.elem_kind == KIND_STRING {
@@ -52,6 +48,9 @@ impl GcObject {
                 }
             },
             Self::Map(ptr) => unsafe {
+                if (**ptr).key_kind != KIND_STRING && (**ptr).value_kind != KIND_STRING {
+                    return;
+                }
                 for (key, value) in (&**ptr).entries.iter().flatten() {
                     for cell in [key, value] {
                         if let ScalarCell::String(text) = cell {
@@ -69,7 +68,7 @@ impl Drop for GcObject {
     fn drop(&mut self) {
         unsafe {
             match self {
-                Self::String(_) => {}
+                Self::String(_) | Self::StringBuilder(_) => {}
                 Self::List(ptr) => {
                     let list = Box::from_raw(*ptr);
                     if !list.data.is_null() {
@@ -240,8 +239,11 @@ fn gc_shutdown() {
     });
 }
 
-/// 将容器缓冲区增长计入分配预算，仅记录字节数，不在原生操作中触发收集。
+/// 将实际容量增长计入分配预算；零增长是恒等操作，直接返回以避免 TLS 借用，不触发收集。
 fn gc_charge(bytes: usize) {
+    if bytes == 0 {
+        return;
+    }
     GC_HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         heap.allocated = heap.allocated.saturating_add(bytes);

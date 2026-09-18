@@ -130,6 +130,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         ));
                     }
 
+                    if *op == AssignOp::AddAssign
+                        && self.append_string_builder(variable.pointer, value)?
+                    {
+                        return Ok(false);
+                    }
                     let assigned = match op {
                         AssignOp::Assign => {
                             self.check_global_initialized(&variable, *span)?;
@@ -194,14 +199,24 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             } => self.compile_if(branches, else_branch.as_ref()),
             Stmt::While {
                 condition, body, ..
-            } => self.compile_while(condition, body),
+            } => {
+                let start = self.begin_string_builders(&[condition], body, None)?;
+                self.compile_while(condition, body)?;
+                self.finish_string_builders(start)?;
+                Ok(false)
+            }
             Stmt::ForRange {
                 name,
                 start,
                 end,
                 body,
                 span,
-            } => self.compile_for_range(name, start, end, body, *span),
+            } => {
+                let mark = self.begin_string_builders(&[start, end], body, Some(name))?;
+                self.compile_for_range(name, start, end, body, *span)?;
+                self.finish_string_builders(mark)?;
+                Ok(false)
+            }
             Stmt::ForEach {
                 key_name,
                 value_name,

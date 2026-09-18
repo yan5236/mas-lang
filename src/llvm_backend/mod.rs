@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use crate::CompileOptions;
+use crate::optimization::OptLevel;
 use inkwell::AddressSpace;
-use inkwell::OptimizationLevel;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -20,6 +21,7 @@ use crate::source::{SourceFile, Span};
 mod expressions;
 mod functions;
 mod gc;
+mod gc_elision;
 mod global_state;
 mod numeric_safety;
 mod operations;
@@ -27,6 +29,8 @@ mod output;
 mod runtime;
 mod statements;
 mod storage;
+mod string_builder;
+mod string_builder_analysis;
 
 #[cfg(test)]
 mod tests;
@@ -130,6 +134,10 @@ struct CodeGenerator<'ctx, 'src> {
     current_return_type: ValueType,
     scopes: Vec<HashMap<String, VariableInfo<'ctx>>>,
     loop_stack: Vec<LoopContext<'ctx>>,
+    gc_management: std::cell::RefCell<Vec<inkwell::values::InstructionValue<'ctx>>>,
+    optimize_strings: bool,
+    string_builders: Vec<(PointerValue<'ctx>, PointerValue<'ctx>)>,
+    gc_handle_roots: std::cell::RefCell<Vec<PointerValue<'ctx>>>,
     gc_roots: std::cell::RefCell<Vec<(ValueType, PointerValue<'ctx>)>>,
     gc_temporaries: std::cell::RefCell<Vec<(ValueType, PointerValue<'ctx>)>>,
 }
@@ -145,7 +153,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             )
         })?;
 
-        let target_machine = create_target_machine(source, &TargetMachine::get_default_triple())?;
+        let target_machine = create_target_machine(
+            source,
+            &TargetMachine::get_default_triple(),
+            OptLevel::default(),
+        )?;
         let module = context.create_module("mascript");
         module.set_triple(&target_machine.get_triple());
         module.set_data_layout(&target_machine.get_target_data().get_data_layout());
@@ -179,6 +191,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             current_return_type: ValueType::Unit,
             scopes: Vec::new(),
             loop_stack: Vec::new(),
+            gc_management: std::cell::RefCell::new(Vec::new()),
+            optimize_strings: false,
+            string_builders: Vec::new(),
+            gc_handle_roots: std::cell::RefCell::new(Vec::new()),
             gc_roots: std::cell::RefCell::new(Vec::new()),
             gc_temporaries: std::cell::RefCell::new(Vec::new()),
         })
@@ -211,6 +227,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 fn create_target_machine(
     source: &SourceFile,
     triple: &TargetTriple,
+    level: OptLevel,
 ) -> Result<TargetMachine, CompilerError> {
     let target = Target::from_triple(triple).map_err(|error| {
         CompilerError::build(
@@ -225,7 +242,7 @@ fn create_target_machine(
             triple,
             TargetMachine::get_host_cpu_name().to_string().as_str(),
             TargetMachine::get_host_cpu_features().to_string().as_str(),
-            OptimizationLevel::Default,
+            level.llvm(),
             RelocMode::Default,
             CodeModel::Default,
         )
@@ -259,13 +276,24 @@ fn value_type_from_annotation(annotation: &TypeName) -> ValueType {
 /// 使用 LLVM 后端把程序编译为目标文件字节。
 pub fn compile_program(
     source: &SourceFile,
+    settings: &CompilerSettings,
+    program: &Program,
+) -> Result<GeneratedObject, CompilerError> {
+    compile_program_with_options(source, settings, program, &CompileOptions::new(None))
+}
+
+/// 根据显式输出选项生成目标文件；默认 API 与 CLI 共用此路径。
+pub fn compile_program_with_options(
+    source: &SourceFile,
     _settings: &CompilerSettings,
     program: &Program,
+    options: &CompileOptions,
 ) -> Result<GeneratedObject, CompilerError> {
     let context = Context::create();
     let mut generator = CodeGenerator::new(&context, source)?;
+    generator.optimize_strings = options.opt_level != OptLevel::O0;
     generator.compile_program(program)?;
-    generator.finish_object()
+    generator.finish_object(options)
 }
 
 /// 使用 LLVM 后端把程序编译为 IR 文本，仅供测试校验使用。

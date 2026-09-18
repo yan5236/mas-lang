@@ -4,6 +4,8 @@ pub fn bootstrap_source() -> &'static str {
         "#![allow(unsafe_op_in_unsafe_fn)]\n",
         include_str!("runtime/strings.rs"),
         "\n",
+        include_str!("runtime/string_builder.rs"),
+        "\n",
         include_str!("runtime/numeric_errors.rs"),
         "\n",
         include_str!("runtime/containers.rs"),

@@ -1,4 +1,5 @@
 include!("strings.rs");
+include!("string_builder.rs");
 include!("containers.rs");
 include!("lists.rs");
 include!("maps.rs");
@@ -117,6 +118,202 @@ fn compacts_live_map_without_reordering() {
         assert!((*map).entries.capacity() <= 64);
         let keys = map_keys(map);
         assert_eq!(list_get_int(keys, 0), -1);
+    }
+    mas_gc_leave();
+    gc_shutdown();
+}
+
+/// 字符串索引独立拥有字节；等值临时键回收后查询、更新、删除与墓碑压缩仍保持正确顺序。
+#[test]
+fn string_indexes_own_keys_and_survive_temporary_queries() {
+    mas_gc_enter();
+    let map = map_create(KIND_STRING, KIND_INT);
+    mas_gc_root((&raw const map).cast(), 2, 1);
+    let site = make_runtime_error_site(b"".as_ptr(), 0, b"".as_ptr(), 0, 0, 0);
+    unsafe {
+        let first = text("你好");
+        map_set_cell(map, ScalarCell::String(first), ScalarCell::Int(7));
+        let owned = (*map).string_indexes.keys().next().unwrap();
+        assert_ne!(owned.as_ptr(), first.ptr);
+        for index in 0..200 {
+            let same = text("你好");
+            assert_eq!(map_find_index(map, ScalarCell::String(same)), Some(0));
+            map_set_cell(map, ScalarCell::String(same), ScalarCell::Int(index));
+            let other = text(&index.to_string());
+            map_set_cell(map, ScalarCell::String(other), ScalarCell::Int(index));
+            map_remove_cell(map, ScalarCell::String(other), site);
+            collect_boundary();
+        }
+        assert_eq!((*map).len, 1);
+        assert!((*map).entries.len() <= 32);
+        let ScalarCell::String(key) = (&(*map).entries)[0].unwrap().0 else {
+            panic!("string key");
+        };
+        assert_eq!(string_bytes(key), "你好".as_bytes());
+        assert_eq!((*map).string_indexes.len(), 1);
+        assert!((*map).indexes.is_empty());
+    }
+    mas_gc_leave();
+    gc_shutdown();
+}
+
+/// 紧凑数字索引保留完整整数位宽、浮点位模式与布尔键；覆盖原位更新和删除后末尾重插。
+#[test]
+fn numeric_indexes_preserve_bits_and_reinsertion_order() {
+    mas_gc_enter();
+    let site = make_runtime_error_site(b"".as_ptr(), 0, b"".as_ptr(), 0, 0, 0);
+    let cases = [
+        (
+            KIND_INT,
+            vec![
+                ScalarCell::Int(i64::MIN),
+                ScalarCell::Int(-1),
+                ScalarCell::Int(0),
+                ScalarCell::Int(i64::MAX),
+            ],
+        ),
+        (
+            KIND_FLOAT,
+            vec![
+                ScalarCell::Float(0.0),
+                ScalarCell::Float(-0.0),
+                ScalarCell::Float(f64::from_bits(0x7ff8000000000001)),
+                ScalarCell::Float(f64::from_bits(0x7ff8000000000002)),
+            ],
+        ),
+        (KIND_BOOL, vec![ScalarCell::Bool(0), ScalarCell::Bool(1)]),
+    ];
+    unsafe {
+        for (kind, keys) in cases {
+            let map = map_create(kind, KIND_INT);
+            for (i, &key) in keys.iter().enumerate() {
+                map_set_cell(map, key, ScalarCell::Int(i as i64));
+            }
+            for (i, &key) in keys.iter().enumerate() {
+                let ScalarCell::Int(value) = map_get_cell(map, key, site) else {
+                    panic!("integer value")
+                };
+                assert_eq!(value, i as i64);
+                map_set_cell(map, key, ScalarCell::Int(i as i64 + 10));
+                assert_eq!(map_find_index(map, key), Some(i));
+            }
+            assert_eq!(map_len(map), keys.len() as u64);
+            map_remove_cell(map, keys[0], site);
+            assert_eq!(map_contains_cell(map, keys[0]), 0);
+            map_set_cell(map, keys[0], ScalarCell::Int(99));
+            let values = map_values(map);
+            assert_eq!(list_get_int(values, keys.len() as u64 - 1), 99);
+            assert_eq!(list_get_int(values, 0), 11);
+        }
+    }
+    mas_gc_leave();
+    gc_shutdown();
+}
+
+/// 数字键字典的字符串值仍被追踪；更新释放旧值，删除最后引用后新值也能回收。
+#[test]
+fn numeric_map_updates_trace_only_current_string_values() {
+    mas_gc_enter();
+    let map = map_create(KIND_INT, KIND_STRING);
+    mas_gc_root((&raw const map).cast(), 2, 1);
+    let site = make_runtime_error_site(b"".as_ptr(), 0, b"".as_ptr(), 0, 0, 0);
+    unsafe {
+        map_set_cell(map, ScalarCell::Int(-1), ScalarCell::String(text("old")));
+        collect_boundary();
+        assert_eq!(mas_gc_live_objects(), 2);
+        map_set_cell(map, ScalarCell::Int(-1), ScalarCell::String(text("new")));
+        collect_boundary();
+        assert_eq!(mas_gc_live_objects(), 2);
+        let ScalarCell::String(value) = map_get_cell(map, ScalarCell::Int(-1), site) else {
+            panic!("string value")
+        };
+        assert_eq!(string_bytes(value), b"new");
+        map_remove_cell(map, ScalarCell::Int(-1), site);
+        collect_boundary();
+        assert_eq!(mas_gc_live_objects(), 1);
+    }
+    mas_gc_leave();
+    gc_shutdown();
+}
+
+/// 复现词频 contains/get/set 链路并校验每个计数；每轮释放临时查询字符串后缓存仍安全。
+#[test]
+fn cached_word_counts_survive_query_collection() {
+    mas_gc_enter();
+    let map = map_create(KIND_STRING, KIND_INT);
+    mas_gc_root((&raw const map).cast(), 2, 1);
+    let site = make_runtime_error_site(b"".as_ptr(), 0, b"".as_ptr(), 0, 0, 0);
+    unsafe {
+        for i in 0..2000 {
+            let key = ScalarCell::String(text(&(i % 37).to_string()));
+            let count = if map_contains_cell(map, key) != 0 {
+                let ScalarCell::Int(value) = map_get_cell(map, key, site) else {
+                    panic!("int")
+                };
+                value + 1
+            } else {
+                1
+            };
+            map_set_cell(map, key, ScalarCell::Int(count));
+            collect_boundary();
+        }
+        assert_eq!(map_len(map), 37);
+        for i in 0..37 {
+            let key = ScalarCell::String(text(&i.to_string()));
+            let ScalarCell::Int(count) = map_get_cell(map, key, site) else {
+                panic!("int")
+            };
+            assert_eq!(count, 2000 / 37 + i64::from(i < 2000 % 37));
+        }
+    }
+    mas_gc_leave();
+    gc_shutdown();
+}
+
+/// 删除非缓存键触发压缩后重查缓存键，并覆盖删除缓存键、等长不同内容、空串与内嵌零字节。
+#[test]
+fn string_lookup_cache_checks_content_and_invalidates_on_compaction() {
+    mas_gc_enter();
+    let map = map_create(KIND_STRING, KIND_INT);
+    let site = make_runtime_error_site(b"".as_ptr(), 0, b"".as_ptr(), 0, 0, 0);
+    unsafe {
+        let keys: Vec<_> = (0..80)
+            .map(|i| ScalarCell::String(text(&format!("key-{i:02}"))))
+            .collect();
+        for (i, &key) in keys.iter().enumerate() {
+            map_set_cell(map, key, ScalarCell::Int(i as i64));
+        }
+        for key in &keys[..60] {
+            assert!(map_find_index(map, keys[79]).is_some());
+            map_remove_cell(map, *key, site);
+            let ScalarCell::Int(value) = map_get_cell(map, keys[79], site) else {
+                panic!("int")
+            };
+            assert_eq!(value, 79);
+        }
+        assert!((*map).entries.len() < 80);
+        map_remove_cell(map, keys[79], site);
+        assert_eq!(map_contains_cell(map, keys[79]), 0);
+        map_set_cell(map, keys[79], ScalarCell::Int(179));
+        for (i, name) in ["", "a\0b", "a\0c", "你好"].iter().enumerate() {
+            map_set_cell(
+                map,
+                ScalarCell::String(text(name)),
+                ScalarCell::Int(i as i64),
+            );
+        }
+        for (i, name) in ["", "a\0b", "a\0c", "你好"].iter().enumerate() {
+            let key = ScalarCell::String(text(name));
+            for _ in 0..2 {
+                let ScalarCell::Int(value) = map_get_cell(map, key, site) else {
+                    panic!("int")
+                };
+                assert_eq!(value, i as i64);
+            }
+        }
+        assert_eq!(map_contains_cell(map, ScalarCell::String(text("a\0d"))), 0);
+        let values = map_values(map);
+        assert_eq!(list_get_int(values, map_len(map) - 5), 179);
     }
     mas_gc_leave();
     gc_shutdown();

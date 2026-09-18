@@ -6,6 +6,7 @@ pub mod linker;
 pub mod llvm_backend;
 pub mod module_loader;
 pub mod native_link;
+pub mod optimization;
 pub mod parser;
 pub mod runtime_bootstrap;
 pub mod semantic;
@@ -30,27 +31,7 @@ pub struct FrontendOutput {
     pub package_roots: Vec<PathBuf>,
 }
 
-/// 保存构建阶段允许外部指定的输出选项。
-pub struct CompileOptions {
-    pub output_path: Option<PathBuf>,
-    pub allow_native_source_build: bool,
-}
-
-impl CompileOptions {
-    /// 使用可选输出路径创建新的编译选项对象。
-    pub fn new(output_path: Option<PathBuf>) -> Self {
-        Self {
-            output_path,
-            allow_native_source_build: false,
-        }
-    }
-
-    /// 返回一个启用或关闭“维护者源码构建”模式的新选项对象，避免调用侧手写字段赋值。
-    pub fn with_allow_native_source_build(mut self, allow_native_source_build: bool) -> Self {
-        self.allow_native_source_build = allow_native_source_build;
-        self
-    }
-}
+pub use optimization::CompileOptions;
 
 /// 按固定顺序执行词法、语法和语义分析，并返回可复用的前端结果。
 pub fn analyze_source(

@@ -68,10 +68,17 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
     /// 在当前语句边界或循环头插入安全点；此时没有未保护的 LLVM 中间结果。
     pub(super) fn emit_gc_poll(&self) -> Result<(), CompilerError> {
-        self.map_builder(
-            self.builder
-                .build_call(self.gc_void_function("mas_gc_poll"), &[], ""),
-        )?;
+        self.emit_gc_management(&self.builder, "mas_gc_poll")
+    }
+
+    /// 记录编译器自动插入的帧/安全点指令，供无分配函数优化使用；显式 extern 调用不在此集合内。
+    fn emit_gc_management(&self, builder: &Builder<'ctx>, name: &str) -> Result<(), CompilerError> {
+        let call = self.map_builder(builder.build_call(self.gc_void_function(name), &[], ""))?;
+        self.gc_management.borrow_mut().push(
+            call.try_as_basic_value()
+                .instruction()
+                .expect("void GC call"),
+        );
         Ok(())
     }
 
@@ -91,7 +98,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 builder.build_store(*pointer, self.basic_type_for(value_type)?.const_zero()),
             )?;
         }
-        self.map_builder(builder.build_call(self.gc_void_function("mas_gc_enter"), &[], ""))?;
+        for pointer in self.gc_handle_roots.borrow().iter() {
+            self.map_builder(builder.build_store(
+                *pointer,
+                self.context.ptr_type(AddressSpace::default()).const_null(),
+            ))?;
+        }
+        self.emit_gc_management(&builder, "mas_gc_enter")?;
         let root_function = self.module.get_function("mas_gc_root").unwrap_or_else(|| {
             self.module.add_function(
                 "mas_gc_root",
@@ -127,15 +140,22 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 "",
             ))?;
         }
+        for pointer in self.gc_handle_roots.borrow().iter() {
+            self.map_builder(builder.build_call(
+                root_function,
+                &[
+                    (*pointer).into(),
+                    self.context.i8_type().const_int(2, false).into(),
+                    self.context.i64_type().const_int(1, false).into(),
+                ],
+                "",
+            ))?;
+        }
         for block in function.get_basic_blocks() {
             if let Some(terminator) = block.get_terminator() {
                 if terminator.get_opcode() == InstructionOpcode::Return {
                     builder.position_before(&terminator);
-                    self.map_builder(builder.build_call(
-                        self.gc_void_function("mas_gc_leave"),
-                        &[],
-                        "",
-                    ))?;
+                    self.emit_gc_management(&builder, "mas_gc_leave")?;
                 }
             }
         }

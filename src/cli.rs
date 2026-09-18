@@ -15,11 +15,11 @@ enum CliCommand {
     Build {
         file: PathBuf,
         output: Option<PathBuf>,
-        allow_native_source_build: bool,
+        options: CompileOptions,
     },
     Run {
         file: PathBuf,
-        allow_native_source_build: bool,
+        options: CompileOptions,
     },
 }
 
@@ -53,12 +53,9 @@ pub fn run() -> ExitCode {
         CliCommand::Build {
             file,
             output,
-            allow_native_source_build,
-        } => build_file(&settings, file, output, allow_native_source_build),
-        CliCommand::Run {
-            file,
-            allow_native_source_build,
-        } => run_file(&settings, file, allow_native_source_build),
+            options,
+        } => build_file(&settings, file, output, options),
+        CliCommand::Run { file, options } => run_file(&settings, file, options),
     }
 }
 
@@ -87,7 +84,7 @@ fn parse_build_args(args: &[String]) -> Result<CliCommand, CompilerError> {
 
     let file = PathBuf::from(&args[0]);
     let mut output = None;
-    let mut allow_native_source_build = false;
+    let mut options = CompileOptions::new(None);
     let mut index = 1usize;
 
     while index < args.len() {
@@ -100,8 +97,23 @@ fn parse_build_args(args: &[String]) -> Result<CliCommand, CompilerError> {
                 index += 2;
             }
             "--allow-native-source-build" => {
-                allow_native_source_build = true;
+                options.allow_native_source_build = true;
                 index += 1;
+            }
+            "-O0" | "-O1" | "-O2" | "-O3" => {
+                options.opt_level =
+                    crate::optimization::OptLevel::parse(&args[index][2..]).unwrap();
+                index += 1;
+            }
+            "--emit-dir" => {
+                let dir = args.get(index + 1).ok_or_else(|| {
+                    CompilerError::cli(
+                        MessageId::CliUnexpectedArgument,
+                        vec!["--emit-dir requires a path".into()],
+                    )
+                })?;
+                options.emit_dir = Some(PathBuf::from(dir));
+                index += 2;
             }
             other => {
                 return Err(CompilerError::cli(
@@ -115,7 +127,7 @@ fn parse_build_args(args: &[String]) -> Result<CliCommand, CompilerError> {
     Ok(CliCommand::Build {
         file,
         output,
-        allow_native_source_build,
+        options,
     })
 }
 
@@ -125,13 +137,28 @@ fn parse_run_args(args: &[String]) -> Result<CliCommand, CompilerError> {
         return Err(CompilerError::cli(MessageId::CliMissingInputFile, vec![]));
     }
     let file = PathBuf::from(&args[0]);
-    let mut allow_native_source_build = false;
+    let mut options = CompileOptions::new(None);
     let mut index = 1usize;
     while index < args.len() {
         match args[index].as_str() {
             "--allow-native-source-build" => {
-                allow_native_source_build = true;
+                options.allow_native_source_build = true;
                 index += 1;
+            }
+            "-O0" | "-O1" | "-O2" | "-O3" => {
+                options.opt_level =
+                    crate::optimization::OptLevel::parse(&args[index][2..]).unwrap();
+                index += 1;
+            }
+            "--emit-dir" => {
+                let dir = args.get(index + 1).ok_or_else(|| {
+                    CompilerError::cli(
+                        MessageId::CliUnexpectedArgument,
+                        vec!["--emit-dir requires a path".into()],
+                    )
+                })?;
+                options.emit_dir = Some(PathBuf::from(dir));
+                index += 2;
             }
             other => {
                 return Err(CompilerError::cli(
@@ -141,10 +168,7 @@ fn parse_run_args(args: &[String]) -> Result<CliCommand, CompilerError> {
             }
         }
     }
-    Ok(CliCommand::Run {
-        file,
-        allow_native_source_build,
-    })
+    Ok(CliCommand::Run { file, options })
 }
 
 /// 读取源码并执行编译命令，把结果输出到终端。
@@ -152,7 +176,7 @@ fn build_file(
     settings: &CompilerSettings,
     path: PathBuf,
     output: Option<PathBuf>,
-    allow_native_source_build: bool,
+    mut options: CompileOptions,
 ) -> ExitCode {
     let source = match read_source(&path) {
         Ok(source) => source,
@@ -162,8 +186,7 @@ fn build_file(
         }
     };
 
-    let options =
-        CompileOptions::new(output).with_allow_native_source_build(allow_native_source_build);
+    options.output_path = output;
     match compile_to_executable(&source, settings, &options) {
         Ok(binary) => {
             println!("{}", binary.display());
@@ -177,11 +200,7 @@ fn build_file(
 }
 
 /// 在独占临时目录编译并运行源码；子进程结束或任何错误返回后清理 EXE 与 PDB。
-fn run_file(
-    settings: &CompilerSettings,
-    path: PathBuf,
-    allow_native_source_build: bool,
-) -> ExitCode {
+fn run_file(settings: &CompilerSettings, path: PathBuf, mut options: CompileOptions) -> ExitCode {
     let source = match read_source(&path) {
         Ok(source) => source,
         Err(error) => {
@@ -202,8 +221,7 @@ fn run_file(
         }
     };
     let output_path = workspace.path().join("program.exe");
-    let options = CompileOptions::new(Some(output_path))
-        .with_allow_native_source_build(allow_native_source_build);
+    options.output_path = Some(output_path);
     let binary = match compile_to_executable(&source, settings, &options) {
         Ok(binary) => binary,
         Err(error) => {
@@ -291,7 +309,7 @@ fn render_help(program_name: &str, language: UiLanguage) -> String {
     };
 
     format!(
-        "{title}\n{usage}\n\n{commands}\n\n{options_title}:\n{option_line}\n{native_option_line}",
+        "{title}\n{usage}\n\n{commands}\n\n{options_title}:\n{option_line}\n{native_option_line}\n  -O0|-O1|-O2|-O3          Optimization level (default: O2)\n  --emit-dir <path>         Write raw IR, optimized IR and assembly",
         title = render_message(language, MessageId::CliHelpTitle, &[]),
         usage = usage,
         commands = commands,
