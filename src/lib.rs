@@ -12,6 +12,7 @@ pub mod runtime_bootstrap;
 pub mod semantic;
 pub mod settings;
 pub mod source;
+mod source_map;
 pub mod temp_directory;
 pub mod token;
 
@@ -39,7 +40,9 @@ pub fn analyze_source(
     settings: &CompilerSettings,
 ) -> Result<FrontendOutput, CompilerError> {
     let loaded = module_loader::load_module_graph(source, settings)?;
-    SemanticAnalyzer::new(settings).analyze(&loaded.program)?;
+    SemanticAnalyzer::new(settings)
+        .analyze(&loaded.program)
+        .map_err(|error| source_map::restore_error(error, &loaded.origins))?;
     Ok(FrontendOutput {
         source: loaded.source,
         program: loaded.program,

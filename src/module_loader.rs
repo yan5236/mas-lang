@@ -14,6 +14,7 @@ use crate::source::{SourceFile, Span};
 
 /// 保存模块装载后的扁平化源码与最终程序，供后续语义与代码生成复用。
 pub struct ModuleLoadResult {
+    pub origins: Vec<crate::source_map::ModuleOrigin>,
     pub source: SourceFile,
     pub program: Program,
     pub package_roots: Vec<PathBuf>,
@@ -34,6 +35,7 @@ pub fn load_module_graph(
     let mut loader = ModuleLoader::new(settings, project_root);
     loader.load_module_with_source(&entry_path, &entry_package_root, true, Some(entry.clone()))?;
     Ok(ModuleLoadResult {
+        origins: loader.origins,
         source: SourceFile::new(entry.path(), loader.synthetic_source),
         program: Program {
             statements: loader.statements,
@@ -50,6 +52,7 @@ struct ModuleLoader<'a> {
     active_modules: HashSet<PathBuf>,
     dependency_cache: BTreeMap<PathBuf, BTreeSet<String>>,
     package_roots: BTreeSet<PathBuf>,
+    origins: Vec<crate::source_map::ModuleOrigin>,
     synthetic_source: String,
     statements: Vec<Stmt>,
 }
@@ -76,6 +79,7 @@ impl<'a> ModuleLoader<'a> {
             active_modules: HashSet::new(),
             dependency_cache: BTreeMap::new(),
             package_roots: BTreeSet::new(),
+            origins: Vec::new(),
             synthetic_source: String::new(),
             statements: Vec::new(),
         }
@@ -116,8 +120,12 @@ impl<'a> ModuleLoader<'a> {
             Some(source) => source,
             None => read_module_source(module_path)?,
         };
-        let tokens = Lexer::new(&source, self.settings).tokenize()?;
-        let program = Parser::new(tokens, self.settings).parse_program()?;
+        let tokens = Lexer::new(&source, self.settings)
+            .tokenize()
+            .map_err(|error| error.with_source(source.clone()))?;
+        let program = Parser::new(tokens, self.settings)
+            .parse_program()
+            .map_err(|error| error.with_source(source.clone()))?;
         let renamed_declarations = collect_top_level_declarations(&program, module_path, is_entry);
         let mut imports = BTreeMap::new();
         let mut exports = BTreeMap::new();
@@ -168,9 +176,14 @@ impl<'a> ModuleLoader<'a> {
 
         let mut bindings = renamed_declarations;
         bindings.extend(imports);
-        let mut rewriter = ModuleRewriter::new(bindings);
+        let mut rewriter = ModuleRewriter::new(bindings.clone());
         let rewritten_statements = rewriter.rewrite_program(program);
         let offset = append_module_source(&mut self.synthetic_source, module_path, &source);
+        self.origins.push(crate::source_map::ModuleOrigin {
+            offset,
+            source,
+            bindings,
+        });
         self.statements.extend(
             rewritten_statements
                 .into_iter()
@@ -842,6 +855,7 @@ fn parse_single_source(
     let tokens = Lexer::new(source, settings).tokenize()?;
     let program = Parser::new(tokens, settings).parse_program()?;
     Ok(ModuleLoadResult {
+        origins: Vec::new(),
         source: source.clone(),
         program,
         package_roots: Vec::new(),

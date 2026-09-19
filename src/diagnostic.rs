@@ -77,17 +77,25 @@ pub struct CompilerError {
     pub message_id: MessageId,
     pub args: Vec<String>,
     pub span: Span,
+    pub source: Option<SourceFile>,
 }
 
 impl CompilerError {
     /// 使用统一字段创建一个新的诊断对象。
     pub fn new(stage: ErrorStage, message_id: MessageId, args: Vec<String>, span: Span) -> Self {
         Self {
+            source: None,
             stage,
             message_id,
             args,
             span,
         }
+    }
+
+    /// 为错误附加实际所属的原始文件，渲染时优先使用该文件而非入口文件。
+    pub fn with_source(mut self, source: SourceFile) -> Self {
+        self.source = Some(source);
+        self
     }
 
     /// 构造一个设置读取相关的错误。
@@ -145,7 +153,7 @@ impl CompilerError {
     pub fn render(&self, language: UiLanguage, source: Option<&SourceFile>) -> String {
         let message = render_message(language, self.message_id, &self.args);
 
-        if let Some(source) = source {
+        if let Some(source) = self.source.as_ref().or(source) {
             let (line, column) = source.line_col(self.span.start);
             let line_text = source.line_text(line);
             let caret_width = self.span.end.saturating_sub(self.span.start).max(1);
