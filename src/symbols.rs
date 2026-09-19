@@ -397,7 +397,17 @@ fn make_symbol(
 /// 在语句跨度内寻找声明名的真实源码跨度，避免 selectionRange 落在整条语句上。
 fn name_selection_span(text: &str, span: Span, name: &str) -> Span {
     text.get(span.start..span.end)
-        .and_then(|slice| slice.find(name).map(|offset| span.start + offset))
+        .and_then(|slice| {
+            slice
+                .match_indices(name)
+                .find(|(offset, _)| {
+                    let before = slice[..*offset].chars().next_back();
+                    let after = slice[*offset + name.len()..].chars().next();
+                    let identifier = |ch: char| ch.is_alphanumeric() || ch == '_';
+                    !before.is_some_and(identifier) && !after.is_some_and(identifier)
+                })
+                .map(|(offset, _)| span.start + offset)
+        })
         .map(|start| Span::new(start, start + name.len()))
         .unwrap_or(span)
 }

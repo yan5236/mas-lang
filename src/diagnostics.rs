@@ -1,7 +1,9 @@
 use mascript_compiler_llvm::diagnostic::{CompilerError, render_stage};
 use mascript_compiler_llvm::settings::CompilerSettings;
 use mascript_compiler_llvm::source::SourceFile;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp::lsp_types::{
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range, Url,
+};
 
 use crate::lsp_convert::span_to_range;
 
@@ -12,8 +14,28 @@ pub fn compiler_error_to_diagnostic(
     settings: CompilerSettings,
 ) -> Diagnostic {
     let stage = render_stage(settings.language, error.stage);
+    let origin = error.source.as_ref().unwrap_or(source);
+    let foreign = origin.path() != source.path();
+    let related_information = if foreign {
+        Url::from_file_path(origin.path()).ok().map(|uri| {
+            vec![DiagnosticRelatedInformation {
+                location: Location {
+                    uri,
+                    range: span_to_range(origin.text(), error.span),
+                },
+                message: error.render(settings.language, Some(origin)),
+            }]
+        })
+    } else {
+        None
+    };
     Diagnostic {
-        range: span_to_range(source.text(), error.span),
+        range: if foreign {
+            Range::default()
+        } else {
+            span_to_range(source.text(), error.span)
+        },
+        related_information,
         severity: Some(DiagnosticSeverity::ERROR),
         source: Some(format!("mas-lang {stage}")),
         message: error.render(settings.language, Some(source)),

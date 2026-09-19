@@ -1,5 +1,6 @@
 use mascript_compiler_llvm::settings::CompilerSettings;
 use mascript_compiler_llvm::source::SourceFile;
+use mascript_compiler_llvm::{lexer::Lexer, parser::Parser};
 use tower_lsp::lsp_types::Diagnostic;
 
 use crate::diagnostics::compiler_error_to_diagnostic;
@@ -41,10 +42,18 @@ impl AnalysisService {
     pub fn analyze_document(&self, document: &OpenDocument) -> DocumentAnalysis {
         let source = SourceFile::new(document.path.display().to_string(), document.text.clone());
         match mascript_compiler_llvm::analyze_source(&source, &self.settings) {
-            Ok(output) => DocumentAnalysis {
-                diagnostics: Vec::new(),
-                symbols: symbols_from_program(output.source.text(), &output.program),
-            },
+            Ok(_) => {
+                // 编辑器符号只取当前内存文档的原始 AST，不能使用模块展开后的内部名称及偏移。
+                let symbols = Lexer::new(&source, &self.settings)
+                    .tokenize()
+                    .and_then(|tokens| Parser::new(tokens, &self.settings).parse_program())
+                    .map(|program| symbols_from_program(source.text(), &program))
+                    .unwrap_or_else(|_| fallback_symbols_from_source(&source, &self.settings));
+                DocumentAnalysis {
+                    diagnostics: Vec::new(),
+                    symbols,
+                }
+            }
             Err(error) => DocumentAnalysis {
                 diagnostics: vec![compiler_error_to_diagnostic(&error, &source, self.settings)],
                 symbols: fallback_symbols_from_source(&source, &self.settings),
