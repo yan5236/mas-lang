@@ -58,7 +58,8 @@ fn compile_project(
         source,
         &settings,
         &CompileOptions::new(Some(output_path.to_path_buf()))
-            .with_allow_native_source_build(allow_native_source_build),
+            .with_allow_native_source_build(allow_native_source_build)
+            .with_opt_level(context.opt_level),
     )
     .map_err(|error| FamaError::Compiler(error.render(settings.language, Some(source))))?;
     Ok(())
@@ -79,6 +80,7 @@ fn run_external_compiler(
     command
         .arg("build")
         .arg(&context.entry_path)
+        .arg(format!("-O{}", context.opt_level.as_str()))
         .arg("-o")
         .arg(output_path)
         .current_dir(&context.root);
@@ -136,6 +138,7 @@ pub(crate) fn run_external_compiler_entry(
     command
         .arg("run")
         .arg(&context.entry_path)
+        .arg(format!("-O{}", context.opt_level.as_str()))
         .current_dir(&context.root);
     if allow_native_source_build {
         command.arg("--allow-native-source-build");

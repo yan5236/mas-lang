@@ -18,11 +18,18 @@ struct ProjectSection {
     name: String,
 }
 
-/// 保存构建相关配置，目前只使用入口文件和输出目录。
+/// 保存入口、输出目录和生成程序优化档位；缺省 O2，加载时拒绝超出 0..3 的值。
 #[derive(Debug, Deserialize)]
 struct BuildSection {
     entry: String,
     output: String,
+    #[serde(rename = "opt-level", default = "default_opt_level")]
+    opt_level: u8,
+}
+
+/// 缺省项目使用 O2，与编译器默认生成档位一致。
+fn default_opt_level() -> u8 {
+    2
 }
 
 /// 汇总项目根目录、源码入口和默认产物路径，供命令层直接复用。
@@ -32,6 +39,7 @@ pub struct ProjectContext {
     pub name: String,
     pub entry_path: PathBuf,
     pub output_dir: PathBuf,
+    pub opt_level: mascript_compiler_llvm::optimization::OptLevel,
 }
 
 impl ProjectContext {
@@ -41,6 +49,13 @@ impl ProjectContext {
         let settings_path = root.join("settings.toml");
         let settings_text = read_required_utf8_file(&settings_path)?;
         let settings = parse_settings(&settings_path, &settings_text)?;
+        let opt_level = mascript_compiler_llvm::optimization::OptLevel::parse(
+            &settings.build.opt_level.to_string(),
+        )
+        .ok_or_else(|| FamaError::InvalidSettings {
+            path: settings_path.clone(),
+            message: "build.opt-level 必须是 0、1、2 或 3".into(),
+        })?;
         let entry_path = root.join(&settings.build.entry);
         let output_dir = root.join(&settings.build.output);
 
@@ -51,6 +66,7 @@ impl ProjectContext {
             name: settings.project.name,
             entry_path,
             output_dir,
+            opt_level,
         })
     }
 
@@ -159,5 +175,33 @@ mod tests {
         assert!(error.to_string().contains("缺少必需文件"));
 
         fs::remove_dir_all(root).expect("删除临时目录失败");
+    }
+    /// 项目显式选择 O0/O2/O3 均被读取，缺省为 O2，越界档位不能静默忽略。
+    #[test]
+    fn validates_optimization_levels() {
+        let root = create_temp_dir("optimization");
+        fs::write(root.join("main.ms"), "print(1)\n").unwrap();
+        for (field, expected) in [
+            ("", Some("2")),
+            ("opt-level=0", Some("0")),
+            ("opt-level=2", Some("2")),
+            ("opt-level=3", Some("3")),
+            ("opt-level=4", None),
+        ] {
+            fs::write(
+                root.join("settings.toml"),
+                format!(
+                    "[project]\nname='opt'\n[build]\nentry='main.ms'\noutput='build'\n{field}\n"
+                ),
+            )
+            .unwrap();
+            let result = ProjectContext::load(&root);
+            if let Some(level) = expected {
+                assert_eq!(result.unwrap().opt_level.as_str(), level);
+            } else {
+                assert!(result.is_err());
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }
