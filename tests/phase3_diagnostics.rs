@@ -121,3 +121,29 @@ fn should_return_diagnostic_for_missing_module_error() {
             .contains("构建错误")
     );
 }
+
+/// 验证列表和固定数组下标赋值复用编译器规则：合法写入无诊断，错误下标及元素类型仍定位到赋值行。
+#[test]
+fn index_assignment_diagnostics_match_compiler() {
+    let service = AnalysisService::with_settings(CompilerSettings::new(UiLanguage::ZhCn));
+    let valid = "var xs = [1, 2]\nxs[0] = 3\nvar a = array<int,2>(1,2)\na[1] = 4\n";
+    let analysis = service.analyze_document(&open_document(valid));
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "{:?}",
+        analysis.diagnostics
+    );
+    for (declaration, assignment, message) in [
+        ("var xs = [1, 2]", "xs[true] = 3", "下标必须是整数"),
+        ("var a = array<int,2>(1,2)", "a[0.5] = 3", "下标必须是整数"),
+        ("var xs = [1, 2]", "xs[0] = false", "元素类型"),
+        ("var a = array<int,2>(1,2)", "a[0] = false", "元素类型"),
+    ] {
+        let text = format!("{declaration}\n{assignment}\n");
+        let analysis = service.analyze_document(&open_document(&text));
+        assert_eq!(analysis.diagnostics.len(), 1);
+        let diagnostic = &analysis.diagnostics[0];
+        assert_eq!(diagnostic.range.start.line, 1, "{diagnostic:?}");
+        assert!(diagnostic.message.contains(message), "{diagnostic:?}");
+    }
+}

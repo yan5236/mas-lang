@@ -270,7 +270,7 @@ fn should_handle_validation_project_document_lifecycle() {
     assert!(status.is_some_and(|status| status.success()));
 }
 
-/// 验证真实 stdio 语言服务器会在打开和修改 `.ms` 文档后发布编译器诊断。
+/// 验证真实 stdio 服务在打开错误源码后发布诊断，修改为合法列表及数组下标赋值后清除诊断。
 #[test]
 fn should_publish_diagnostics_after_open_and_change() {
     let document_uri = "file:///E:/xiangmu/mascript/mskaifa/yanzhenglsp/src/main.ms";
@@ -354,7 +354,7 @@ fn should_publish_diagnostics_after_open_and_change() {
                     "version": 2
                 },
                 "contentChanges": [{
-                    "text": "func main():\n    print(1)\n"
+                    "text": "func main():\n    var xs = [1, 2]\n    xs[0] = 3\n    var a = array<int,2>(1,2)\n    a[1] = 4\n"
                 }]
             }
         }),
