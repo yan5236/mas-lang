@@ -168,27 +168,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     Ok(false)
                 }
                 AssignTarget::Index { target, index, .. } => {
-                    let compiled_target = self.compile_expr(target)?;
-                    let target_value = self.expect_value(compiled_target)?;
-                    let (map_value, key_type, value_type) =
-                        self.expect_map_value(target_value, *span)?;
-                    let key_compiled = self.compile_expr(index)?;
-                    let key = self.expect_value(key_compiled)?;
-                    let assigned_compiled = self.compile_expr(value)?;
-                    let assigned = self.expect_value(assigned_compiled)?;
-                    if key.value_type != key_type {
-                        return Err(CompilerError::build_message(
-                            "字典键类型与下标表达式不匹配",
-                            index.span(),
-                        ));
-                    }
-                    if assigned.value_type != value_type {
-                        return Err(CompilerError::build_message(
-                            "字典值类型与赋值表达式不匹配",
-                            value.span(),
-                        ));
-                    }
-                    self.build_map_set(map_value, &key_type, &value_type, key, assigned, *span)?;
+                    self.compile_index_assignment(target, index, value, *span)?;
                     Ok(false)
                 }
             },

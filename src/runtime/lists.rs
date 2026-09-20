@@ -340,3 +340,44 @@ pub extern "C" fn list_contains_string(list: *const MsList, ptr: *const u8, len:
         )
     }))
 }
+
+/// 在有效列表句柄的现有槽位写入同类型值；先检查下标（负数转换后同样越界），不改变长度容量或触发 GC。
+/// 调用方必须保证 T 与列表元素布局一致；字节复制避免未对齐写入，字符串继续由容器追踪。
+unsafe fn set_value<T: Copy>(list: *mut MsList, index: u64, value: T) {
+    let list = unsafe { &mut *list };
+    if index >= list.len {
+        abort_runtime("列表索引越界");
+    }
+    let bytes = unsafe { bytes_of(&value) };
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            list.data.add(index as usize * bytes.len()),
+            bytes.len(),
+        );
+    }
+}
+
+/// 覆盖列表的整数元素；无返回值，非法下标按运行时错误退出。
+#[unsafe(no_mangle)]
+pub extern "C" fn list_set_int(list: *mut MsList, index: u64, value: i64) {
+    unsafe { set_value(list, index, value) }
+}
+
+/// 覆盖列表的浮点元素；无返回值，非法下标按运行时错误退出。
+#[unsafe(no_mangle)]
+pub extern "C" fn list_set_float(list: *mut MsList, index: u64, value: f64) {
+    unsafe { set_value(list, index, value) }
+}
+
+/// 覆盖列表的布尔元素；ABI 使用单字节布尔值，非法下标按运行时错误退出。
+#[unsafe(no_mangle)]
+pub extern "C" fn list_set_bool(list: *mut MsList, index: u64, value: u8) {
+    unsafe { set_value(list, index, value) }
+}
+
+/// 覆盖列表的字符串引用并由现有 GC 遍历保活新值；旧值不再由此槽保活，非法下标退出。
+#[unsafe(no_mangle)]
+pub extern "C" fn list_set_string(list: *mut MsList, index: u64, ptr: *const u8, len: u64) {
+    unsafe { set_value(list, index, MsString { ptr, len }) }
+}

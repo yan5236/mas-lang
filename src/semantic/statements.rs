@@ -4,7 +4,7 @@ use crate::diagnostic::CompilerError;
 use super::{SemanticAnalyzer, SymbolInfo, ValueType};
 
 impl<'a> SemanticAnalyzer<'a> {
-    /// 分析单条语句，并在需要时更新作用域中的变量或上下文状态。
+    /// 分析单条语句并更新作用域与控制流上下文；赋值检查绑定或容器键值类型，不匹配时返回源码诊断。
     pub(super) fn analyze_statement(&mut self, statement: &Stmt) -> Result<(), CompilerError> {
         match statement {
             Stmt::Import { span, .. } | Stmt::ExportImport { span, .. } => Err(
@@ -111,27 +111,35 @@ impl<'a> SemanticAnalyzer<'a> {
                         ));
                     }
                     let target_type = self.infer_expression_type(target)?;
-                    let ValueType::Map(key_type, value_type) = target_type else {
-                        return Err(CompilerError::semantic_message(
-                            "下标赋值当前只支持字典类型",
-                            *span,
-                        ));
+                    let (key_type, value_type, key_error, value_error) = match target_type {
+                        ValueType::Map(key, value) => (
+                            key,
+                            value,
+                            "字典键类型与下标表达式不匹配",
+                            "字典值类型与赋值表达式不匹配",
+                        ),
+                        ValueType::List(element) | ValueType::Array(element, _) => (
+                            Box::new(ValueType::Int),
+                            element,
+                            "列表或数组下标必须是整数",
+                            "容器元素类型与赋值表达式不匹配",
+                        ),
+                        _ => {
+                            return Err(CompilerError::semantic_message(
+                                "下标赋值只支持列表、数组或字典类型",
+                                *span,
+                            ));
+                        }
                     };
                     let actual_key =
                         self.infer_expression_type_with_hint(index, Some(key_type.as_ref()))?;
                     if actual_key != *key_type {
-                        return Err(CompilerError::semantic_message(
-                            "字典键类型与下标表达式不匹配",
-                            index.span(),
-                        ));
+                        return Err(CompilerError::semantic_message(key_error, index.span()));
                     }
                     let actual_value =
                         self.infer_expression_type_with_hint(value, Some(value_type.as_ref()))?;
                     if actual_value != *value_type {
-                        return Err(CompilerError::semantic_message(
-                            "字典值类型与赋值表达式不匹配",
-                            value.span(),
-                        ));
+                        return Err(CompilerError::semantic_message(value_error, value.span()));
                     }
                     Ok(())
                 }

@@ -224,6 +224,27 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             "list_append_string",
             &[ptr_type.into(), ptr_type.into(), i64_type.into()],
         );
+        add_void(
+            "list_set_int",
+            &[ptr_type.into(), i64_type.into(), i64_type.into()],
+        );
+        add_void(
+            "list_set_float",
+            &[ptr_type.into(), i64_type.into(), f64_type.into()],
+        );
+        add_void(
+            "list_set_bool",
+            &[ptr_type.into(), i64_type.into(), i8_type.into()],
+        );
+        add_void(
+            "list_set_string",
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+            ],
+        );
         add_value(
             "list_get_int",
             i64_type.into(),

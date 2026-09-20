@@ -23,6 +23,7 @@ mod functions;
 mod gc;
 mod gc_elision;
 mod global_state;
+mod index_assignment;
 mod numeric_safety;
 mod operations;
 mod output;
