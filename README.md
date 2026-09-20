@@ -41,6 +41,8 @@ server/mas-lang-lsp.exe
 
 ## 更新内置 server
 
+LSP 通过静态链接复用编译器前端。编译器语法或语义变更后，必须重新构建 LSP 并复制内置 server；只构建编译器不会更新编辑器诊断。已安装扩展使用安装目录的独立副本，更新源码目录后还需要重新打包、安装扩展并执行 `Developer: Reload Window`。
+
 在本地构建 `mas-lang-lsp`：
 
 ```powershell
