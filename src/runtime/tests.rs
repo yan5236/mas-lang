@@ -1,6 +1,7 @@
 include!("strings.rs");
 include!("string_builder.rs");
 include!("containers.rs");
+include!("borrowed_keys.rs");
 include!("lists.rs");
 include!("maps.rs");
 include!("gc.rs");
@@ -314,6 +315,78 @@ fn string_lookup_cache_checks_content_and_invalidates_on_compaction() {
         assert_eq!(map_contains_cell(map, ScalarCell::String(text("a\0d"))), 0);
         let values = map_values(map);
         assert_eq!(list_get_int(values, map_len(map) - 5), 179);
+    }
+    mas_gc_leave();
+    gc_shutdown();
+}
+
+/// 用独立有序模型核对稠密/稀疏索引混用、覆盖、空洞、压缩及删除重插；大整数不触发巨大分配。
+#[test]
+fn integer_indexes_match_ordered_model_across_density_changes() {
+    mas_gc_enter();
+    let map = map_create(KIND_INT, KIND_INT);
+    let site = make_runtime_error_site(b"".as_ptr(), 0, b"".as_ptr(), 0, 0, 0);
+    let mut expected: Vec<(i64, i64)> = Vec::new();
+    let mut seed = 17u64;
+    unsafe {
+        // 100 起初进入哈希索引，随后直接索引增长覆盖它的键域；它仍须只出现一次。
+        for key in [100, i64::MAX, i64::MIN].into_iter().chain(0..256) {
+            map_set_cell(map, ScalarCell::Int(key), ScalarCell::Int(7));
+            if !expected.iter().any(|&(k, _)| k == key) {
+                expected.push((key, 7));
+            }
+        }
+        for step in 0..4000 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let key = match step % 11 {
+                0 => i64::MAX,
+                1 => i64::MIN,
+                2 => 100,
+                3 => (seed % 500) as i64 * 1000000000,
+                _ => (seed % 320) as i64 - 32,
+            };
+            let position = expected.iter().position(|&(k, _)| k == key);
+            if step % 3 == 0 {
+                if let Some(position) = position {
+                    map_remove_cell(map, ScalarCell::Int(key), site);
+                    expected.remove(position);
+                }
+                assert_eq!(map_contains_cell(map, ScalarCell::Int(key)), 0);
+            } else {
+                map_set_cell(map, ScalarCell::Int(key), ScalarCell::Int(step));
+                if let Some(position) = position {
+                    expected[position].1 = step;
+                } else {
+                    expected.push((key, step));
+                }
+            }
+            assert_eq!(map_len(map), expected.len() as u64);
+        }
+        // 大批删除触发压缩，随后重插稠密键并验证最终完整遍历顺序和值。
+        for &(key, _) in &expected[..expected.len() - 10] {
+            map_remove_cell(map, ScalarCell::Int(key), site);
+        }
+        expected.drain(..expected.len() - 10);
+        for key in 0..256 {
+            map_set_cell(map, ScalarCell::Int(key), ScalarCell::Int(key));
+            if let Some(entry) = expected.iter_mut().find(|(k, _)| *k == key) {
+                entry.1 = key;
+            } else {
+                expected.push((key, key));
+            }
+        }
+        let keys = map_keys(map);
+        let values = map_values(map);
+        assert_eq!(map_len(map), expected.len() as u64);
+        for (index, &(key, value)) in expected.iter().enumerate() {
+            assert_eq!(list_get_int(keys, index as u64), key);
+            assert_eq!(list_get_int(values, index as u64), value);
+            let ScalarCell::Int(actual) = map_get_cell(map, ScalarCell::Int(key), site) else {
+                panic!("int");
+            };
+            assert_eq!(actual, value);
+        }
+        assert!((*map).integer_indexes.capacity() < 4096);
     }
     mas_gc_leave();
     gc_shutdown();

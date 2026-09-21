@@ -7,6 +7,7 @@ pub extern "C" fn map_create(key_kind: u8, value_kind: u8) -> *mut MsMap {
         len: 0,
         entries: Vec::new(),
         indexes: HashMap::new(),
+        integer_indexes: Vec::new(),
         string_indexes: HashMap::new(),
         last_string_index: std::cell::Cell::new(None),
     }));
@@ -416,5 +417,21 @@ pub extern "C" fn map_get_string_string(
     match value {
         ScalarCell::String(value) => unsafe { write_string_result(value, out_len) },
         _ => abort_runtime("内部字典值类型不匹配"),
+    }
+}
+
+/// 整数字典读取使用常量错误上下文指针，命中不读取诊断字段；缺失时保留原源码定位与退出行为。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn map_get_int_int_site(
+    map: *const MsMap,
+    key: i64,
+    site: *const RuntimeErrorSite,
+) -> i64 {
+    let index = unsafe { map_find_index(map, ScalarCell::Int(key)) }
+        .unwrap_or_else(|| unsafe { abort_runtime_at("字典中不存在目标键", *site) });
+    match unsafe { (&(*map).entries).get(index) } {
+        Some(Some((_, ScalarCell::Int(value)))) => *value,
+        Some(Some(_)) => abort_runtime("内部字典值类型不匹配"),
+        _ => abort_runtime("内部字典索引失效"),
     }
 }

@@ -1,7 +1,7 @@
 use mascript_compiler_llvm::temp_directory::TemporaryDirectory;
 use std::{fs, process::Command};
 
-/// 从真实 CLI 构建三个档位，验证数值/递归/GC 字典行为一致且 O2/O3 消除标量栈槽与自动 GC 调用，O0 保留 GC 调用。
+/// 从真实 CLI 构建三个档位，验证行为一致及 O2/O3 的栈槽/GC 裁剪；允许私有函数被完整内联，O0 保留函数与 GC 调用。
 #[test]
 fn optimization_levels_preserve_results_and_run_ir_passes() {
     let root = TemporaryDirectory::create("mas-optimization").unwrap();
@@ -34,18 +34,27 @@ fn optimization_levels_preserve_results_and_run_ir_passes() {
         let raw = fs::read_to_string(dir.join("main.raw.ll")).unwrap();
         let optimized = fs::read_to_string(dir.join("main.opt.ll")).unwrap();
         assert!(dir.join("main.s").is_file());
-        let sum = optimized
-            .split("\ndefine ")
-            .find(|body| {
-                body.lines()
-                    .next()
-                    .is_some_and(|line| line.contains("_sum("))
-            })
-            .expect("sum function");
-        let sum = sum.split("\n}").next().unwrap();
-        assert_eq!(sum.contains("@mas_gc_"), level == "0");
+        let sum = optimized.split("\ndefine ").find(|body| {
+            body.lines()
+                .next()
+                .is_some_and(|line| line.contains("_sum("))
+        });
+        if let Some(sum) = sum {
+            let sum = sum.split("\n}").next().unwrap();
+            assert_eq!(sum.contains("@mas_gc_"), level == "0");
+        } else {
+            assert_ne!(level, "0", "O0 must retain sum");
+            assert!(
+                !optimized.contains("_sum("),
+                "inlined function must have no calls"
+            );
+        }
         if level != "0" {
             assert!(optimized.matches("alloca").count() < raw.matches("alloca").count());
+            assert!(
+                optimized.matches("call void @mas_gc_enter").count()
+                    < raw.matches("call void @mas_gc_enter").count()
+            );
         }
     }
 }

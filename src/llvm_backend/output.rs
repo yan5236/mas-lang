@@ -23,6 +23,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             self.emit_ir(dir, "raw.ll")?;
         }
         if options.opt_level != OptLevel::O0 {
+            self.elide_redundant_gc_polls();
             self.elide_scalar_gc();
         }
         let passes = inkwell::passes::PassBuilderOptions::create();

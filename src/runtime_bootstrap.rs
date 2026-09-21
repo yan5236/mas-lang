@@ -8,6 +8,8 @@ pub fn bootstrap_source() -> &'static str {
         "\n",
         include_str!("runtime/numeric_errors.rs"),
         "\n",
+        include_str!("runtime/borrowed_keys.rs"),
+        "\n",
         include_str!("runtime/containers.rs"),
         "\n",
         include_str!("runtime/lists.rs"),

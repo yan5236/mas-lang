@@ -27,8 +27,9 @@ enum ScalarCell {
 // 字典键类型由 key_kind 固定；索引只存位模式，避免每个桶重复存储类型标签。
 type MapKey = u64;
 
+#[repr(C)]
 #[derive(Clone, Copy)]
-struct RuntimeErrorSite {
+pub struct RuntimeErrorSite {
     path: MsString,
     source: MsString,
     span_start: u64,
@@ -42,6 +43,8 @@ pub struct MsMap {
     len: u64,
     entries: Vec<Option<(ScalarCell, ScalarCell)>>,
     indexes: HashMap<MapKey, usize>,
+    // 非负稠密整数键直接定位条目；usize::MAX 表示空槽，其余键仍使用随机哈希。
+    integer_indexes: Vec<usize>,
     string_indexes: HashMap<Vec<u8>, usize>,
     // 仅缓存条目位置，不持有查询字符串；每次命中仍比较字节，删除时失效。
     last_string_index: std::cell::Cell<Option<usize>>,
@@ -323,12 +326,16 @@ pub extern "C" fn mas_runtime_abort(message: *const c_char) -> ! {
 }
 
 /// 以统一的运行时错误格式输出消息，并立刻终止当前进程。
+#[cold]
+#[inline(never)]
 fn abort_runtime(message: &str) -> ! {
     eprintln!("运行时错误: {}", message);
     std::process::exit(1);
 }
 
 /// 以带源码定位的统一运行时错误格式输出消息，并立刻终止当前进程。
+#[cold]
+#[inline(never)]
 fn abort_runtime_at(message: &str, site: RuntimeErrorSite) -> ! {
     let path = std::str::from_utf8(string_bytes(site.path)).unwrap_or("<invalid utf8>");
     let source = std::str::from_utf8(string_bytes(site.source)).unwrap_or("");

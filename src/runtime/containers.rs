@@ -114,10 +114,21 @@ fn cmp_strings(left: MsString, right: MsString) -> std::cmp::Ordering {
     string_bytes(left).cmp(string_bytes(right))
 }
 
-/// 查询键对应的条目位置；字符串先按内容验证最近命中的条目，再回退到随机哈希索引。
+/// 查询键对应的条目位置；整数优先直接索引，空洞及范围外回退随机哈希，保留历史稀疏条目。
+/// 字符串先按内容验证最近命中的条目，再回退到随机哈希索引。
 /// 缓存仅保存位置，不延长查询字符串寿命；单线程中通过 Cell 更新，不分配或触发 GC。
+/// 强制在类型固定的 ABI 包装层内展开，使未使用的 ScalarCell 分支可被优化器删除。
+#[inline(always)]
 unsafe fn map_find_index(map: *const MsMap, key: ScalarCell) -> Option<usize> {
     match key {
+        ScalarCell::Int(value) => {
+            let map = &*map;
+            usize::try_from(value)
+                .ok()
+                .and_then(|key| map.integer_indexes.get(key).copied())
+                .filter(|&index| index != usize::MAX)
+                .or_else(|| map.indexes.get(&(value as u64)).copied())
+        }
         ScalarCell::String(value) => {
             let map = &*map;
             let bytes = string_bytes(value);
@@ -136,27 +147,70 @@ unsafe fn map_find_index(map: *const MsMap, key: ScalarCell) -> Option<usize> {
     }
 }
 
-/// 写入或更新字典并保持插入顺序；数字键用 entry 合并查询与插入，字符串复用经过内容验证的查询缓存。
-/// 新增条目才结算容量增长并计入 GC 预算；内部不收集，更新保留原键以维持字符串可达性。
+/// 写入或更新字典并保持插入顺序；命中时只覆盖值，保留原键及其字符串可达性。
+/// 非负整数仅在键域足够紧凑时扩展直接索引；回退索引用 entry 合并查找与插入，避免重复哈希。
+/// 新增条目才结算容量增长并计入 GC 预算，内部不收集，空洞不代表语言层存在该键。
+/// 在类型固定的导出函数内展开，消除热更新路径的枚举装箱及无关类型分支。
+#[inline(always)]
 unsafe fn map_set_cell(map: *mut MsMap, key: ScalarCell, value: ScalarCell) {
     let map = &mut *map;
-    let old_capacity = map.entries.capacity()
-        * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
-        + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>()
-        + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>();
+    let old_capacity = map_index_capacity(map);
     let next = map.entries.len();
-    let index = if let ScalarCell::String(text) = key {
-        if let Some(index) = map_find_index(map, key) {
-            index
-        } else {
-            let bytes = string_bytes(text).to_vec();
-            gc_charge(bytes.capacity());
-            map.string_indexes.insert(bytes, next);
-            map.last_string_index.set(Some(next));
-            next
+    let index = match key {
+        ScalarCell::String(text) => {
+            if let Some(index) = map_find_index(map, key) {
+                index
+            } else {
+                let bytes = string_bytes(text).to_vec();
+                gc_charge(bytes.capacity());
+                map.string_indexes.insert(bytes, next);
+                map.last_string_index.set(Some(next));
+                next
+            }
         }
-    } else {
-        *map.indexes.entry(scalar_to_map_key(key)).or_insert(next)
+        ScalarCell::Int(number) => {
+            let number_index = usize::try_from(number).ok();
+            let dense_index = number_index
+                .and_then(|number| map.integer_indexes.get(number).copied())
+                .filter(|&index| index != usize::MAX);
+            if let Some(index) = dense_index {
+                index
+            } else {
+                let dense_key = number_index.filter(|&number| {
+                    number < map.integer_indexes.len()
+                        || number
+                            < (map.len as usize)
+                                .saturating_add(1)
+                                .saturating_mul(2)
+                                .max(64)
+                });
+                // 没有历史稀疏条目时直接创建稠密槽，避免 entry 为一个不用的空哈希表分配桶。
+                let index = if dense_key.is_some() && map.indexes.is_empty() {
+                    next
+                } else {
+                    match map.indexes.entry(number as u64) {
+                        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            if dense_key.is_none() {
+                                entry.insert(next);
+                            }
+                            next
+                        }
+                    }
+                };
+                if index == next {
+                    if let Some(number) = dense_key {
+                        if number >= map.integer_indexes.len() {
+                            map.integer_indexes
+                                .resize((number + 1).next_power_of_two(), usize::MAX);
+                        }
+                        map.integer_indexes[number] = next;
+                    }
+                }
+                index
+            }
+        }
+        _ => *map.indexes.entry(scalar_to_map_key(key)).or_insert(next),
     };
     if index != next {
         let (_, entry_value) = map.entries[index]
@@ -167,13 +221,19 @@ unsafe fn map_set_cell(map: *mut MsMap, key: ScalarCell, value: ScalarCell) {
     }
     map.entries.push(Some((key, value)));
     map.len += 1;
-    let capacity = map.entries.capacity() * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
+    gc_charge(map_index_capacity(map).saturating_sub(old_capacity));
+}
+
+/// 汇总条目和三类索引的实际缓冲容量；字符串索引拥有的字节另行记账，不包含分配器元数据。
+fn map_index_capacity(map: &MsMap) -> usize {
+    map.entries.capacity() * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
         + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>()
-        + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>();
-    gc_charge(capacity.saturating_sub(old_capacity));
+        + map.integer_indexes.capacity() * std::mem::size_of::<usize>()
+        + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>()
 }
 
 /// 读取字典中的值；若键不存在则输出带源码定位的运行时错误。
+#[inline(always)]
 unsafe fn map_get_cell(map: *const MsMap, key: ScalarCell, site: RuntimeErrorSite) -> ScalarCell {
     let index =
         map_find_index(map, key).unwrap_or_else(|| abort_runtime_at("字典中不存在目标键", site));
@@ -184,11 +244,18 @@ unsafe fn map_get_cell(map: *const MsMap, key: ScalarCell, site: RuntimeErrorSit
         .unwrap_or_else(|| abort_runtime("内部字典索引失效"))
 }
 
-/// 删除键前失效查询缓存；墓碑过多时按原顺序压缩，避免缓存指向重排后的其他键或历史槽无限增长。
+/// 删除键前失效查询缓存并清空直接索引槽；缺失键报告原来的源码定位错误。
+/// 墓碑过多时按原顺序压缩并更新所有索引，裁剪直接索引尾部空洞，防止旧位置被误用。
 unsafe fn map_remove_cell(map: *mut MsMap, key: ScalarCell, site: RuntimeErrorSite) {
     let map = &mut *map;
     map.last_string_index.set(None);
     let index = match key {
+        ScalarCell::Int(value) => usize::try_from(value)
+            .ok()
+            .and_then(|key| map.integer_indexes.get_mut(key))
+            .filter(|slot| **slot != usize::MAX)
+            .map(|slot| std::mem::replace(slot, usize::MAX))
+            .or_else(|| map.indexes.remove(&(value as u64))),
         ScalarCell::String(value) => map.string_indexes.remove(string_bytes(value)),
         _ => map.indexes.remove(&scalar_to_map_key(key)),
     }
@@ -204,11 +271,23 @@ unsafe fn map_remove_cell(map: *mut MsMap, key: ScalarCell, site: RuntimeErrorSi
         for (index, entry) in map.entries.iter().enumerate() {
             let key = entry.as_ref().expect("live entry").0;
             let slot = match key {
+                ScalarCell::Int(value) => usize::try_from(value)
+                    .ok()
+                    .and_then(|key| map.integer_indexes.get_mut(key))
+                    .filter(|slot| **slot != usize::MAX)
+                    .or_else(|| map.indexes.get_mut(&(value as u64))),
                 ScalarCell::String(value) => map.string_indexes.get_mut(string_bytes(value)),
                 _ => map.indexes.get_mut(&scalar_to_map_key(key)),
             };
             *slot.expect("live key") = index;
         }
+        let dense_len = map
+            .integer_indexes
+            .iter()
+            .rposition(|&index| index != usize::MAX)
+            .map_or(0, |index| index + 1);
+        map.integer_indexes.truncate(dense_len);
+        map.integer_indexes.shrink_to_fit();
         map.entries.shrink_to((map.len as usize).max(32));
         map.indexes.shrink_to((map.len as usize).max(32));
         map.string_indexes.shrink_to((map.len as usize).max(32));
@@ -216,6 +295,7 @@ unsafe fn map_remove_cell(map: *mut MsMap, key: ScalarCell, site: RuntimeErrorSi
 }
 
 /// 判断目标键是否存在于字典中，直接复用哈希索引结果。
+#[inline(always)]
 unsafe fn map_contains_cell(map: *const MsMap, key: ScalarCell) -> u8 {
     u8::from(map_find_index(map, key).is_some())
 }

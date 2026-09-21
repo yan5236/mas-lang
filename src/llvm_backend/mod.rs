@@ -18,12 +18,15 @@ use crate::semantic::ValueType;
 use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
 
+mod borrowed_keys;
 mod expressions;
 mod functions;
 mod gc;
 mod gc_elision;
+mod gc_poll_elision;
 mod global_state;
 mod index_assignment;
+mod map_access;
 mod numeric_safety;
 mod operations;
 mod output;
@@ -137,6 +140,9 @@ struct CodeGenerator<'ctx, 'src> {
     loop_stack: Vec<LoopContext<'ctx>>,
     gc_management: std::cell::RefCell<Vec<inkwell::values::InstructionValue<'ctx>>>,
     optimize_strings: bool,
+    borrowed_conversion: Option<Span>,
+    borrowed_slots: std::collections::HashSet<PointerValue<'ctx>>,
+    borrowed_values: std::collections::HashSet<BasicValueEnum<'ctx>>,
     string_builders: Vec<(PointerValue<'ctx>, PointerValue<'ctx>)>,
     gc_handle_roots: std::cell::RefCell<Vec<PointerValue<'ctx>>>,
     gc_roots: std::cell::RefCell<Vec<(ValueType, PointerValue<'ctx>)>>,
@@ -194,6 +200,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             loop_stack: Vec::new(),
             gc_management: std::cell::RefCell::new(Vec::new()),
             optimize_strings: false,
+            borrowed_conversion: None,
+            borrowed_slots: std::collections::HashSet::new(),
+            borrowed_values: std::collections::HashSet::new(),
             string_builders: Vec::new(),
             gc_handle_roots: std::cell::RefCell::new(Vec::new()),
             gc_roots: std::cell::RefCell::new(Vec::new()),

@@ -4,17 +4,24 @@ use super::*;
 use crate::ast::{AssignOp, AssignTarget, BinaryOp, ConditionalBranch, Expr, Stmt};
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 顺序编译一个语句数组，并返回当前控制流是否已经终止。
+    /// 顺序编译语句并返回终止状态；O1+ 对局部声明的整个余下词法块做借用键证明。
     pub(super) fn compile_statements(
         &mut self,
         statements: &[Stmt],
     ) -> Result<bool, CompilerError> {
         let mut terminated = false;
-        for statement in statements {
+        for (index, statement) in statements.iter().enumerate() {
             if terminated {
                 break;
             }
+            let previous = self.borrowed_conversion;
+            self.borrowed_conversion = if self.optimize_strings && !self.is_top_level_scope() {
+                borrowed_keys::candidate(statement, &statements[index + 1..])
+            } else {
+                None
+            };
             terminated = self.compile_statement(statement)?;
+            self.borrowed_conversion = previous;
         }
         Ok(terminated)
     }
@@ -30,7 +37,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(terminated)
     }
 
-    /// 生成语句控制流并在全局声明完成后标记可访问；赋值须检查声明已执行，外层负责 GC 安全点。
+    /// 生成控制流并记录局部借用键槽；全局声明完成后标记可访问，赋值检查初始化，外层负责 GC 安全点。
     fn compile_statement_inner(&mut self, statement: &Stmt) -> Result<bool, CompilerError> {
         match statement {
             Stmt::Import { .. } | Stmt::ExportImport { .. } => Ok(false),
@@ -96,7 +103,15 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         self.context.i8_type().const_int(1, false),
                     ))?;
                 } else {
-                    let pointer = self.allocate_local(&expected, name)?;
+                    let borrowed = self.borrowed_values.contains(&value.value);
+                    let pointer = if borrowed {
+                        self.allocate_entry_slot(self.basic_type_for(&expected)?, name)?
+                    } else {
+                        self.allocate_local(&expected, name)?
+                    };
+                    if borrowed {
+                        self.borrowed_slots.insert(pointer);
+                    }
                     self.map_builder(self.builder.build_store(pointer, value.value))?;
                     self.current_scope_mut().insert(
                         name.clone(),

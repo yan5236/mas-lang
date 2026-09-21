@@ -117,8 +117,29 @@ fn integer_string_allocations() {
     gc_shutdown();
 }
 
+/// 预热 GC 登记表后，通过真实分配器确认稠密整数索引及条目缓冲区随字典完整释放。
+fn dense_index_allocations() {
+    mas_gc_enter();
+    map_create(KIND_INT, KIND_INT);
+    mas_gc_leave();
+    gc_shutdown();
+    let before = LIVE.load(Ordering::Relaxed);
+    mas_gc_enter();
+    let map = map_create(KIND_INT, KIND_INT);
+    mas_gc_root((&raw const map).cast(), 2, 1);
+    for key in 0..10000 { map_set_int_int(map, key, key); }
+    mas_gc_poll();
+    mas_gc_collect();
+    assert_eq!(map_len(map), 10000);
+    assert!(LIVE.load(Ordering::Relaxed) - before > 10000 * 8);
+    mas_gc_leave();
+    gc_shutdown();
+    assert_eq!(LIVE.load(Ordering::Relaxed), before);
+}
+
 /// 验证查询零分配，并对比十倍累计工作量后的存活请求字节，容许 GC 哈希表有限容量波动。
 fn main() {
+    dense_index_allocations();
     integer_string_allocations();
     builder_allocations();
     allocation_free_lookup();

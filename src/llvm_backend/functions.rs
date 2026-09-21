@@ -7,6 +7,7 @@ use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 为用户函数和原生函数声明预先分配 LLVM 符号，支持前向调用与递归调用。
+    /// 用户函数只在当前整程序模块内部调用，标为 internal 允许跨函数常量传播；extern 与入口仍对外可见。
     pub(super) fn declare_user_functions(
         &mut self,
         program: &Program,
@@ -57,7 +58,10 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 FunctionAbi::User => format!("ms_user_{name}"),
                 FunctionAbi::Extern => name.clone(),
             };
-            let function = self.module.add_function(&symbol_name, function_type, None);
+            let linkage = (abi == FunctionAbi::User).then_some(inkwell::module::Linkage::Internal);
+            let function = self
+                .module
+                .add_function(&symbol_name, function_type, linkage);
             self.functions.insert(
                 name.clone(),
                 FunctionInfo {
@@ -92,6 +96,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.gc_roots.borrow_mut().clear();
         self.gc_handle_roots.borrow_mut().clear();
         self.string_builders.clear();
+        self.borrowed_conversion = None;
+        self.borrowed_slots.clear();
+        self.borrowed_values.clear();
         self.gc_temporaries.borrow_mut().clear();
 
         let terminated = self.compile_statements(&program.statements)?;
@@ -129,6 +136,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.gc_roots.borrow_mut().clear();
         self.gc_handle_roots.borrow_mut().clear();
         self.string_builders.clear();
+        self.borrowed_conversion = None;
+        self.borrowed_slots.clear();
+        self.borrowed_values.clear();
         self.gc_temporaries.borrow_mut().clear();
 
         for (index, parameter) in parameters.iter().enumerate() {

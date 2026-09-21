@@ -9,7 +9,7 @@ enum GcObject {
 }
 
 impl GcObject {
-    /// 返回主要堆容量，含构建缓冲区、两类索引和拥有的字符串字节，用于回收阈值；不含分配器元数据。
+    /// 返回主要堆容量，含构建缓冲区、三类索引和拥有的字符串字节，用于回收阈值；不含分配器元数据。
     fn bytes(&self) -> usize {
         match self {
             Self::String(bytes) => bytes.len(),
@@ -21,10 +21,7 @@ impl GcObject {
             Self::Map(ptr) => unsafe {
                 let map = &**ptr;
                 std::mem::size_of::<MsMap>()
-                    + map.entries.capacity()
-                        * std::mem::size_of::<Option<(ScalarCell, ScalarCell)>>()
-                    + map.indexes.capacity() * std::mem::size_of::<(MapKey, usize)>()
-                    + map.string_indexes.capacity() * std::mem::size_of::<(Vec<u8>, usize)>()
+                    + map_index_capacity(map)
                     + map.string_indexes.keys().map(Vec::capacity).sum::<usize>()
             },
         }
@@ -112,6 +109,7 @@ const GC_MIN_THRESHOLD: usize = 256 * 1024;
 
 impl GcHeap {
     /// 从精确根与半构造对象出发迭代标记并清扫；调用者必须处于安全点。
+    /// 收集后依据存活载荷及对象登记项重设预算，与注册时的新增分配口径一致。
     fn collect(&mut self) {
         let mut work = Vec::new();
         for frame in &self.frames {
@@ -138,18 +136,23 @@ impl GcHeap {
             }
         }
         self.objects.retain(|address, _| marked.contains(address));
-        let live_bytes: usize = self.objects.values().map(GcObject::bytes).sum();
+        let live_bytes: usize = self.objects.values().map(GcObject::bytes).sum::<usize>()
+            + self.objects.len() * std::mem::size_of::<(usize, GcObject)>();
         self.threshold = live_bytes.saturating_mul(2).max(GC_MIN_THRESHOLD);
         self.allocated = 0;
         self.collections += 1;
     }
 }
 
-/// 接管新对象并保护到当前语句结束；分配内部不回收，避免扫描半构造对象。
+/// 接管新对象并保护到当前语句结束；对象登记项与载荷共同计入预算，防止短字符串积压。
+/// 分配内部不回收，避免扫描半构造对象；注册表保留容量不作为存活载荷重复记账。
 fn gc_track(address: usize, object: GcObject) {
     GC_HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
-        heap.allocated = heap.allocated.saturating_add(object.bytes());
+        heap.allocated = heap
+            .allocated
+            .saturating_add(object.bytes())
+            .saturating_add(std::mem::size_of::<(usize, GcObject)>());
         heap.objects.insert(address, object);
         if let Some(frame) = heap.frames.last_mut() {
             frame.pending.push(address);

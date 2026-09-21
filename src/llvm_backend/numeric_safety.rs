@@ -39,7 +39,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(())
     }
 
-    /// 在 i128 中计算两个 i64 的加减乘，确认结果可由 i64 表示后截断；避免先溢出再尝试检测。
+    /// 使用 LLVM 有符号溢出 intrinsic 同时得到 i64 结果和溢出位；失败仍在结果使用前报告源码位置。
+    /// intrinsic 的回绕结果是已定义值，仅在无溢出分支使用，不引入 nsw 假设或扩大语言整数范围。
     pub(super) fn checked_int_arithmetic(
         &mut self,
         op: BinaryOp,
@@ -47,44 +48,34 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         right: IntValue<'ctx>,
         span: Span,
     ) -> Result<IntValue<'ctx>, CompilerError> {
-        let wide = self.context.i128_type();
-        let left = self.map_builder(self.builder.build_int_s_extend(left, wide, "checked.left"))?;
-        let right = self.map_builder(self.builder.build_int_s_extend(
-            right,
-            wide,
-            "checked.right",
-        ))?;
-        let value = match op {
-            BinaryOp::Add => {
-                self.map_builder(self.builder.build_int_add(left, right, "checked.add"))?
-            }
-            BinaryOp::Subtract => {
-                self.map_builder(self.builder.build_int_sub(left, right, "checked.sub"))?
-            }
-            BinaryOp::Multiply => {
-                self.map_builder(self.builder.build_int_mul(left, right, "checked.mul"))?
-            }
+        let name = match op {
+            BinaryOp::Add => "llvm.sadd.with.overflow",
+            BinaryOp::Subtract => "llvm.ssub.with.overflow",
+            BinaryOp::Multiply => "llvm.smul.with.overflow",
             _ => unreachable!("only add/subtract/multiply"),
         };
-        let lower = self.map_builder(self.builder.build_int_compare(
-            IntPredicate::SGE,
-            value,
-            wide.const_int(i64::MIN as u64, true),
-            "checked.lower",
+        let function = inkwell::intrinsics::Intrinsic::find(name)
+            .expect("LLVM signed overflow intrinsic")
+            .get_declaration(&self.module, &[self.context.i64_type().into()])
+            .expect("i64 overflow intrinsic declaration");
+        let call = self.map_builder(self.builder.build_call(
+            function,
+            &[left.into(), right.into()],
+            "checked.arithmetic",
         ))?;
-        let upper = self.map_builder(self.builder.build_int_compare(
-            IntPredicate::SLE,
-            value,
-            wide.const_int(i64::MAX as u64, false),
-            "checked.upper",
-        ))?;
-        let valid = self.map_builder(self.builder.build_and(lower, upper, "checked.valid"))?;
+        let result = call.try_as_basic_value().unwrap_basic().into_struct_value();
+        let value = self
+            .map_builder(self.builder.build_extract_value(result, 0, "checked.value"))?
+            .into_int_value();
+        let overflow = self
+            .map_builder(
+                self.builder
+                    .build_extract_value(result, 1, "checked.overflow"),
+            )?
+            .into_int_value();
+        let valid = self.map_builder(self.builder.build_not(overflow, "checked.valid"))?;
         self.emit_safety_check(valid, 2, span)?;
-        self.map_builder(self.builder.build_int_truncate(
-            value,
-            self.context.i64_type(),
-            "checked.value",
-        ))
+        Ok(value)
     }
 
     /// 整数除法和取余执行前排除零除数及 MIN/-1，防止硬件异常与 LLVM 未定义值。
@@ -157,4 +148,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         ))?;
         Ok((valid, result))
     }
+}
+
+/// 精确识别后端生成的三个纯 i64 溢出 intrinsic，供 GC 分析复用；不放行其他 LLVM 或原生调用。
+pub(super) fn is_checked_arithmetic_intrinsic(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"llvm.sadd.with.overflow.i64"
+            | b"llvm.ssub.with.overflow.i64"
+            | b"llvm.smul.with.overflow.i64"
+    )
 }

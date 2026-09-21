@@ -35,9 +35,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(builder.build_alloca(value_type, name))
     }
 
-    /// 为返回的托管表达式保留根，确保后续实参求值、嵌套调用与全局覆盖不会使其失效。
+    /// 为托管表达式保留根以跨越嵌套调用；已证明借用的栈字符串无需堆根，实际入图复制由字典写入负责。
     pub(super) fn protect_gc_value(&self, value: &TypedValue<'ctx>) -> Result<(), CompilerError> {
-        if Self::gc_layout(&value.value_type).is_some() {
+        if Self::gc_layout(&value.value_type).is_some()
+            && !self.borrowed_values.contains(&value.value)
+        {
             let slot = self.allocate_local(&value.value_type, "gc.temp")?;
             self.map_builder(self.builder.build_store(slot, value.value))?;
             self.gc_temporaries

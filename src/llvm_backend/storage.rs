@@ -7,7 +7,8 @@ use inkwell::values::{BasicValueEnum, GlobalValue, PointerValue};
 use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 为全局变量创建零值存储及独立初始化标记；声明执行完成前禁止读取或赋值。
+    /// 为全局变量创建模块私有的零值存储及独立初始化标记；声明执行完成前禁止读取或赋值。
+    /// 仅限制链接可见性，不提前执行初始化，使 LLVM 能分析模块内实际读写而保留声明顺序错误。
     pub(super) fn declare_global(
         &mut self,
         name: &str,
@@ -23,12 +24,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let global = self
             .module
             .add_global(self.basic_type_for(&value_type)?, None, &symbol);
+        global.set_linkage(inkwell::module::Linkage::Internal);
         self.initialize_global(&global, &value_type)?;
         let initialized = self.module.add_global(
             self.context.i8_type(),
             None,
             &format!("{symbol}_initialized"),
         );
+        initialized.set_linkage(inkwell::module::Linkage::Internal);
         initialized.set_initializer(&self.context.i8_type().const_zero());
         self.global_initialized
             .insert(name.to_string(), initialized.as_pointer_value());
@@ -82,7 +85,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(pointer)
     }
 
-    /// 检查全局声明已执行后加载变量；未初始化访问通过运行时诊断报告给定源码位置。
+    /// 检查声明状态后加载变量并传播已证明的借用键标记；未初始化全局仍按源码位置报错。
     pub(super) fn load_variable(
         &mut self,
         variable: VariableInfo<'ctx>,
@@ -94,6 +97,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             variable.pointer,
             "load.var",
         ))?;
+        if self.borrowed_slots.contains(&variable.pointer) {
+            self.borrowed_values.insert(value);
+        }
         Ok(TypedValue {
             value_type: variable.value_type,
             value,

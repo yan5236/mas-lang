@@ -5,7 +5,7 @@ use std::collections::HashSet;
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 对用户函数调用图求保守不动点，找出没有托管根、分配或未知调用的函数（含递归环）。
     /// 只移除记录过的自动 GC 调用；根注册、显式 GC、原生调用均使函数及其调用者退出候选集。
-    /// 入口帧保留；剩余调用只有纯计算或终止进程的诊断，不会清除调用者的 pending 临时保护。
+    /// 入口帧保留；剩余调用只有纯计算（含精确识别的整数溢出 intrinsic）或终止进程的诊断，不会清除调用者的 pending 临时保护。
     pub(super) fn elide_scalar_gc(&self) {
         let generated: HashSet<_> = self.gc_management.borrow().iter().copied().collect();
         let mut safe: HashSet<_> = self
@@ -31,7 +31,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         let Some(callee) = call.get_called_fn_value() else {
                             return false;
                         };
-                        previous.contains(&callee)
+                        numeric_safety::is_checked_arithmetic_intrinsic(
+                            callee.get_name().to_bytes(),
+                        ) || previous.contains(&callee)
                             || matches!(
                                 callee.get_name().to_bytes(),
                                 b"mas_numeric_error" | b"mas_global_uninitialized"

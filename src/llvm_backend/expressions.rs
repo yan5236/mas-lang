@@ -547,7 +547,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
-    /// 把基础类型值转换为 `string`，数值和布尔值通过运行时格式化为 UTF-8 文本。
+    /// 转换基础类型为 UTF-8；仅对已证明不逃逸的局部整数键使用栈缓冲，其他情况保留托管分配。
     fn compile_string_conversion(
         &mut self,
         arguments: &[Expr],
@@ -556,6 +556,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let argument = self.compile_scalar_convert_argument("string", arguments, span)?;
         match argument.value_type {
             ValueType::String => Ok(argument),
+            ValueType::Int if self.borrowed_conversion == Some(span) => {
+                self.build_borrowed_int_key(argument)
+            }
             ValueType::Int => self.build_scalar_string_call(
                 self.runtime.int_to_string,
                 &[argument.value.into()],
@@ -1591,7 +1594,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             .into_pointer_value())
     }
 
-    /// 向字典对象写入或更新一个键值对。
+    /// 写入或更新键值对；借用的栈字符串先转为稳定托管键，已有键不重复分配。
     pub(super) fn build_map_set(
         &mut self,
         map_value: PointerValue<'ctx>,
@@ -1602,6 +1605,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         span: Span,
     ) -> Result<(), CompilerError> {
         let function = self.map_runtime_function("map_set", key_type, Some(value_type))?;
+        let function = self.borrowed_key_setter(function, &key);
         let mut args = vec![map_value.into()];
         args.extend(self.build_list_value_arguments(key, span)?);
         args.extend(self.build_list_value_arguments(value, span)?);
@@ -1609,7 +1613,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(())
     }
 
-    /// 通过运行时调用读取字典中指定键对应的值。
+    /// 读取指定键的值；整数键值对复用常量诊断上下文，其余类型沿用原 ABI。
     pub(super) fn build_map_get(
         &mut self,
         map_value: PointerValue<'ctx>,
@@ -1618,6 +1622,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         key: TypedValue<'ctx>,
         span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
+        if *key_type == ValueType::Int && *value_type == ValueType::Int {
+            return self.build_int_map_get(map_value, key, span);
+        }
         let function = self.map_runtime_function("map_get", key_type, Some(value_type))?;
         let mut args = vec![map_value.into()];
         args.extend(self.build_list_value_arguments(key, span)?);
