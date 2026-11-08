@@ -223,7 +223,7 @@ mod tests {
         .unwrap();
         fs::write(
             root.join("src").join("utils").join("index.ms"),
-            "export import utils.math { add }\n",
+            "export import utils.math {\n    add,\n}\n",
         )
         .unwrap();
         fs::write(
@@ -253,19 +253,36 @@ mod tests {
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
 
-    /// 校验别名导入与全部导入能够在模块装载后被正确重写并编译运行。
+    /// 编译运行多行别名导入和原有通配导入，验证模块调用与同名对象方法各自绑定。
     #[test]
     fn should_build_project_with_alias_and_star_imports() {
         let root = create_temp_project("alias-star");
         fs::create_dir_all(root.join("src").join("utils")).unwrap();
         fs::write(
             root.join("src").join("utils").join("math.ms"),
-            "pub func add(a:int, b:int) -> int:\n    return a + b\n",
+            "pub func add(a:int, b:int) -> int:\n    return a + b\npub func trim() -> int:\n    return 42\n",
         )
         .unwrap();
         fs::write(
             root.join("src").join("main.ms"),
-            "import utils.math { add as plus }\nimport utils.math.*\nfunc main():\n    print(plus(1, 2))\n    print(add(3, 4))\n",
+            r#"import utils.math {
+    add as plus,
+}
+import utils.math as m {
+    add,
+    trim,
+    add as sum,
+}
+import utils.math.*
+func main():
+    print(plus(1, 2))
+    print(add(3, 4))
+    print(m.add(4, 5))
+    print(m.sum(5, 6))
+    print(m.trim())
+    var m = " Mas "
+    print(m.trim())
+"#,
         )
         .unwrap();
 
@@ -283,7 +300,7 @@ mod tests {
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();
         assert!(output.status.success());
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), "3\n7\n");
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "3\n7\n9\n11\n42\nMas\n");
 
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }

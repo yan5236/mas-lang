@@ -12,15 +12,33 @@ sidebar_position: 1
 // 导入特定符号
 import utils.math { add, sub }
 
-// 带别名导入
-import utils.math { add as plus }
+// 重命名导入的函数，末项可以保留逗号
+import time {
+    sleep as time_sleep,
+    unix_seconds,
+}
 
+// 为模块设置别名，只通过 t 访问花括号内列出的成员
+import time as t {
+    sleep,
+    unix_millis as millis,
+}
+
+func main():
+    time_sleep(10)
+    t.sleep(10)
+    print(t.millis())
+```
+
+```mas-lang
 // 通配导入
 import utils.math.*
 
 // 导入已安装的标准库包
 import time { unix_seconds }
 ```
+
+具名列表可以写在一行，也可以换行。项目内同一个文件的模块别名必须唯一，并且不能和顶层声明或直接导入的名字重复。重导出支持列表换行、尾逗号和成员别名。
 
 ## 模块路径
 

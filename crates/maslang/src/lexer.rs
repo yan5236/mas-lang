@@ -20,13 +20,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// 完整扫描源码文本，并在末尾补上 `EOF` 词法单元。
+    /// 扫描源码并补上 EOF；导入列表续行保留换行记号，但不影响语句块的缩进栈。
     pub fn tokenize(mut self) -> Result<Vec<Token>, CompilerError> {
         let _ = self.settings;
         let mut tokens = Vec::new();
         let mut indent_stack = vec![0usize];
         let text = self.source.text();
         let mut line_start = 0usize;
+        let mut in_import_list = false;
 
         while line_start < text.len() {
             let line_end = text[line_start..]
@@ -42,15 +43,27 @@ impl<'a> Lexer<'a> {
             let (indent_width, content_start, is_blank) =
                 self.inspect_line(line_start, line_end)?;
             if !is_blank {
-                self.emit_indentation(
-                    line_start,
-                    content_start,
-                    indent_width,
-                    &mut indent_stack,
-                    &mut tokens,
-                )?;
+                if !in_import_list {
+                    self.emit_indentation(
+                        line_start,
+                        content_start,
+                        indent_width,
+                        &mut indent_stack,
+                        &mut tokens,
+                    )?;
+                }
+                let first_token = tokens.len();
                 self.position = content_start;
                 self.lex_line_content(line_end, &mut tokens)?;
+                let line = &tokens[first_token..];
+                let starts_import = matches!(
+                    line,
+                    [Token { kind: TokenKind::Import, .. }, ..]
+                        | [Token { kind: TokenKind::Export, .. }, Token { kind: TokenKind::Import, .. }, ..]
+                );
+                in_import_list = (in_import_list
+                    || (starts_import && line.iter().any(|token| token.kind == TokenKind::LeftBrace)))
+                    && !line.iter().any(|token| token.kind == TokenKind::RightBrace);
             }
 
             tokens.push(Token::new(

@@ -196,7 +196,10 @@ fn collect_statement_symbol(text: &str, statement: &Stmt, symbols: &mut Vec<MasS
             ));
         }
         Stmt::Import { path, kind, span } | Stmt::ExportImport { path, kind, span } => {
-            let module = path.normalized_segments().join(".");
+            let module = path
+                .alias
+                .clone()
+                .unwrap_or_else(|| path.normalized_segments().join("."));
             match kind {
                 ImportKind::Named(items) => {
                     for item in items {

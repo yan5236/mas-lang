@@ -135,11 +135,20 @@ impl<'a> ModuleLoader<'a> {
         let renamed_declarations = collect_top_level_declarations(&program, module_path, is_entry);
         let mut imports = BTreeMap::new();
         let mut exports = BTreeMap::new();
+        let mut module_aliases = BTreeMap::new();
 
         for statement in &program.statements {
             match statement {
-                Stmt::Import { path, kind, .. } => {
-                    self.resolve_import_bindings(package_root, path, kind, &mut imports)?
+                Stmt::Import { path, kind, span } => {
+                    if let Some(alias) = &path.alias
+                        && module_aliases.insert(alias, *span).is_some()
+                    {
+                        return Err(CompilerError::build_message(
+                            format!("模块别名 `{alias}` 重复"),
+                            *span,
+                        ));
+                    }
+                    self.resolve_import_bindings(package_root, path, kind, &mut imports)?;
                 }
                 Stmt::ExportImport { path, kind, .. } => self.resolve_export_bindings(
                     package_root,
@@ -171,6 +180,15 @@ impl<'a> ModuleLoader<'a> {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        for (alias, span) in module_aliases {
+            if imports.contains_key(alias) || renamed_declarations.contains_key(alias) {
+                return Err(CompilerError::build_message(
+                    format!("模块别名 `{alias}` 与当前模块的导入名或顶层声明重名"),
+                    span,
+                ));
             }
         }
 
@@ -209,7 +227,7 @@ impl<'a> ModuleLoader<'a> {
         Ok(loaded)
     }
 
-    /// 解析普通 `import` 语句导入的绑定名，并写入当前模块可见绑定表。
+    /// 加载普通导入的目标模块，并将选中的公开成员写入当前模块的绑定表。
     fn resolve_import_bindings(
         &mut self,
         package_root: &Path,
@@ -219,7 +237,7 @@ impl<'a> ModuleLoader<'a> {
     ) -> Result<(), CompilerError> {
         let (target_file, target_package_root) = self.resolve_module_path(package_root, path)?;
         let target_module = self.load_module(&target_file, &target_package_root, false)?;
-        merge_imports(kind, &target_module.exports, imports, path.span)?;
+        merge_imports(kind, &target_module.exports, imports, path)?;
         Ok(())
     }
 
@@ -234,7 +252,7 @@ impl<'a> ModuleLoader<'a> {
     ) -> Result<(), CompilerError> {
         let (target_file, target_package_root) = self.resolve_module_path(package_root, path)?;
         let target_module = self.load_module(&target_file, &target_package_root, false)?;
-        let merged = merge_imports(kind, &target_module.exports, imports, path.span)?;
+        let merged = merge_imports(kind, &target_module.exports, imports, path)?;
         exports.extend(merged);
         Ok(())
     }
@@ -534,14 +552,19 @@ impl ModuleRewriter {
         rewritten
     }
 
-    /// 按照当前作用域规则重写赋值目标。
+    /// 按作用域重写赋值目标；模块成员赋值交由具名绑定的可变性检查处理。
     fn rewrite_target(&mut self, target: AssignTarget) -> AssignTarget {
         match target {
-            AssignTarget::Field { target, name, span } => AssignTarget::Field {
-                target: Box::new(self.rewrite_expr(*target)),
-                name,
-                span,
-            },
+            AssignTarget::Field { target, name, span } => {
+                if let Some(name) = self.qualified_binding(&target, &name) {
+                    return AssignTarget::Identifier { name, span };
+                }
+                AssignTarget::Field {
+                    target: Box::new(self.rewrite_expr(*target)),
+                    name,
+                    span,
+                }
+            }
             AssignTarget::Identifier { name, span } => AssignTarget::Identifier {
                 name: self.rewrite_identifier(name),
                 span,
@@ -558,14 +581,19 @@ impl ModuleRewriter {
         }
     }
 
-    /// 递归重写表达式树中的标识符引用。
+    /// 递归重写标识符和模块成员；成员名即使与内建方法或属性同名，也优先使用模块绑定。
     fn rewrite_expr(&mut self, expr: Expr) -> Expr {
         match expr {
-            Expr::FieldAccess { target, name, span } => Expr::FieldAccess {
-                target: Box::new(self.rewrite_expr(*target)),
-                name,
-                span,
-            },
+            Expr::FieldAccess { target, name, span } => {
+                if let Some(name) = self.qualified_binding(&target, &name) {
+                    return Expr::Identifier { name, span };
+                }
+                Expr::FieldAccess {
+                    target: Box::new(self.rewrite_expr(*target)),
+                    name,
+                    span,
+                }
+            }
             Expr::Identifier { name, span } => Expr::Identifier {
                 name: self.rewrite_identifier(name),
                 span,
@@ -655,30 +683,56 @@ impl ModuleRewriter {
                 method,
                 arguments,
                 span,
-            } => Expr::MethodCall {
-                target: Box::new(self.rewrite_expr(*target)),
-                method,
-                arguments: arguments
+            } => {
+                let arguments = arguments
                     .into_iter()
                     .map(|item| self.rewrite_expr(item))
-                    .collect(),
-                span,
-            },
+                    .collect();
+                if let Some(name) = self.qualified_binding(&target, method.display_name()) {
+                    return Expr::Call {
+                        callee: Box::new(Expr::Identifier { name, span }),
+                        arguments,
+                        span,
+                    };
+                }
+                Expr::MethodCall {
+                    target: Box::new(self.rewrite_expr(*target)),
+                    method,
+                    arguments,
+                    span,
+                }
+            }
             Expr::PropertyAccess {
                 target,
                 property,
                 span,
-            } => Expr::PropertyAccess {
-                target: Box::new(self.rewrite_expr(*target)),
-                property,
-                span,
-            },
+            } => {
+                if let Some(name) = self.qualified_binding(&target, property.display_name()) {
+                    return Expr::Identifier { name, span };
+                }
+                Expr::PropertyAccess {
+                    target: Box::new(self.rewrite_expr(*target)),
+                    property,
+                    span,
+                }
+            }
             Expr::Grouped { expression, span } => Expr::Grouped {
                 expression: Box::new(self.rewrite_expr(*expression)),
                 span,
             },
             other => other,
         }
+    }
+
+    /// 查找 `模块别名.成员` 的内部名称；局部变量同名时保留普通的对象成员访问。
+    fn qualified_binding(&self, target: &Expr, member: &str) -> Option<String> {
+        let Expr::Identifier { name, .. } = target else {
+            return None;
+        };
+        if self.is_local_name(name) {
+            return None;
+        }
+        self.bindings.get(&format!("{name}.{member}")).cloned()
     }
 
     /// 递归重写类型名称，类型不受同名局部变量遮蔽；容器和可空后缀保留。
@@ -763,11 +817,12 @@ fn collect_top_level_declarations(
         .collect()
 }
 
+/// 将选中的公开符号加入绑定表并返回本次新增项；带模块别名时只生成限定名称，缺失或重复的限定成员会报错。
 fn merge_imports(
     kind: &ImportKind,
     exports: &BTreeMap<String, String>,
     imports: &mut BTreeMap<String, String>,
-    span: Span,
+    path: &ImportPath,
 ) -> Result<BTreeMap<String, String>, CompilerError> {
     let mut inserted = BTreeMap::new();
     match kind {
@@ -782,10 +837,20 @@ fn merge_imports(
                 let internal = exports.get(name).ok_or_else(|| {
                     CompilerError::build_message(
                         format!("导入的符号 `{name}` 不存在或未公开"),
-                        span,
+                        path.span,
                     )
                 })?;
-                let visible_name = alias.clone().unwrap_or_else(|| name.clone());
+                let member = alias.as_ref().unwrap_or(name);
+                let visible_name = match &path.alias {
+                    Some(namespace) => format!("{namespace}.{member}"),
+                    None => member.clone(),
+                };
+                if path.alias.is_some() && inserted.contains_key(&visible_name) {
+                    return Err(CompilerError::build_message(
+                        format!("导入的成员名 `{visible_name}` 重复"),
+                        path.span,
+                    ));
+                }
                 imports.insert(visible_name.clone(), internal.clone());
                 inserted.insert(visible_name, internal.clone());
             }

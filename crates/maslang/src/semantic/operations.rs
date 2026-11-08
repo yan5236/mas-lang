@@ -169,13 +169,19 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    /// 推导具名函数调用的返回类型，校验实参，并禁止在函数体外调用 print。
+    /// 校验具名调用并推导返回类型；未解析为模块函数的点调用报告不支持的方法。
     pub(super) fn infer_call_type(
         &mut self,
         callee: &Expr,
         arguments: &[Expr],
         span: Span,
     ) -> Result<ValueType, CompilerError> {
+        if let Expr::FieldAccess { name, span, .. } = callee {
+            return Err(CompilerError::semantic_message(
+                format!("当前阶段不支持对象方法 `{name}`"),
+                *span,
+            ));
+        }
         let Expr::Identifier { name, .. } = callee else {
             return Err(CompilerError::semantic_message(
                 "当前阶段只支持调用具名函数",

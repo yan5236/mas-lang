@@ -14,10 +14,11 @@ pub struct Parameter {
     pub span: Span,
 }
 
-/// 表示 `import` 使用的模块路径及其源码区间。
+/// 表示 `import` 的模块来源、可选的本地命名空间别名及原路径区间。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImportPath {
     pub segments: Vec<String>,
+    pub alias: Option<String>,
     pub span: Span,
 }
 

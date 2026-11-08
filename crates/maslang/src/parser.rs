@@ -308,33 +308,40 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析 `import` 或 `export import` 语句。
+    /// 解析导入和重导出；具名列表允许换行及尾逗号，模块别名只绑定在当前文件。
     fn parse_import_statement(&mut self, is_export: bool) -> Result<Stmt, CompilerError> {
         let start = self.previous().span;
         let path = self.parse_import_path()?;
-        let kind = if self.match_tag(TokenTag::Dot) {
+        if is_export && path.alias.is_some() {
+            return Err(CompilerError::syntax_message(
+                "重导出只能为导入项设置别名",
+                self.previous().span,
+            ));
+        }
+        let kind = if path.alias.is_none() && self.match_tag(TokenTag::Dot) {
             self.consume(TokenTag::Star, "全部导入缺少 `*`")?;
             ImportKind::All
         } else {
             self.consume(TokenTag::LeftBrace, "导入语句缺少左花括号 `{`")?;
             let mut items = Vec::new();
-            if !self.check(TokenTag::RightBrace) {
-                loop {
-                    let (name, item_span) = self.consume_identifier("导入项缺少名称")?;
-                    let alias = if self.match_tag(TokenTag::As) {
-                        Some(self.consume_identifier("别名导入缺少别名")?.0)
-                    } else {
-                        None
-                    };
-                    items.push(ImportItem {
-                        name,
-                        alias,
-                        span: item_span,
-                    });
-                    if !self.match_tag(TokenTag::Comma) {
-                        break;
-                    }
+            self.skip_newlines();
+            while !self.check(TokenTag::RightBrace) {
+                let (name, item_span) = self.consume_identifier("导入项缺少名称")?;
+                let alias = if self.match_tag(TokenTag::As) {
+                    Some(self.consume_identifier("别名导入缺少别名")?.0)
+                } else {
+                    None
+                };
+                items.push(ImportItem {
+                    name,
+                    alias,
+                    span: item_span,
+                });
+                self.skip_newlines();
+                if !self.match_tag(TokenTag::Comma) {
+                    break;
                 }
+                self.skip_newlines();
             }
             self.consume(TokenTag::RightBrace, "导入语句缺少右花括号 `}`")?;
             ImportKind::Named(items)
@@ -348,7 +355,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 解析 `foo.bar` 或 `local.foo.bar` 形式的模块路径。
+    /// 解析点分模块路径及可选的 `as` 别名，路径区间只覆盖实际来源。
     fn parse_import_path(&mut self) -> Result<ImportPath, CompilerError> {
         let (first_segment, start) = self.consume_identifier("导入路径缺少模块名")?;
         let mut segments = vec![first_segment];
@@ -361,8 +368,14 @@ impl<'a> Parser<'a> {
             end = span;
         }
 
+        let alias = if self.match_tag(TokenTag::As) {
+            Some(self.consume_identifier("模块导入缺少别名")?.0)
+        } else {
+            None
+        };
         Ok(ImportPath {
             segments,
+            alias,
             span: Span::merge(start, end),
         })
     }
@@ -804,18 +817,19 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// 解析内建方法、结构体字段及安全转换/可空结果属性，未知字段交给类型检查。
+    /// 解析内建方法、字段及只读属性；其他点调用保留为字段调用，供模块加载器解析别名。
     fn finish_member_access(&mut self, target: Expr) -> Result<Expr, CompilerError> {
         let dot_span = self.previous().span;
         let (member_name, member_span) = self.consume_identifier("`.` 后缺少成员名")?;
 
         if self.match_tag(TokenTag::LeftParen) {
-            let method = MethodName::parse(&member_name).ok_or_else(|| {
-                CompilerError::syntax_message(
-                    format!("当前阶段不支持对象方法 `{member_name}`"),
-                    member_span,
-                )
-            })?;
+            let Some(method) = MethodName::parse(&member_name) else {
+                return self.finish_call(Expr::FieldAccess {
+                    target: Box::new(target),
+                    name: member_name,
+                    span: Span::merge(dot_span, member_span),
+                });
+            };
             let mut arguments = Vec::new();
 
             if !self.check(TokenTag::RightParen) {
@@ -1575,17 +1589,6 @@ mod tests {
         Parser::new(tokens, &settings).parse_program().unwrap()
     }
 
-    /// 先做词法分析和语法分析，并把失败结果渲染为稳定的中文诊断文本。
-    fn parse_error(text: &str) -> String {
-        let settings = CompilerSettings::new(UiLanguage::ZhCn);
-        let source = SourceFile::new("<test>", text.to_string());
-        let tokens = Lexer::new(&source, &settings).tokenize().unwrap();
-        Parser::new(tokens, &settings)
-            .parse_program()
-            .unwrap_err()
-            .render(settings.language, Some(&source))
-    }
-
     /// 校验函数定义能够被正确解析为顶层语句节点。
     #[test]
     fn should_parse_function_declaration() {
@@ -1813,11 +1816,22 @@ mod tests {
         }
     }
 
-    /// 校验未知的字符串对象方法仍会给出明确的未支持语法诊断。
+    /// 校验非内建的点调用保留接收者和成员名，供模块加载器解析。
     #[test]
-    fn should_reject_unsupported_string_method_name() {
-        let error = parse_error("var text = \"Mas lang\"\ntext.lowercase()\n");
-        assert!(error.contains("当前阶段不支持对象方法 `lowercase`"));
+    fn should_parse_qualified_call() {
+        let program = parse("t.sleep(100)\n");
+        let Stmt::ExprStmt {
+            expr: Expr::Call { callee, .. },
+            ..
+        } = &program.statements[0]
+        else {
+            panic!("预期点调用表达式");
+        };
+        assert!(matches!(
+            callee.as_ref(),
+            Expr::FieldAccess { target, name, .. }
+                if name == "sleep" && matches!(target.as_ref(), Expr::Identifier { name, .. } if name == "t")
+        ));
     }
 
     /// 校验安全转换结果的 `ok/value` 只读属性能够被正确解析。
