@@ -4,7 +4,7 @@ Mas lang 是一门静态类型编程语言。编译器用 LLVM 把 `.ms` 源码�
 
 ## 快速开始
 
-需要支持 Rust 2024 的稳定版 Rust、LLVM 19.1 和本机 C 工具链。将 `LLVM_SYS_191_PREFIX` 指向 LLVM 安装目录。Ubuntu 24.04 可安装 `llvm-19-dev libpolly-19-dev libzstd-dev libxml2-dev`，前缀为 `/usr/lib/llvm-19`。macOS 可用 `brew install llvm@19`，前缀可用 `brew --prefix llvm@19` 查询。Windows 使用 MSVC。
+需要支持 Rust 2024 的稳定版 Rust、LLVM 19.1 和本机 C 工具链。将 `LLVM_SYS_191_PREFIX` 指向 LLVM 安装目录。Linux 和 macOS 的工具链安装命令见 [CI 配置](.github/workflows/native.yml)。Windows 使用 MSVC。
 
 ```sh
 cargo build --workspace --locked

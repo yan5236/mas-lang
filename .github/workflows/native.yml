@@ -43,21 +43,6 @@ jobs:
           sudo installer -pkg "$pkg" -target /
           sudo /opt/local/bin/port -N -b install llvm-19
           echo "LLVM_SYS_191_PREFIX=/opt/local/libexec/llvm-19" >> "$GITHUB_ENV"
-      - name: Generate Intel macOS time objects
-        if: runner.os == 'macOS' && runner.arch == 'X64'
-        run: |
-          cargo +stable run --locked -p fama -- build examples/projects/time-api --allow-native-source-build
-          target="$(rustc +stable --print host-tuple)"
-          artifacts="examples/projects/time-api/mod_module/time@0.1.0/native/artifacts/$target"
-          file "$artifacts/"*.o
-          mkdir -p "$RUNNER_TEMP/time-artifacts/$target"
-          cp "$artifacts/manifest.toml" "$artifacts/"*.o "$RUNNER_TEMP/time-artifacts/$target/"
-      - uses: actions/upload-artifact@v4
-        if: runner.os == 'macOS' && runner.arch == 'X64'
-        with:
-          name: time-${{ matrix.os }}
-          path: ${{ runner.temp }}/time-artifacts/
-          if-no-files-found: error
       - name: Verify executable format and output
         env:
           BINARY_FORMAT: ${{ matrix.format }}
@@ -65,5 +50,7 @@ jobs:
           cargo +stable run --locked -p maslang -- build examples/regression/syntax/standalone-hello/main.ms -o "$RUNNER_TEMP/mas-hello"
           file "$RUNNER_TEMP/mas-hello" | grep -F "$BINARY_FORMAT"
           test "$("$RUNNER_TEMP/mas-hello")" = Helloworld
+      - name: Run time example with prebuilt objects
+        run: cargo +stable run --locked -p fama -- run examples/projects/time-api
       - name: Test workspace
         run: cargo +stable test --workspace --locked --no-fail-fast

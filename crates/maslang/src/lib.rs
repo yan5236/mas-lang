@@ -468,7 +468,7 @@ func main():
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
 
-    /// 校验应用工程能够通过依赖缓存导入 `time` 标准库，并拿到非空的时间格式输出与非负耗时差值。
+    /// 校验应用工程默认链接依赖缓存中的预编译 time 对象，并核对日期格式和实际等待时间。
     #[test]
     fn should_build_project_with_time_standard_library_dependency() {
         let root = create_temp_project("time-stdlib");
@@ -482,7 +482,7 @@ func main():
         let binary = compile_to_executable(
             &source,
             &zh_settings(),
-            &CompileOptions::new(Some(output_path)).with_allow_native_source_build(cfg!(unix)),
+            &CompileOptions::new(Some(output_path)),
         )
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();
@@ -525,7 +525,7 @@ func main():
         let binary = compile_to_executable(
             &source,
             &zh_settings(),
-            &CompileOptions::new(Some(output_path)).with_allow_native_source_build(cfg!(unix)),
+            &CompileOptions::new(Some(output_path)),
         )
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();

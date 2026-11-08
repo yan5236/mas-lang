@@ -18,3 +18,31 @@ objects = [
   "native/artifacts/x86_64-pc-windows-msvc/time_common.obj",
   "native/artifacts/x86_64-pc-windows-msvc/time_windows.obj",
 ]
+
+[native.prebuilt.x86_64-unknown-linux-gnu]
+manifest = "native/artifacts/x86_64-unknown-linux-gnu/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-unknown-linux-gnu/time_common.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/time_posix.o",
+]
+
+[native.prebuilt.aarch64-unknown-linux-gnu]
+manifest = "native/artifacts/aarch64-unknown-linux-gnu/manifest.toml"
+objects = [
+  "native/artifacts/aarch64-unknown-linux-gnu/time_common.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/time_posix.o",
+]
+
+[native.prebuilt.x86_64-apple-darwin]
+manifest = "native/artifacts/x86_64-apple-darwin/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-apple-darwin/time_common.o",
+  "native/artifacts/x86_64-apple-darwin/time_posix.o",
+]
+
+[native.prebuilt.aarch64-apple-darwin]
+manifest = "native/artifacts/aarch64-apple-darwin/manifest.toml"
+objects = [
+  "native/artifacts/aarch64-apple-darwin/time_common.o",
+  "native/artifacts/aarch64-apple-darwin/time_posix.o",
+]

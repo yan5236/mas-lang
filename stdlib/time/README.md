@@ -13,8 +13,12 @@
 | 目标三元组 | 产物目录 | 状态 |
 | --- | --- | --- |
 | `x86_64-pc-windows-msvc` | `native/artifacts/x86_64-pc-windows-msvc/` | 已支持 |
+| `x86_64-unknown-linux-gnu` | `native/artifacts/x86_64-unknown-linux-gnu/` | 已支持 |
+| `aarch64-unknown-linux-gnu` | `native/artifacts/aarch64-unknown-linux-gnu/` | 已支持 |
+| `x86_64-apple-darwin` | `native/artifacts/x86_64-apple-darwin/` | 已支持 |
+| `aarch64-apple-darwin` | `native/artifacts/aarch64-apple-darwin/` | 已支持 |
 
-普通调用方构建 `import time { ... }` 时，编译器会优先读取 `settings.toml` 中声明的 `native.prebuilt.<target>` 条目，并直接链接该目录下的对象文件。默认消费路径不会自动回退到源码编译，因此调用方机器不需要安装 `gcc`、`clang` 或 `cl.exe`。
+普通调用方构建 `import time { ... }` 时，编译器会读取 `settings.toml` 中对应的 `native.prebuilt.<target>` 条目，并使用本机链接工具链链接该目录下的对象文件。使用 `time` 无需从 C 源码重新构建这些对象。
 
 ## 目录协议
 
@@ -39,7 +43,7 @@ native/
 
 `fama install` 会保留 `native/artifacts/` 目录，因此本地路径依赖安装到 `mod_module/time@0.1.0/` 后仍然可以直接被消费。
 
-在 Linux 和 macOS 上，使用本机 C 编译器和 `fama run --allow-native-source-build examples/projects/time-api` 运行示例。该选项显式允许从包内 POSIX 源码构建原生对象。
+Linux 和 macOS 目录采用相同结构，对象文件名为 `time_common.o` 和 `time_posix.o`。从仓库根目录运行 `cargo run --locked -p fama -- run examples/projects/time-api` 即可测试。
 
 ## 角色分流
 
@@ -72,4 +76,4 @@ native/
 
 ## 版本控制边界
 
-`build/`、`src/build/` 和 `mod_module/` 是本地构建输出或依赖缓存，由 `.gitignore` 排除。`native/artifacts/` 是调用方默认链接所需的发布内容，继续跟踪其中的清单和 OBJ 文件；不要全局忽略所有 `*.obj`。
+`build/`、`src/build/` 和 `mod_module/` 是本地构建输出或依赖缓存，由 `.gitignore` 排除。`native/artifacts/` 是调用方默认链接所需的发布内容，继续跟踪其中的清单及 `.obj`、`.o` 文件。
