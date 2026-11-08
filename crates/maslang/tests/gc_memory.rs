@@ -44,7 +44,7 @@ unsafe impl GlobalAlloc for Counted {
 #[global_allocator]
 static ALLOCATOR: Counted = Counted;
 
-/// 反复分配并丢弃字符串、列表和字典，最后清除语句构造保护并强制回收。
+/// 反复分配并丢弃字符串、列表和字典，强制回收后释放登记表的备用容量以便测量对象载荷。
 fn churn(count: usize) {
     mas_gc_enter();
     for _ in 0..count {
@@ -58,6 +58,7 @@ fn churn(count: usize) {
     mas_gc_leave();
     mas_gc_collect();
     assert_eq!(mas_gc_live_objects(), 0);
+    GC_HEAP.with(|heap| heap.borrow_mut().objects.shrink_to_fit());
 }
 
 /// 验证等值字符串键的查找和更新不产生临时分配，索引仍持有独立拥有的字节。
@@ -137,7 +138,7 @@ fn dense_index_allocations() {
     assert_eq!(LIVE.load(Ordering::Relaxed), before);
 }
 
-/// 验证查询零分配，并对比十倍累计工作量后的存活请求字节，容许 GC 哈希表有限容量波动。
+/// 验证查询零分配，并检查累计工作量增至十倍后，释放登记表容量的堆占用保持不变。
 fn main() {
     dense_index_allocations();
     integer_string_allocations();
@@ -147,7 +148,7 @@ fn main() {
     let first = LIVE.load(Ordering::Relaxed);
     churn(100000);
     let second = LIVE.load(Ordering::Relaxed);
-    assert!(second - first < 65536, "heap grew: {first} -> {second}");
+    assert_eq!(first, second, "heap changed after GC and registry trim");
     gc_shutdown();
     println!("{first} {second}");
 }

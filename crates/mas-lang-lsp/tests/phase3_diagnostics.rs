@@ -101,13 +101,22 @@ fn should_return_diagnostic_for_compiler_frontend_error() {
     );
 }
 
-/// 验证模块装载或文件系统错误会被收敛成诊断，不会让分析服务 panic。
+/// 在独立的临时项目中导入不存在的模块，验证分析服务返回构建诊断。
 #[test]
 fn should_return_diagnostic_for_missing_module_error() {
+    let root = maslang::temp_directory::TemporaryDirectory::create("mas-lsp-missing-module").unwrap();
+    let path = root.path().join("src/main.ms");
+    std::fs::create_dir(path.parent().unwrap()).unwrap();
+    std::fs::write(root.path().join("settings.toml"), "[project]\nname = \"demo\"\n").unwrap();
+    std::fs::write(&path, "").unwrap();
+    let document = OpenDocument {
+        uri: Url::from_file_path(&path).unwrap(),
+        version: 1,
+        path,
+        text: "import missing.module { value }\nfunc main():\n    print(value)\n".into(),
+    };
     let service = AnalysisService::with_settings(CompilerSettings::new(UiLanguage::ZhCn));
-    let analysis = service.analyze_document(&open_document(
-        "import missing.module { value }\nfunc main():\n    print(value)\n",
-    ));
+    let analysis = service.analyze_document(&document);
 
     assert_eq!(analysis.diagnostics.len(), 1);
     let diagnostic = &analysis.diagnostics[0];

@@ -166,11 +166,16 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             )
         })?;
 
-        let target_machine = create_target_machine(
-            source,
-            &TargetTriple::create(crate::native_link::DEFAULT_TARGET_TRIPLE),
-            OptLevel::default(),
-        )?;
+        // Mach-O 对象需要明确的 macOS 平台版本，采用 Rust 对应架构的最低部署版本。
+        let triple = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "arm64-apple-macosx11.0"
+        } else if cfg!(target_os = "macos") {
+            "x86_64-apple-macosx10.12"
+        } else {
+            crate::native_link::DEFAULT_TARGET_TRIPLE
+        };
+        let target_machine =
+            create_target_machine(source, &TargetTriple::create(triple), OptLevel::default())?;
         let module = context.create_module("mascript");
         module.set_triple(&target_machine.get_triple());
         module.set_data_layout(&target_machine.get_target_data().get_data_layout());

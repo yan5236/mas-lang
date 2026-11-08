@@ -29,8 +29,6 @@ jobs:
         run: |
           brew install llvm@19
           echo "LLVM_SYS_191_PREFIX=$(brew --prefix llvm@19)" >> "$GITHUB_ENV"
-      - name: Test workspace
-        run: cargo +stable test --workspace --locked --no-fail-fast
       - name: Verify executable format and output
         env:
           BINARY_FORMAT: ${{ matrix.format }}
@@ -38,3 +36,5 @@ jobs:
           cargo +stable run --locked -p maslang -- build examples/regression/syntax/standalone-hello/main.ms -o "$RUNNER_TEMP/mas-hello"
           file "$RUNNER_TEMP/mas-hello" | grep -F "$BINARY_FORMAT"
           test "$("$RUNNER_TEMP/mas-hello")" = Helloworld
+      - name: Test workspace
+        run: cargo +stable test --workspace --locked --no-fail-fast
