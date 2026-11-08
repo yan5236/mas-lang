@@ -38,7 +38,7 @@ jobs:
         run: |
           pkg="$RUNNER_TEMP/macports.pkg"
           curl --fail --silent --show-error --location --retry 3 \
-            https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-15-Sequoia.pkg \
+            https://distfiles.macports.org/MacPorts/MacPorts-2.12.7-15-Sequoia.pkg \
             -o "$pkg"
           sudo installer -pkg "$pkg" -target /
           sudo /opt/local/bin/port -N -b install llvm-19
