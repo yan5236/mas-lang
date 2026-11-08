@@ -64,7 +64,7 @@ fn optimization_levels_preserve_results_and_run_ir_passes() {
 fn optimized_cli_keeps_errors_and_rejects_invalid_level() {
     let root = TemporaryDirectory::create("mas-optimization-error").unwrap();
     let source = root.path().join("error.ms");
-    fs::write(&source, "var n = 9223372036854775807\nprint(n + 1)\n").unwrap();
+    fs::write(&source, "var n = 9223372036854775807\nfunc main():\n    print(n + 1)\n").unwrap();
     for level in ["-O2", "-O3"] {
         let output = Command::new(env!("CARGO_BIN_EXE_maslang"))
             .arg("run")

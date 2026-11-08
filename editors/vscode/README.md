@@ -1,6 +1,6 @@
-# mascript-lang
+# Mas lang
 
-`mascript-lang` 为 VS Code 提供 Mascript / mas-lang 语言支持。
+Mas lang 扩展为 VS Code 提供 Mas lang 语言支持。
 
 当前扩展通过内置的 `server/mas-lang-lsp.exe` 启动 mas-lang LSP server，不依赖相邻源码仓库路径。安装带有 `server` 目录的扩展后，`.ms` 文件可以直接获得编辑器语言能力。
 

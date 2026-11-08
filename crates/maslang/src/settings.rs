@@ -183,3 +183,15 @@ mod tests {
         assert!(diagnostic.is_some());
     }
 }
+
+/// 判断依赖名称或版本能否安全拼入单层缓存路径；拒绝路径分隔符、盘符和特殊名称。
+pub fn is_dependency_cache_component(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value.trim() == value
+        && !value.ends_with('.')
+        && !value.contains(|character: char| {
+            character.is_control() || r#"/\:<>"|?*@"#.contains(character)
+        })
+}

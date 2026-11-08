@@ -66,8 +66,8 @@ void mas_time_sleep(long long ms);
     - 原生模块向 Mas lang 报告中文运行时错误时复用的统一 abort 辅助函数。
   - 这样后续任意标准库模块只要遵守通用 ABI，就能走同一套原生绑定路径，而不用再为每个模块单独加编译器分支。
 - **C 宿主层实现原则**：
-  - `now_unix()` / `now_unix_millis()`：优先用 `timespec_get(TIME_UTC)` 读取当前 UTC 秒与纳秒，再换算为秒级或毫秒级时间戳。
-  - `now_iso8601()` / `now_rfc2822()` / `now_rfc7231()`：先把 UTC 时间拆成 `struct tm`，再使用固定格式模板输出，禁止依赖宿主本地时区与本地化月份/星期文本。
+  - `unix_seconds()` / `unix_millis()`：优先用 `timespec_get(TIME_UTC)` 读取当前 UTC 秒与纳秒，再换算为秒级或毫秒级时间戳。
+  - `now_utc()` / `now_email_date()` / `now_http_date()`：先把 UTC 时间拆成 `struct tm`，再使用固定格式模板输出，禁止依赖宿主本地时区与本地化月份/星期文本。
   - `monotonic_millis()`：不使用 `clock()` 充当单调时钟，改由平台适配层各自调用合适的单调时间源；这是基于标准 C 文档能力边界得出的实现推断。
   - `sleep(ms)`：不依赖标准 C 缺失的统一睡眠接口，改由平台适配层分别实现“至少等待指定毫秒数”的语义。
   - 负数睡眠、宿主时间读取失败、格式化失败等错误由 C 宿主层通过统一运行时错误辅助函数返回中文消息。
@@ -76,12 +76,12 @@ void mas_time_sleep(long long ms);
   - `fama build` / `maslang` 链路在编译项目依赖树时收集原生源码，按目标平台编译 C 产物，并与 LLVM 生成的对象文件、通用 `bootstrap.rs` 一起链接。
   - `time` 包自己的 C 产物参与链接，不再把时间实现复制进编译器生成的临时 Rust 文件。
 - **数据流 / 控制流**：
-  1. 应用工程 `import time { now_iso8601, monotonic_millis, sleep }`。
+  1. 应用工程 `import time { now_utc, monotonic_millis, sleep }`。
   2. `time` 公开函数调用 `native.ms` 里的私有原生绑定声明。
   3. 编译器把这些声明按“通用原生调用”规则 lowering 为对外部符号的调用。
   4. 链接器把 `stdlib/time` 自带的 C 宿主产物与主程序一并链接。
   5. C 宿主层返回统一 ABI 的 `int` / `string` / `void` 结果。
-  6. `huoqutime` 示例验证导入、调用、格式化与跨平台适配链路。
+  6. `time-api` 示例验证导入、调用、格式化与跨平台适配链路。
 
 ```mermaid
 flowchart TD
@@ -92,7 +92,7 @@ flowchart TD
     E --> F["Windows / POSIX 平台适配"]
     F --> G["宿主系统时间与睡眠 API"]
     E --> H["统一 ABI 返回 int / string / unit"]
-    H --> I["huoqutime 示例与回归验证"]
+    H --> I["time-api 示例与回归验证"]
 ```
 
 ### 2.3 What：落地对象
@@ -102,11 +102,11 @@ flowchart TD
 公开 API 保持不变：
 
 ```ms
-pub func now_unix() -> int
-pub func now_unix_millis() -> int
-pub func now_iso8601() -> string
-pub func now_rfc2822() -> string
-pub func now_rfc7231() -> string
+pub func unix_seconds() -> int
+pub func unix_millis() -> int
+pub func now_utc() -> string
+pub func now_email_date() -> string
+pub func now_http_date() -> string
 pub func monotonic_millis() -> int
 pub func sleep(ms:int)
 ```
@@ -170,4 +170,4 @@ posix = ["native/platform/posix/time_posix.c"]
 - 风险：当前链接链路只负责“LLVM 对象 + Rust bootstrap”，没有原生 C 编译步骤；缓解措施：由 `fama` / 链接器补充统一的源码收集、平台筛选和链接流程，并在规格中单列验证任务。
 - 风险：如果迁移期仍保留 `__time_*` 隐式可用，调用方会继续绕过标准库边界；缓解措施：迁移完成后删除 time 专项内建并补充“直接调用旧符号应失败”的回归验证。
 - 待定：`通用原生绑定能力` 是否需要单独抽成新的规格编号，还是先作为 `005-time-standard-library` 的前置子域实现；需要确认方：语言/构建链路维护者。
-- 待定：包级原生构建配置最终放在 `settings.toml` 还是 `mod.yml` 更符合现有工具链职责；需要确认方：`fama` 维护者。
+- 包级原生构建配置写在 `settings.toml` 的 `[native]` 表。

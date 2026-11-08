@@ -17,7 +17,7 @@ fn project_build_and_run_support_records() {
     let project = root.path().join("demo");
     std::fs::write(
         project.join("src/main.ms"),
-        "struct Person:\n    age: int?\nvar p = Person(null)\np.age = 18\nvar people: list<Person?> = []\npeople.append(p)\nvar named: map<string,Person?> = {\"p\": people[0]}\nprint(named[\"p\"].value.age.value)\n",
+        "struct Person:\n    age: int?\nvar p = Person(null)\nfunc main():\n    p.age = 18\n    var people: list<Person?> = []\n    people.append(p)\n    var named: map<string,Person?> = {\"p\": people[0]}\n    print(named[\"p\"].value.age.value)\n",
     )
     .unwrap();
     let built = Command::new(binary)

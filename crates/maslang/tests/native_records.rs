@@ -43,11 +43,6 @@ Time *time_null(void) { return NULL; }
 fn execute(body: &str, level: OptLevel) -> Output {
     let root = TemporaryDirectory::create("native-records").unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();
-    std::fs::write(
-        root.path().join("mod.yml"),
-        "name: native-records\nversion: 0.1.0\ndependencies: {}\n",
-    )
-    .unwrap();
     std::fs::write(root.path().join("settings.toml"), "[project]\nname = \"native-records\"\nversion = \"0.1.0\"\n[native]\nabi = 1\ninclude = [\".\"]\n[native.sources]\ncommon = [\"host.c\"]\n").unwrap();
     std::fs::write(root.path().join("host.c"), HOST).unwrap();
     std::fs::write(
@@ -103,9 +98,10 @@ func run():
     print(optional.value)
     print(time_optional(false) == null)
     print(time_identity(null) == null)
-run()
-mas_gc_collect()
-print(mas_gc_live_objects())
+func main():
+    run()
+    mas_gc_collect()
+    print(mas_gc_live_objects())
 "#;
     for level in [OptLevel::O0, OptLevel::O3] {
         let output = execute(text, level);
@@ -125,7 +121,7 @@ fn invalid_native_return_ownership_is_rejected() {
         ("time_null", "非空类型返回了 null"),
     ] {
         let output = execute(
-            &format!("extern func {name}() -> Time\nvar t = {name}()\nprint(t.seconds)\n"),
+            &format!("extern func {name}() -> Time\nvar t = {name}()\nfunc main():\n    print(t.seconds)\n"),
             OptLevel::O3,
         );
         assert!(!output.status.success());

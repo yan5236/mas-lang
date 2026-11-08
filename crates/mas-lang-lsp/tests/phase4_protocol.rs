@@ -59,7 +59,7 @@ fn recv_notification_with_method(receiver: &Receiver<Value>, method: &str) -> Va
 #[test]
 fn should_serve_phase_four_language_features_for_validation_project() {
     let sample_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/projects/yanzhenglsp");
+        .join("../../examples/projects/language-server-demo");
     let project_uri = tower_lsp::lsp_types::Url::from_directory_path(&sample_path).unwrap();
     let sample_text = std::fs::read_to_string(sample_path.join("src/main.ms")).unwrap();
     let document_url = project_uri.join("src/main.ms").unwrap();
@@ -291,7 +291,7 @@ fn should_serve_struct_members_and_definition_over_stdio() {
     });
     initialize_server(&mut stdin, &receiver, "file:///validation");
     let uri = "file:///E:/struct-protocol/main.ms";
-    let text = "struct Person:\n    age: int?\nvar p = Person(18)\nprint(p.age.value)\n";
+    let text = "struct Person:\n    age: int?\nvar p = Person(18)\nfunc main():\n    print(p.age.value)\n";
     write_lsp_message(
         &mut stdin,
         json!({"jsonrpc":"2.0", "method":"textDocument/didOpen", "params":{"textDocument":{"uri":uri,"languageId":"mas-lang","version":1,"text":text}}}),
@@ -300,7 +300,7 @@ fn should_serve_struct_members_and_definition_over_stdio() {
     assert_eq!(diagnostics["params"]["diagnostics"], json!([]));
     write_lsp_message(
         &mut stdin,
-        json!({"jsonrpc":"2.0","id":71,"method":"textDocument/definition","params":{"textDocument":{"uri":uri},"position":{"line":3,"character":9}}}),
+        json!({"jsonrpc":"2.0","id":71,"method":"textDocument/definition","params":{"textDocument":{"uri":uri},"position":{"line":4,"character":13}}}),
     );
     let definition = recv_response_with_id(&receiver, 71);
     assert_eq!(definition["result"]["uri"], uri);
@@ -310,7 +310,7 @@ fn should_serve_struct_members_and_definition_over_stdio() {
     );
     write_lsp_message(
         &mut stdin,
-        json!({"jsonrpc":"2.0","id":72,"method":"textDocument/hover","params":{"textDocument":{"uri":uri},"position":{"line":3,"character":9}}}),
+        json!({"jsonrpc":"2.0","id":72,"method":"textDocument/hover","params":{"textDocument":{"uri":uri},"position":{"line":4,"character":13}}}),
     );
     let hover = recv_response_with_id(&receiver, 72);
     assert!(hover["result"].to_string().contains("age: int?"));

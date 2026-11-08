@@ -1,0 +1,13 @@
+dependencies:
+  examplecore:
+    version: 0.1.0
+    source:
+      type: path
+      path: ../dependency-core
+    store_path: mod_module/examplecore@0.1.0
+  examplemath:
+    version: 0.1.0
+    source:
+      type: path
+      path: ../dependency-math
+    store_path: mod_module/examplemath@0.1.0

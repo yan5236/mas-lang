@@ -50,7 +50,7 @@ pub fn analyze_source(
     })
 }
 
-/// 把源码编译为 Windows 可执行文件，并返回最终产物路径。
+/// 分析并编译具有显式 main 入口的 Windows 程序，成功时返回产物路径。
 pub fn compile_to_executable(
     source: &SourceFile,
     settings: &CompilerSettings,
@@ -87,7 +87,7 @@ mod tests {
         CompilerSettings::new(UiLanguage::ZhCn)
     }
 
-    /// 创建一个带 `mod.yml` 和 `src/` 的临时模块项目目录，供模块导入测试复用。
+    /// 创建一个带 `settings.toml` 和 `src/` 的临时模块项目目录，供模块导入测试复用。
     fn create_temp_project(name: &str) -> std::path::PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -95,11 +95,6 @@ mod tests {
             .as_nanos();
         let root = env::temp_dir().join(format!("mascript-llvm-project-{name}-{unique}"));
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(
-            root.join("mod.yml"),
-            "name: demo\nversion: 0.1.0\n\ndependencies: {}\n",
-        )
-        .unwrap();
         fs::write(root.join("mod-lock.yml"), "dependencies: {}\n").unwrap();
         fs::write(
             root.join("settings.toml"),
@@ -129,13 +124,14 @@ mod tests {
         let package_root = root.join("mod_module").join("time@0.1.0");
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/time");
         copy_directory_recursive(&source_root, &package_root);
+        fs::create_dir_all(root.join("mod_module/time@0.0.1/src")).unwrap();
     }
 
     /// 为依赖 `time` 的测试项目写入固定依赖清单，避免每个用例重复拼接样板文件。
     fn write_time_dependency_manifest(root: &Path) {
         fs::write(
-            root.join("mod.yml"),
-            "name: demo\nversion: 0.1.0\n\ndependencies:\n  time:\n    path: ../time\n    version: 0.1.0\n",
+            root.join("settings.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[dependencies]\ntime = { path = \"../time\", version = \"0.1.0\" }\n",
         )
         .unwrap();
         fs::write(
@@ -158,9 +154,42 @@ mod tests {
     /// 校验最小程序能够完整通过前端分析流水线。
     #[test]
     fn should_analyze_minimal_program() {
-        let source = SourceFile::new("<test>", "var value = 1\nprint(value)\n".to_string());
+        let source = SourceFile::new(
+            "<test>",
+            "var value = 1\nfunc main():\n    print(value)\n".to_string(),
+        );
         let output = analyze_source(&source, &zh_settings()).unwrap();
         assert_eq!(output.program.statements.len(), 2);
+    }
+
+    /// 校验库源码可独立分析，但必须包含有效 main 才能编译为可执行程序。
+    #[test]
+    fn requires_main_only_for_executables() {
+        for text in ["func helper():\n    print(1)\n", "extern func main()\n"] {
+            let source = SourceFile::new("<test>", text.to_string());
+            assert!(analyze_source(&source, &zh_settings()).is_ok());
+            let error = compile_to_executable(&source, &zh_settings(), &CompileOptions::new(None))
+                .unwrap_err();
+            assert!(
+                error
+                    .render(UiLanguage::ZhCn, Some(&source))
+                    .contains("必须定义无参数")
+            );
+        }
+    }
+
+    /// 校验顶层代码块也不能调用 print，函数中的 print 由其他回归用例覆盖。
+    #[test]
+    fn rejects_print_outside_functions() {
+        for text in ["print(1)\n", "if true:\n    print(1)\n"] {
+            let source = SourceFile::new("<test>", text.to_string());
+            let error = analyze_source(&source, &zh_settings()).unwrap_err();
+            assert!(
+                error
+                    .render(UiLanguage::ZhCn, Some(&source))
+                    .contains("只能在函数体内")
+            );
+        }
     }
 
     /// 校验原生后端能够把最小程序编译为可执行文件。
@@ -175,7 +204,7 @@ mod tests {
             .join("minimal.ms");
         let source = SourceFile::new(
             source_path.display().to_string(),
-            "print(\"Hello world.\")\n".to_string(),
+            "func main():\n    print(\"Hello world.\")\n".to_string(),
         );
         let binary =
             compile_to_executable(&source, &zh_settings(), &CompileOptions::new(None)).unwrap();
@@ -296,8 +325,8 @@ mod tests {
         let root = create_temp_project("local-prefix");
         fs::create_dir_all(root.join("mod_module").join("time@0.1.0").join("src")).unwrap();
         fs::write(
-            root.join("mod.yml"),
-            "name: demo\nversion: 0.1.0\n\ndependencies:\n  time:\n    path: ../time\n    version: 0.1.0\n",
+            root.join("settings.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[dependencies]\ntime = { path = \"../time\", version = \"0.1.0\" }\n",
         )
         .unwrap();
         fs::write(
@@ -387,7 +416,7 @@ mod tests {
         write_time_dependency_manifest(&root);
         let source = write_time_app_source(
             &root,
-            "import time { monotonic_millis, now_iso8601, now_rfc2822, now_rfc7231, now_unix, now_unix_millis, sleep }\n\nfunc main():\n    print(\"unix=\" + string(now_unix()))\n    print(\"unix_millis=\" + string(now_unix_millis()))\n    print(\"iso8601=\" + now_iso8601())\n    print(\"rfc2822=\" + now_rfc2822())\n    print(\"rfc7231=\" + now_rfc7231())\n    var started = monotonic_millis()\n    sleep(10)\n    print(\"elapsed_ms=\" + string(monotonic_millis() - started))\n",
+            "import time { monotonic_millis, now_utc, now_email_date, now_http_date, unix_seconds, unix_millis, sleep }\n\nfunc main():\n    print(\"unix=\" + string(unix_seconds()))\n    print(\"unix_millis=\" + string(unix_millis()))\n    print(\"iso8601=\" + now_utc())\n    print(\"rfc2822=\" + now_email_date())\n    print(\"rfc7231=\" + now_http_date())\n    var started = monotonic_millis()\n    sleep(10)\n    print(\"elapsed_ms=\" + string(monotonic_millis() - started))\n",
         );
         let output_path = root.join("build").join("demo.exe");
         let binary = compile_to_executable(
@@ -485,7 +514,7 @@ mod tests {
 
         let source = write_time_app_source(
             &root,
-            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+            "import time { unix_seconds }\n\nfunc main():\n    print(unix_seconds())\n",
         );
         let output_path = root.join("build").join("demo.exe");
         let error = compile_to_executable(
@@ -520,7 +549,7 @@ mod tests {
 
         let source = write_time_app_source(
             &root,
-            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+            "import time { unix_seconds }\n\nfunc main():\n    print(unix_seconds())\n",
         );
         let output_path = root.join("build").join("demo.exe");
         let error = compile_to_executable(
@@ -554,7 +583,7 @@ mod tests {
 
         let source = write_time_app_source(
             &root,
-            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+            "import time { unix_seconds }\n\nfunc main():\n    print(unix_seconds())\n",
         );
         let output_path = root.join("build").join("demo.exe");
         let error = compile_to_executable(
@@ -586,7 +615,7 @@ mod tests {
 
         let source = write_time_app_source(
             &root,
-            "import time { now_unix }\n\nfunc main():\n    print(now_unix())\n",
+            "import time { unix_seconds }\n\nfunc main():\n    print(unix_seconds())\n",
         );
         let output_path = root.join("build").join("demo.exe");
         let binary = compile_to_executable(

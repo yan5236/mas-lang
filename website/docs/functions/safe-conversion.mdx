@@ -55,9 +55,10 @@ var result = try_int(true)   // result.ok == true, result.value == 1
 
 ```mas-lang
 var huge = try_int(float("1e20"))
-print(huge.ok)      // false
-var small = try_int(-3.9)
-print(small.value)  // -3
+func main():
+    print(huge.ok)      // false
+    var small = try_int(-3.9)
+    print(small.value)  // -3
 ```
 
 浮点转整数检查的是已经舍入为 64 位浮点数的值，可用范围是 `[-2^63, 2^63)`。例如 `-9223372036854776000.0` 和 `-9223372036854775809.0` 都会先舍入为精确的 `-2^63`，因此转换成功；真正更小的相邻值 `-9223372036854777856.0` 转换失败。`9223372036854775807.0` 则会舍入为 `2^63`，因此转换失败。需要精确保留十进制整数时，使用整数字面量或 `try_int("...")`，不要先经过 `float`。

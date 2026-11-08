@@ -11,10 +11,10 @@ Monotonic clock timing and thread sleep.
 The monotonic clock measures time intervals without being affected by system clock adjustments.
 
 ```mas-lang
-let start: int = monotonic_millis()
+var start: int = monotonic_millis()
 
 // perform some work...
-let elapsed: int = monotonic_millis() - start
+var elapsed: int = monotonic_millis() - start
 // elapsed is the duration in milliseconds
 ```
 

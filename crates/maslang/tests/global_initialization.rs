@@ -33,7 +33,7 @@ fn rejects_reads_before_global_declaration() {
         ("\"hello\"", "xs", "string"),
     ] {
         let text = format!(
-            "func get() -> {result_type}:\n    return {expression}\nfunc indirect() -> {result_type}:\n    return get()\nprint(indirect())\nvar xs = {initializer}\n"
+            "func get() -> {result_type}:\n    return {expression}\nfunc indirect() -> {result_type}:\n    return get()\nvar ignored = indirect()\nvar xs = {initializer}\nfunc main():\n    print(ignored)\n"
         );
         let output = execute(&text);
         assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -49,12 +49,12 @@ fn rejects_reads_before_global_declaration() {
 fn rejects_writes_and_recursive_initialization() {
     for assignment in ["xs = 3", "xs += 1"] {
         let output = execute(&format!(
-            "func set():\n    {assignment}\nset()\nvar xs = 1\n"
+            "func set():\n    {assignment}\nset()\nvar xs = 1\nfunc main():\n    print(xs)\n"
         ));
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("全局变量尚未初始化"));
     }
-    let output = execute("func get() -> int:\n    return xs\nvar xs = get()\n");
+    let output = execute("func get() -> int:\n    return xs\nvar xs = get()\nfunc main():\n    print(xs)\n");
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("全局变量尚未初始化"));
 }
@@ -63,7 +63,7 @@ fn rejects_writes_and_recursive_initialization() {
 #[test]
 fn initialized_globals_and_shadowed_parameters_work() {
     let output = execute(
-        "func local(xs:int) -> int:\n    return xs\nprint(local(7))\nvar xs = 2\nfunc update():\n    xs += 3\nupdate()\nprint(xs)\nvar values = [1, 2]\nfunc count() -> int:\n    return len(values)\nprint(count())\n",
+        "func local(xs:int) -> int:\n    return xs\nvar xs = 2\nfunc update():\n    xs += 3\nvar values = [1, 2]\nfunc count() -> int:\n    return len(values)\nfunc main():\n    print(local(7))\n    update()\n    print(xs)\n    print(count())\n",
     );
     assert!(output.status.success(), "{output:?}");
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "7\n5\n2\n");

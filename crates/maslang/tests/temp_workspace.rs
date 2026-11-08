@@ -54,7 +54,7 @@ fn compiler_cleans_success_failure_and_parallel_builds() {
     let temp = root.path().join("temp");
     fs::create_dir(&temp).unwrap();
     let source = root.path().join("main.ms");
-    fs::write(&source, "print(42)\n").unwrap();
+    fs::write(&source, "func main():\n    print(42)\n").unwrap();
     std::thread::scope(|scope| {
         let workers: Vec<_> = (0..6)
             .map(|i| {
@@ -86,14 +86,14 @@ fn compiler_cleans_success_failure_and_parallel_builds() {
     let run = compiler(&["run".as_ref(), source.as_os_str()], &temp);
     assert!(run.status.success(), "{run:?}");
     assert_empty(&temp);
-    fs::write(&source, "print(10 %/% 0)\n").unwrap();
+    fs::write(&source, "func main():\n    print(10 %/% 0)\n").unwrap();
     let run = compiler(&["run".as_ref(), source.as_os_str()], &temp);
     assert!(!run.status.success(), "{run:?}");
     assert!(String::from_utf8_lossy(&run.stderr).contains("整数除零"));
     assert_empty(&temp);
     fs::write(
         &source,
-        "extern func missing_cleanup_test_symbol()\nmissing_cleanup_test_symbol()\n",
+        "extern func missing_cleanup_test_symbol()\nfunc main():\n    missing_cleanup_test_symbol()\n",
     )
     .unwrap();
     let output_path = root.path().join("missing.exe");

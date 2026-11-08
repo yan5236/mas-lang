@@ -2,11 +2,6 @@
 name = "time"
 version = "0.1.0"
 
-[build]
-entry = "src/main.ms"
-output = "build"
-opt-level = 2
-
 [native]
 abi = 1
 source_fallback = "explicit"

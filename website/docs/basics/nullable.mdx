@@ -33,9 +33,10 @@ else:
 ```mas-lang
 var saved: int? = null
 var count = 0
-if saved != null:
-    count = saved.value
-print(count) // 0
+func main():
+    if saved != null:
+        count = saved.value
+    print(count) // 0
 ```
 
 `and`、`or` 保持短路规则，所以下面也是安全的：
@@ -88,10 +89,11 @@ var profile = Profile("小明", null)
 var enabled: bool? = false
 var temperature: float? = 0.0
 var items: list<int>? = []
-show_score(90)
-show_score(null)
-print(enabled.value) // false 是有效值
-print(len(items.value)) // 0：空列表依然是有效值
+func main():
+    show_score(90)
+    show_score(null)
+    print(enabled.value) // false 是有效值
+    print(len(items.value)) // 0：空列表依然是有效值
 ```
 
 问号也可以用于结构体、字符串以及整个列表、字典或数组：例如 `Profile?`、`string?`、`list<int>?`。
@@ -127,14 +129,15 @@ print(len(items.value)) // 0：空列表依然是有效值
 
 ```mas-lang
 var scores: list<int?> = [90, null]
-scores.append(100)
-scores[1] = 80
-print(scores[1].value) // 80
-print(scores.contains(90)) // true：可空基础值按内容查找
+func main():
+    scores.append(100)
+    scores[1] = 80
+    print(scores[1].value) // 80
+    print(scores.contains(90)) // true：可空基础值按内容查找
 
-var cached: map<string,int?> = {"today": null}
-cached["today"] = 42
-print(cached["today"].value)
+    var cached: map<string,int?> = {"today": null}
+    cached["today"] = 42
+    print(cached["today"].value)
 ```
 
 往 `T?` 元素位置写入 `T` 会自动提升，写入 `null` 表示缺失。读取时保留 `T?` 类型，需要判空后用 `.value`。字典中“键不存在”和“键对应的值为 null”不同：前者下标访问仍会报错，先用 `contains(key)` 判断。

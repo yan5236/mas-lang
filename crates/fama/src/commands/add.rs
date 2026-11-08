@@ -6,7 +6,7 @@ use crate::manifest::{
 };
 use crate::project::resolve_project_root;
 
-/// 执行 `fama add`，把本地路径依赖写入当前项目的 `mod.yml`。
+/// 执行 `fama add`，把本地路径依赖写入当前项目的 `settings.toml`。
 pub fn run(args: AddArgs) -> Result<(), FamaError> {
     let project_root = resolve_project_root(&args.project_dir)?;
     let dependency_root = resolve_dependency_path(&project_root, &args.dependency_path)?;

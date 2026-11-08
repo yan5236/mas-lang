@@ -6,20 +6,20 @@ sidebar_position: 2
 
 获取当前 Unix 时间戳。
 
-## now_unix — 当前 Unix 时间戳（秒）
+## unix_seconds — 当前 Unix 时间戳（秒）
 
 ```mas-lang
-let ts: int = now_unix()
+var ts: int = unix_seconds()
 // 示例：1717050800
 ```
 
 返回自 Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。适用于日志记录、时间窗口校验、签名等场景。
 
-## now_unix_millis — 当前 Unix 时间戳（毫秒）
+## unix_millis — 当前 Unix 时间戳（毫秒）
 
 ```mas-lang
-let ts: int = now_unix_millis()
+var ts: int = unix_millis()
 // 示例：1717050800123
 ```
 
-返回自 Unix 纪元以来的毫秒数，精度高于 `now_unix`。适用于需要更高时间精度的场景。
+返回自 Unix 纪元以来的毫秒数，精度高于 `unix_seconds`。适用于需要更高时间精度的场景。

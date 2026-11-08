@@ -56,13 +56,14 @@ func churn(n:int) -> int:
     mas_gc_collect()
     print(mas_gc_live_objects() < 40)
     return total
-print(churn(10000))
-mas_gc_collect()
-print(mas_gc_live_objects())
-print(churn(1000000))
-mas_gc_collect()
-print(mas_gc_live_objects())
-print(mas_gc_collections() > 10)
+func main():
+    print(churn(10000))
+    mas_gc_collect()
+    print(mas_gc_live_objects())
+    print(churn(1000000))
+    mas_gc_collect()
+    print(mas_gc_live_objects())
+    print(mas_gc_collections() > 10)
 "#,
     );
     assert_eq!(output, "true\n20000\n0\ntrue\n2000000\n0\ntrue\n");
@@ -133,10 +134,11 @@ func replace() -> string:
 func pair(a:string, b:string) -> string:
     mas_gc_collect()
     return a + b
-print(pair(global, replace()))
-global = "again" + "!"
-global += replace()
-print(global)
+func main():
+    print(pair(global, replace()))
+    global = "again" + "!"
+    global += replace()
+    print(global)
 "#,
     );
     assert_eq!(output, "old!tail\nagain!tail\n");
@@ -170,9 +172,10 @@ func churn():
         var value = combine("item-" + string(i), pure(10), indirect(i))
         if i == 999:
             print(value)
-churn()
-mas_gc_collect()
-print(mas_gc_live_objects())
+func main():
+    churn()
+    mas_gc_collect()
+    print(mas_gc_live_objects())
 "#,
     );
     assert_eq!(output, "item-999:55:9\n0\n");

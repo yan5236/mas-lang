@@ -65,9 +65,10 @@ struct Person:
 var alice = Person("Alice")
 var people: map<string,Person?> = {"leader": alice, "helper": null}
 var scores: map<Person,int> = {alice: 90}
-alice.name = "Alice Chen"
-print(scores[alice]) // 90：修改字段不会改变对象身份
-print(scores.contains(Person("Alice Chen"))) // false：这是另一个对象
+func main():
+    alice.name = "Alice Chen"
+    print(scores[alice]) // 90：修改字段不会改变对象身份
+    print(scores.contains(Person("Alice Chen"))) // false：这是另一个对象
 ```
 
 每个字典的键类型一致，值类型也一致。值可为基础值、结构体、可空值、列表或字典；`keys()` 和 `values()` 保留相应元素类型及共享引用。键支持基础类型或结构体引用，目前不接受可空键、容器键。固定数组值请改用列表。

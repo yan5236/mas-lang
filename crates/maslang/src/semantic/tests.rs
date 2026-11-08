@@ -18,7 +18,7 @@ fn analyze(text: &str) -> Result<(), String> {
 /// 校验条件表达式必须是布尔值。
 #[test]
 fn should_reject_non_boolean_if_condition() {
-    let error = analyze("if 1:\n    print(1)\n").unwrap_err();
+    let error = analyze("func main():\n    if 1:\n        print(1)\n").unwrap_err();
     assert!(error.contains("条件表达式必须是布尔值"));
 }
 
@@ -47,7 +47,7 @@ fn should_reject_integer_variable_receiving_true_division_result() {
 /// 校验 `%` 和 `%/%` 只接受整数运算数。
 #[test]
 fn should_reject_non_integer_modulo() {
-    let error = analyze("print(5.0 % 2)\n").unwrap_err();
+    let error = analyze("func main():\n    print(5.0 % 2)\n").unwrap_err();
     assert!(error.contains("只支持整数"));
 }
 
@@ -75,14 +75,14 @@ fn should_reject_empty_list_without_annotation() {
 /// 校验列表遍历会把循环变量绑定为元素类型。
 #[test]
 fn should_accept_for_each_on_list() {
-    analyze("var items:list<int> = [1, 2]\nfor item in items:\n    print(item)\n").unwrap();
+    analyze("var items:list<int> = [1, 2]\nfunc main():\n    for item in items:\n        print(item)\n").unwrap();
 }
 
 /// 校验字典遍历会把循环变量分别绑定为键类型和值类型。
 #[test]
 fn should_accept_for_each_on_map() {
     analyze(
-        "var user:map<string,int> = {\"age\": 18}\nfor key, value in user:\n    print(key)\n    print(value)\n",
+        "var user:map<string,int> = {\"age\": 18}\nfunc main():\n    for key, value in user:\n        print(key)\n        print(value)\n",
     )
     .unwrap();
 }
@@ -104,7 +104,7 @@ fn should_reject_empty_map_without_annotation() {
 /// 校验字典下标类型必须和声明的键类型一致。
 #[test]
 fn should_reject_invalid_map_index_type() {
-    let error = analyze("var user:map<string,int> = {\"age\": 18}\nprint(user[1])\n").unwrap_err();
+    let error = analyze("var user:map<string,int> = {\"age\": 18}\nfunc main():\n    print(user[1])\n").unwrap_err();
     assert!(error.contains("字典下标的键类型不匹配"));
 }
 
@@ -129,11 +129,11 @@ fn should_accept_string_methods() {
 #[test]
 fn should_reject_string_method_on_non_string_targets() {
     let cases = [
-        ("var value:int = 1\nprint(value.trim())\n", "int"),
-        ("var value:float = 1.5\nprint(value.trim())\n", "float"),
-        ("var value:bool = true\nprint(value.trim())\n", "bool"),
+        ("var value:int = 1\nfunc main():\n    print(value.trim())\n", "int"),
+        ("var value:float = 1.5\nfunc main():\n    print(value.trim())\n", "float"),
+        ("var value:bool = true\nfunc main():\n    print(value.trim())\n", "bool"),
         (
-            "var value:array<int,2>\nprint(value.trim())\n",
+            "var value:array<int,2>\nfunc main():\n    print(value.trim())\n",
             "array<int,2>",
         ),
     ];
@@ -162,18 +162,18 @@ fn should_reject_string_only_method_on_list_and_map() {
 #[test]
 fn should_reject_invalid_string_method_arguments() {
     let missing_argument =
-        analyze("var text = \"Mas lang\"\nprint(text.contains())\n").unwrap_err();
+        analyze("var text = \"Mas lang\"\nfunc main():\n    print(text.contains())\n").unwrap_err();
     assert!(missing_argument.contains("字符串方法 `contains` 需要且只接受一个 string 参数"));
 
     let invalid_type =
-        analyze("var text = \"Mas lang\"\nprint(text.replace(\"M\", 1))\n").unwrap_err();
+        analyze("var text = \"Mas lang\"\nfunc main():\n    print(text.replace(\"M\", 1))\n").unwrap_err();
     assert!(invalid_type.contains("字符串方法 `replace` 的参数类型必须是 string"));
 }
 
 /// 校验数组默认声明和元素访问能够通过语义分析。
 #[test]
 fn should_accept_array_declaration_and_index() {
-    analyze("var fixed:array<int,3>\nvar values = array<int,3>(1, 2, 3)\nprint(values[1])\n")
+    analyze("var fixed:array<int,3>\nvar values = array<int,3>(1, 2, 3)\nfunc main():\n    print(values[1])\n")
         .unwrap();
 }
 
@@ -204,7 +204,7 @@ fn should_reject_non_scalar_convert_builtin_argument() {
 #[test]
 fn should_accept_safe_convert_builtins() {
     analyze(
-        "var parsed = try_int(\"123\")\nif parsed.ok:\n    print(parsed.value)\nvar float_parsed = try_float(\"3.14\")\nif float_parsed.ok:\n    print(float_parsed.value)\nvar bool_parsed = try_bool(\"true\")\nif bool_parsed.ok:\n    print(bool_parsed.value)\n",
+        "var parsed = try_int(\"123\")\nfunc main():\n    if parsed.ok:\n        print(parsed.value)\n    var float_parsed = try_float(\"3.14\")\n    if float_parsed.ok:\n        print(float_parsed.value)\n    var bool_parsed = try_bool(\"true\")\n    if bool_parsed.ok:\n        print(bool_parsed.value)\n",
     )
     .unwrap();
 }
@@ -213,7 +213,7 @@ fn should_accept_safe_convert_builtins() {
 #[test]
 fn should_accept_extern_function_declarations() {
     analyze(
-        "extern func host_now() -> int\nextern func host_sleep(ms:int)\nextern func host_name() -> string\nvar unix:int = host_now()\nhost_sleep(1)\nprint(host_name())\nprint(unix)\n",
+        "extern func host_now() -> int\nextern func host_sleep(ms:int)\nextern func host_name() -> string\nvar unix:int = host_now()\nfunc main():\n    host_sleep(1)\n    print(host_name())\n    print(unix)\n",
     )
     .unwrap();
 }
@@ -221,7 +221,7 @@ fn should_accept_extern_function_declarations() {
 /// 校验 `extern func` 也会复用普通函数调用的参数数量与类型检查逻辑。
 #[test]
 fn should_reject_invalid_extern_function_arguments() {
-    let count_error = analyze("extern func host_now() -> int\nprint(host_now(1))\n").unwrap_err();
+    let count_error = analyze("extern func host_now() -> int\nfunc main():\n    print(host_now(1))\n").unwrap_err();
     assert!(count_error.contains("期望 0 个参数"));
 
     let type_error = analyze("extern func host_sleep(ms:int)\nhost_sleep(\"1\")\n").unwrap_err();
@@ -231,20 +231,20 @@ fn should_reject_invalid_extern_function_arguments() {
 /// 校验旧的 `__time_*` 入口在迁移完成后会以未声明函数的方式失败，避免继续绕过标准库边界。
 #[test]
 fn should_reject_legacy_time_builtins_after_migration() {
-    let error = analyze("print(__time_now_unix())\n").unwrap_err();
+    let error = analyze("func main():\n    print(__time_now_unix())\n").unwrap_err();
     assert!(error.contains("未声明函数 `__time_now_unix`"));
 }
 
 /// 校验只有安全转换结果才允许访问 `ok/value` 属性。
 #[test]
 fn should_reject_property_access_on_non_safe_convert_value() {
-    let error = analyze("var value = 1\nprint(value.ok)\n").unwrap_err();
+    let error = analyze("var value = 1\nfunc main():\n    print(value.ok)\n").unwrap_err();
     assert!(error.contains("当前表达式不支持属性访问"));
 }
 
 /// 校验模板字符串中的字符串与数值插值都能复用现有类型转换链路通过语义分析。
 #[test]
 fn should_accept_template_string_interpolation() {
-    analyze("var name = \"Mas lang\"\nvar count = 3\nprint(\"hello ${name}, count=${count}\")\n")
+    analyze("var name = \"Mas lang\"\nvar count = 3\nfunc main():\n    print(\"hello ${name}, count=${count}\")\n")
         .unwrap();
 }

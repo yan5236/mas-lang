@@ -35,14 +35,14 @@
 ## 阶段 4：工程化工具链与项目骨架
 
 - [x] 4.1 实现 `fama new` 项目骨架生成，创建 `src/`、`mod_module/` 与 `main.ms` [关联: design.md 2.2] [验证 Req 4]
-- [x] 4.2 实现 `fama new` 默认写入 `mod.yml`、`mod-lock.yml` 与 `settings.toml` [依赖: 4.1] [验证 Req 4]
+- [x] 4.2 实现 `fama new` 默认写入 `settings.toml` 与 `mod-lock.yml` [依赖: 4.1] [验证 Req 4]
 - [x] 4.3 实现 `fama build` 读取 `settings.toml` 的入口与输出路径并生成 EXE [依赖: 4.2] [验证 Req 4]
 - [x] 4.4 实现 `fama run` 复用 build 流程并执行产物 [依赖: 4.3] [验证 Req 4]
 - [x] 4.5 将 `fama build` 从遗留 `compiler` 切换到 `maslang`（支持通过 `~/.fama/setting.toml` 的 `compiler.binary` 配置外部编译器路径，未配置时回退到内嵌主编译器） [依赖: 1.5, 4.3] [验证 Req 4, Req 6]
 - [x] 4.6 将 `fama run` 切换到 `maslang` 产物链路 [依赖: 4.5] [验证 Req 4]
 - [x] 4.7 实现 `fama add` 依赖写入命令（当前支持本地路径依赖） [依赖: 4.2] [验证 Req 4, Req 5]
 - [x] 4.8 实现 `fama install` 依赖下载与缓存命令（当前支持本地路径依赖的平铺安装与锁文件回写） [依赖: 4.7] [验证 Req 4, Req 5]
-- [x] 4.9 实现 `mod.yml` 解析、`mod-lock.yml` 更新与真实依赖缓存管理（当前版本在 `mod_module/<name>@<version>` 中平铺缓存，冲突时直接失败） [依赖: 4.7, 4.8] [验证 Req 4, Req 5]
+- [x] 4.9 实现 `settings.toml` 解析、`mod-lock.yml` 更新与真实依赖缓存管理（当前版本在 `mod_module/<name>@<version>` 中平铺缓存，冲突时直接失败） [依赖: 4.7, 4.8] [验证 Req 4, Req 5]
 - [ ] 4.10 将 `settings.toml` 中的 `opt-level` 接入真实编译优化链路 [依赖: 4.5] [验证 Req 4, Req 6]
 
 ## 阶段 5：模块系统与标准库生态
@@ -51,7 +51,7 @@
 - [x] 5.2 实现 `src` 本地模块根目录、文件到模块路径映射与 `index.ms` 聚合入口 [依赖: 5.1] [验证 Req 5]
 - [x] 5.3 实现 `pub`、`export import` 与 `local.` 命名冲突处理 [依赖: 5.2] [验证 Req 5]
 - [x] 5.4 实现循环依赖检测与模块装载顺序约束 [依赖: 5.2] [验证 Req 5]
-- [ ] 5.5 实现 `std.io`、`std.time`、`std.fs`、`std.net`、`std.math` 标准库入口（当前已交付与 `std.time` 映射兼容的 `time` 依赖包最小 API：`now_unix`、`now_unix_millis`、`now_iso8601`、`now_rfc2822`、`now_rfc7231`、`monotonic_millis`、`sleep`；`time` 已迁移为“标准库自带 C 宿主层 + 通用原生绑定”模式，旧 `__time_*` 编译器内建已移除；其余标准库入口仍待完成） [依赖: 5.1] [验证 Req 5]
+- [ ] 5.5 实现 `std.io`、`std.time`、`std.fs`、`std.net`、`std.math` 标准库入口（当前已交付与 `std.time` 映射兼容的 `time` 依赖包最小 API：`unix_seconds`、`unix_millis`、`now_utc`、`now_email_date`、`now_http_date`、`monotonic_millis`、`sleep`；`time` 已迁移为“标准库自带 C 宿主层 + 通用原生绑定”模式，旧 `__time_*` 编译器内建已移除；其余标准库入口仍待完成） [依赖: 5.1] [验证 Req 5]
 
 ## 阶段 6：错误处理与未来特性
 

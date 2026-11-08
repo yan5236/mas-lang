@@ -169,7 +169,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    /// 校验函数实参与返回类型；len 接受字符串、列表、字典和定长数组。
+    /// 推导具名函数调用的返回类型，校验实参，并禁止在函数体外调用 print。
     pub(super) fn infer_call_type(
         &mut self,
         callee: &Expr,
@@ -187,6 +187,12 @@ impl<'a> SemanticAnalyzer<'a> {
             return self.infer_constructor(name, arguments, span);
         }
         if name == "print" {
+            if self.current_return_type.is_none() {
+                return Err(CompilerError::semantic_message(
+                    "`print` 只能在函数体内调用，请将输出放入 `main` 或其他函数",
+                    span,
+                ));
+            }
             if arguments.len() != 1 {
                 return Err(CompilerError::semantic_message(
                     "内建函数 `print` 需要且只接受一个参数",

@@ -28,7 +28,7 @@ fn at(text: &str, marker: &str, extra: usize) -> Position {
 /// 结构体字段、可空函数签名和有效程序诊断复用编译器，类型和字段定位保持原始名称。
 #[test]
 fn diagnostics_symbols_hover_and_definition() {
-    let text = "// 中文\nstruct Person:\n    age: int?\nfunc create() -> Person:\n    return Person(18)\nvar person = create()\nprint(person.age.value)\n";
+    let text = "// 中文\nstruct Person:\n    age: int?\nfunc create() -> Person:\n    return Person(18)\nvar person = create()\nfunc main():\n    print(person.age.value)\n";
     let analysis = AnalysisService::with_settings(CompilerSettings::default_settings())
         .analyze_document(&document(text));
     assert!(
@@ -109,10 +109,10 @@ fn same_named_fields_resolve_by_receiver() {
 /// 字段声明本身可悬停，字符串和注释中的同名文字不能伪装成类型定义引用。
 #[test]
 fn declaration_hover_and_non_code_definition() {
-    let text = "struct Person:\n    age: int?\nprint(\"Person\")\n// Person\n";
+    let text = "struct Person:\n    age: int?\nfunc main():\n    print(\"Person\")\n    // Person\n";
     let analysis = AnalysisService::new().analyze_document(&document(text));
     let hover = hover_for(text, &analysis.symbols, Position::new(1, 5)).unwrap();
     assert!(format!("{:?}", hover.contents).contains("age: int?"));
-    assert!(definition_range(text, Position::new(2, 9)).is_none());
-    assert!(definition_range(text, Position::new(3, 5)).is_none());
+    assert!(definition_range(text, Position::new(3, 15)).is_none());
+    assert!(definition_range(text, Position::new(4, 7)).is_none());
 }

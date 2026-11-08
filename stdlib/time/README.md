@@ -1,5 +1,11 @@
 # time 标准库原生产物说明
 
+通过 `src/index.ms` 导入公开函数：
+
+- `unix_seconds()`、`unix_millis()` 返回当前 Unix 时间戳。
+- `now_utc()`、`now_email_date()`、`now_http_date()` 返回 UTC 日期时间、邮件日期和 HTTP 日期字符串。
+- `monotonic_millis()` 用于计算耗时，`sleep(ms)` 按毫秒暂停执行。
+
 ## 支持矩阵
 
 当前 `time` 包默认提供以下预编译原生产物：
@@ -43,9 +49,9 @@ native/
 
 维护者：
 
-- 在需要刷新原生产物时执行 `fama build --allow-native-source-build`
+- 在 `examples/projects/time-api` 中执行 `fama build --allow-native-source-build` 刷新已安装的 time 包
 - 编译器会在校验失败或产物缺失时，使用 `native.sources` 的 C 源文件重新生成对象文件和 `manifest.toml`
-- 刷新后的产物会直接回写到 `native/artifacts/<target>/`
+- 刷新后的产物会写到依赖缓存的 `native/artifacts/<target>/`，发布前需复制回标准库包
 
 ## 发布检查
 

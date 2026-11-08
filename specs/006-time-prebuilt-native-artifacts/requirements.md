@@ -41,7 +41,7 @@
 
 #### 验收标准 (EARS格式)
 
-1. WHEN 团队引入预编译产物分发 THEN 系统 SHALL 保持 `now_unix`、`now_unix_millis`、`now_iso8601`、`now_rfc2822`、`now_rfc7231`、`monotonic_millis`、`sleep` 这些公开函数名与返回类型不变。
+1. WHEN 团队引入预编译产物分发 THEN 系统 SHALL 保持 `unix_seconds`、`unix_millis`、`now_utc`、`now_email_date`、`now_http_date`、`monotonic_millis`、`sleep` 这些公开函数名与返回类型不变。
 2. WHEN 链接器消费预编译对象文件 THEN 系统 SHALL 继续沿用 `005-time-standard-library` 已定义的统一原生 ABI，而不是为 `time` 单独发明新的调用约定。
 3. IF 预编译产物的 ABI 版本与当前编译器期望不匹配 THEN 系统 SHALL 阻止链接，并要求维护者先刷新对应目标的预编译产物。
 4. WHERE 后续 `time` 包新增宿主函数但未改变 ABI 总版本 WHEN 维护者更新包内源码与预编译产物 THEN 系统 SHALL 不要求新增 time 专项编译器业务分支。

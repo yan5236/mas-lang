@@ -39,11 +39,11 @@ fn fails_at_source(text: &str, message: &str) {
 fn integer_zero_divisors_are_diagnosed() {
     for op in ["%/%", "%"] {
         fails_at_source(
-            &format!("func div(n:int) -> int:\n    return 10 {op} n\nprint(div(0))\n"),
+            &format!("func div(n:int) -> int:\n    return 10 {op} n\nfunc main():\n    print(div(0))\n"),
             "整数除零",
         );
     }
-    fails_at_source("var n = 3\nn %= 0\nprint(n)\n", "整数除零");
+    fails_at_source("var n = 3\nfunc main():\n    n %= 0\n    print(n)\n", "整数除零");
 }
 
 /// 固定数组拒绝上界、负数和极大动态下标，所有元素类型都应在读取前检查。
@@ -52,13 +52,13 @@ fn array_bounds_are_checked() {
     for index in ["3", "5", "-1", "9223372036854775807"] {
         fails_at_source(
             &format!(
-                "func read(i:int) -> int:\n    var arr = array<int,3>(10,20,30)\n    return arr[i]\nprint(read({index}))\n"
+                "func read(i:int) -> int:\n    var arr = array<int,3>(10,20,30)\n    return arr[i]\nfunc main():\n    print(read({index}))\n"
             ),
             "数组下标越界",
         );
     }
     fails_at_source(
-        "var arr = array<string,1>(\"hello\")\nprint(arr[1])\n",
+        "var arr = array<string,1>(\"hello\")\nfunc main():\n    print(arr[1])\n",
         "数组下标越界",
     );
 }
@@ -75,10 +75,10 @@ fn integer_overflow_is_diagnosed() {
         "int(\"-9223372036854775808\") % -1",
         "--9223372036854775808",
     ] {
-        fails_at_source(&format!("print({expr})\n"), "整数溢出");
+        fails_at_source(&format!("func main():\n    print({expr})\n"), "整数溢出");
     }
     fails_at_source(
-        "var n = 9223372036854775807\nn += 1\nprint(n)\n",
+        "var n = 9223372036854775807\nfunc main():\n    n += 1\n    print(n)\n",
         "整数溢出",
     );
     for op in ["+", "*", "-"] {
@@ -89,7 +89,7 @@ fn integer_overflow_is_diagnosed() {
         };
         fails_at_source(
             &format!(
-                "func calc(a:int, b:int) -> int:\n    return a {op} b\nprint(calc({left}, 2))\n"
+                "func calc(a:int, b:int) -> int:\n    return a {op} b\nfunc main():\n    print(calc({left}, 2))\n"
             ),
             "整数溢出",
         );
@@ -100,7 +100,7 @@ fn integer_overflow_is_diagnosed() {
 #[test]
 fn float_integer_conversions_check_range() {
     let output = execute(
-        "func check(x:float):\n    var r = try_int(x)\n    print(r.ok)\n    print(r.value)\ncheck(float(\"1e20\"))\ncheck(float(\"-1e20\"))\ncheck(float(\"NaN\"))\ncheck(float(\"inf\"))\ncheck(float(\"-inf\"))\ncheck(9223372036854775808.0)\ncheck(-9223372036854775808.0)\ncheck(9223372036854774784.0)\ncheck(-3.9)\n",
+        "func check(x:float):\n    var r = try_int(x)\n    print(r.ok)\n    print(r.value)\nfunc main():\n    check(float(\"1e20\"))\n    check(float(\"-1e20\"))\n    check(float(\"NaN\"))\n    check(float(\"inf\"))\n    check(float(\"-inf\"))\n    check(9223372036854775808.0)\n    check(-9223372036854775808.0)\n    check(9223372036854774784.0)\n    check(-3.9)\n",
     );
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
@@ -112,7 +112,7 @@ fn float_integer_conversions_check_range() {
     );
     for value in ["1e20", "NaN", "inf", "-inf"] {
         fails_at_source(
-            &format!("print(int(float(\"{value}\")))\n"),
+            &format!("func main():\n    print(int(float(\"{value}\")))\n"),
             "浮点数无法转换为整数",
         );
     }
@@ -122,7 +122,7 @@ fn float_integer_conversions_check_range() {
 #[test]
 fn nan_inequality_is_consistent() {
     let output = execute(
-        "var n = 0.0 / 0.0\nprint(n != 1.0)\nprint(n != n)\nprint(n == n)\nprint(float(\"inf\") == float(\"inf\"))\nprint(0.0 == -0.0)\nprint(1.5 != 1.5)\n",
+        "var n = 0.0 / 0.0\nfunc main():\n    print(n != 1.0)\n    print(n != n)\n    print(n == n)\n    print(float(\"inf\") == float(\"inf\"))\n    print(0.0 == -0.0)\n    print(1.5 != 1.5)\n",
     );
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
@@ -134,7 +134,7 @@ fn nan_inequality_is_consistent() {
 /// 最小整数字面量无精度损失地编译；越界正负字面量及减法右侧越界值仍被拒绝。
 #[test]
 fn minimum_integer_literal_is_exact() {
-    let output = execute("print(-9223372036854775808)\nprint(9223372036854775807)\n");
+    let output = execute("func main():\n    print(-9223372036854775808)\n    print(9223372036854775807)\n");
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -146,7 +146,7 @@ fn minimum_integer_literal_is_exact() {
         "0 - 9223372036854775808",
         "18446744073709551616",
     ] {
-        let source = SourceFile::new("literal.ms", format!("print({expression})\n"));
+        let source = SourceFile::new("literal.ms", format!("func main():\n    print({expression})\n"));
         assert!(
             analyze_source(&source, &CompilerSettings::new(UiLanguage::ZhCn)).is_err(),
             "{expression}"
@@ -158,7 +158,7 @@ fn minimum_integer_literal_is_exact() {
 #[test]
 fn valid_arithmetic_and_array_edges_work() {
     let output = execute(
-        "var arr = array<int,3>(10,20,30)\nprint(arr[0])\nprint(arr[2])\nprint(9223372036854775806 + 1)\nprint(int(\"-9223372036854775808\") + 1)\nprint(-7 %/% 3)\nprint(-7 % 3)\nprint(7 * -3)\nprint(int(-3.9))\n",
+        "var arr = array<int,3>(10,20,30)\nfunc main():\n    print(arr[0])\n    print(arr[2])\n    print(9223372036854775806 + 1)\n    print(int(\"-9223372036854775808\") + 1)\n    print(-7 %/% 3)\n    print(-7 % 3)\n    print(7 * -3)\n    print(int(-3.9))\n",
     );
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
@@ -171,7 +171,7 @@ fn valid_arithmetic_and_array_edges_work() {
 #[test]
 fn float_rounding_preserves_exact_minimum_contract() {
     let output = execute(
-        "var minimum = -9223372036854775808.0\nprint(-9223372036854776000.0 == minimum)\nprint(-9223372036854775809.0 == minimum)\nprint(int(-9223372036854776000.0))\nvar rounded = try_int(-9223372036854775809.0)\nprint(rounded.ok)\nprint(rounded.value)\nvar below = try_int(-9223372036854777856.0)\nprint(below.ok)\nprint(9223372036854775807.0 == 9223372036854775808.0)\nvar above = try_int(9223372036854775807.0)\nprint(above.ok)\n",
+        "var minimum = -9223372036854775808.0\nfunc main():\n    print(-9223372036854776000.0 == minimum)\n    print(-9223372036854775809.0 == minimum)\n    print(int(-9223372036854776000.0))\n    var rounded = try_int(-9223372036854775809.0)\n    print(rounded.ok)\n    print(rounded.value)\n    var below = try_int(-9223372036854777856.0)\n    print(below.ok)\n    print(9223372036854775807.0 == 9223372036854775808.0)\n    var above = try_int(9223372036854775807.0)\n    print(above.ok)\n",
     );
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
@@ -179,7 +179,7 @@ fn float_rounding_preserves_exact_minimum_contract() {
         "true\ntrue\n-9223372036854775808\ntrue\n-9223372036854775808\nfalse\ntrue\nfalse\n"
     );
     fails_at_source(
-        "print(int(-9223372036854777856.0))\n",
+        "func main():\n    print(int(-9223372036854777856.0))\n",
         "浮点数无法转换为整数",
     );
 }

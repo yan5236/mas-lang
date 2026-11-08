@@ -59,10 +59,6 @@ fn create_project(project_root: &Path, project_name: &str) -> Result<(), FamaErr
         .map_err(|source| FamaError::io(mod_module_dir.clone(), source))?;
 
     write_file(
-        &project_root.join("mod.yml"),
-        &ProjectTemplate::mod_yml(project_name),
-    )?;
-    write_file(
         &project_root.join("mod-lock.yml"),
         &ProjectTemplate::mod_lock_yml(),
     )?;

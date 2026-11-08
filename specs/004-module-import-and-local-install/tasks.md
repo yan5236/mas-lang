@@ -3,13 +3,13 @@
 ## 阶段 1：规格对齐与数据模型
 
 - [x] 1.1 在 `specs/004-module-import-and-local-install/` 三件套完成评审定稿，并确认本功能承接路线图 `4.5` 至 `5.4` 的最小本地依赖范围 [关联: design.md 1, 2.1]
-- [x] 1.2 在 `fama` 中补充 `mod.yml`、`mod-lock.yml` 与 `~/.fama/setting.toml` 的结构体、读写工具和中文错误封装 [依赖: 1.1] [验证 Req 1, Req 5]
+- [x] 1.2 在 `fama` 中补充 `settings.toml`、`mod-lock.yml` 与 `~/.fama/setting.toml` 的结构体、读写工具和中文错误封装 [依赖: 1.1] [验证 Req 1, Req 5]
 - [x] 1.3 为平铺缓存目录、锁文件记录与同名依赖冲突规则补充单元测试样例 [依赖: 1.2] [验证 Req 2]
 
 ## 阶段 2：fama 本地依赖命令与主编译器切换
 
 - [x] 2.1 在 `crates/fama/src/cli.rs` 与命令模块中新增 `add`、`install` 子命令参数定义 [依赖: 1.2] [验证 Req 1]
-- [x] 2.2 实现 `fama add <path>`，读取目标依赖的 `mod.yml` 并回写当前项目 `mod.yml` [依赖: 2.1] [验证 Req 1]
+- [x] 2.2 实现 `fama add <path>`，读取目标依赖的 `settings.toml` 并回写当前项目 `settings.toml` [依赖: 2.1] [验证 Req 1]
 - [x] 2.3 实现 `fama install` 的本地路径递归安装、平铺缓存写入和 `mod-lock.yml` 回写逻辑 [依赖: 2.2] [验证 Req 1, Req 2]
 - [x] 2.4 将 `fama build/run` 从遗留 `compiler` 切换到 `maslang` crate，并接入 `~/.fama/setting.toml` 的全局配置读取 [依赖: 1.2] [验证 Req 5]
 - [x] 2.5 为 `fama new`、`add`、`install`、`build`、`run` 补充集成测试，覆盖成功路径和配置/依赖错误路径 [依赖: 2.3, 2.4] [验证 Req 1, Req 2, Req 5]

@@ -17,7 +17,7 @@ pub enum Commands {
     New(NewArgs),
     /// 向当前项目添加一个本地路径依赖。
     Add(AddArgs),
-    /// 安装 `mod.yml` 中声明的本地路径依赖。
+    /// 安装 `settings.toml` 中声明的本地路径依赖。
     Install(InstallArgs),
     /// 读取项目配置并编译当前 Mas lang 项目。
     Build(BuildArgs),

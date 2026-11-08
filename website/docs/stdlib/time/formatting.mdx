@@ -6,28 +6,28 @@ sidebar_position: 3
 
 将当前 UTC 时间格式化为标准字符串。
 
-## now_iso8601 — ISO 8601 格式
+## now_utc — ISO 8601 格式
 
 ```mas-lang
-let s: string = now_iso8601()
+var s: string = now_utc()
 // 示例："2026-05-30T12:34:56+00:00"
 ```
 
 返回 RFC 3339 / ISO 8601 格式的 UTC 时间字符串，时区固定为 `+00:00`。适用于数据交换、日志文件、API 响应等场景。
 
-## now_rfc2822 — RFC 2822 格式
+## now_email_date — RFC 2822 格式
 
 ```mas-lang
-let s: string = now_rfc2822()
+var s: string = now_email_date()
 // 示例："Fri, 30 May 2026 12:34:56 +0000"
 ```
 
 返回 RFC 2822 格式的 UTC 时间字符串，使用英文星期和月份缩写。适用于电子邮件等传统协议。
 
-## now_rfc7231 — HTTP-date 格式
+## now_http_date — HTTP-date 格式
 
 ```mas-lang
-let s: string = now_rfc7231()
+var s: string = now_http_date()
 // 示例："Fri, 30 May 2026 12:34:56 GMT"
 ```
 

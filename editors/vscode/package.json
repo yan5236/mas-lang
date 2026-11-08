@@ -1,7 +1,7 @@
 {
   "name": "mas-lang-vscode",
-  "displayName": "mascript-lang",
-  "description": "Mascript language support for Visual Studio Code.",
+  "displayName": "Mas lang",
+  "description": "Mas lang language support for Visual Studio Code.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.107.0"
@@ -15,8 +15,7 @@
       {
         "id": "mascript",
         "aliases": [
-          "Mascript",
-          "mascript"
+          "Mas lang"
         ],
         "extensions": [
           ".ms"

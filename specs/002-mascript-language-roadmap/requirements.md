@@ -41,7 +41,7 @@
 
 #### 验收标准 (EARS格式)
 
-1. WHEN 开发者执行 `fama new` THEN 系统 SHALL 生成包含 `mod.yml`、`mod-lock.yml`、`settings.toml`、`mod_module/` 与 `src/main.ms` 的项目骨架。
+1. WHEN 开发者执行 `fama new` THEN 系统 SHALL 生成包含 `settings.toml`、`mod-lock.yml`、`mod_module/` 与 `src/main.ms` 的项目骨架。
 2. WHEN 开发者执行 `fama build` THEN 系统 SHALL 读取项目配置中的入口与输出路径，并通过主力编译器链路生成 Windows 可执行文件。
 3. WHEN 开发者执行 `fama run` THEN 系统 SHALL 复用主力编译链路并运行生成的原生二进制。
 4. IF 包管理、依赖解析或锁文件更新尚未实现 THEN 文档 SHALL 把对应命令与流程保留为未完成任务。

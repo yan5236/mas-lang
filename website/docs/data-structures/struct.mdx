@@ -17,8 +17,9 @@ struct Person:
     student: bool
 
 var person = Person("小明", 18, true)
-print(person.name)
-print(person.age)
+func main():
+    print(person.name)
+    print(person.age)
 ```
 
 `Person` 是你定义的新类型，`person` 是这个类型的一个对象。`Person(...)` 按**字段声明顺序**传入值：姓名、年龄、是否为学生。每个字段都必须提供，类型必须匹配；不会自动把字符串 `"18"` 转成整数。
@@ -36,8 +37,9 @@ func increment(counter: Counter):
     counter.count += 1
 
 var counter = Counter(0)
-increment(counter)
-print(counter.count) // 1
+func main():
+    increment(counter)
+    print(counter.count) // 1
 ```
 
 可以使用 `=` 修改字段；数值和字符串字段支持与现有变量一致的复合赋值规则。
@@ -58,10 +60,11 @@ struct Customer:
     scores: list<int>
 
 var customer = Customer("小明", Address("杭州"), [90, 95])
-customer.address.city = "上海"
-customer.scores.append(100)
-print(customer.address.city)
-print(customer.scores[2])
+func main():
+    customer.address.city = "上海"
+    customer.scores.append(100)
+    print(customer.address.city)
+    print(customer.scores[2])
 ```
 
 字段可以是基础类型、另一个结构体、可空类型，或已有的列表、字典、定长数组。结构体名字不同就是不同类型，即使字段恰好一样，也不能互相赋值。
@@ -84,7 +87,8 @@ func total(node: Node?) -> int:
     return current.item + total(current.left) + total(current.right)
 
 var root = Node(1, Node(2, null, null), null)
-print(total(root)) // 3
+func main():
+    print(total(root)) // 3
 ```
 
 `Node` 必须是节点；`Node?` 还可以是 `null`。普通节点可自动传给接收 `Node?` 的函数。反过来必须显式取 `.value`，不能把可能为空的值直接当作节点使用。
@@ -106,7 +110,8 @@ pub struct Person:
 ```mas-lang
 import local.model { Person }
 var person = Person("小明", null)
-print(person.name)
+func main():
+    print(person.name)
 ```
 
 与函数一样支持导入别名、`*` 导入及 `export import` 重导出。字段不需要单独加 `pub`；能够使用这个类型就能访问其字段。
@@ -141,18 +146,19 @@ struct Person:
 
 var people: list<Person> = []
 var alice = Person("Alice", 18)
-people.append(alice)
-people.append(Person("Bob", 20))
-people[0].age = 19
-print(alice.age) // 19：列表里保存的是同一个对象
+func main():
+    people.append(alice)
+    people.append(Person("Bob", 20))
+    people[0].age = 19
+    print(alice.age) // 19：列表里保存的是同一个对象
 
-for person in people:
-    print(person.name)
+    for person in people:
+        print(person.name)
 
-var selected = people[0:1]
-print(selected[0].age) // 19
-var last = people.pop()
-print(last.name) // Bob
+    var selected = people[0:1]
+    print(selected[0].age) // 19
+    var last = people.pop()
+    print(last.name) // Bob
 ```
 
 列表保存结构体引用。取出元素、传参或切片都会共享原对象；修改其字段能从其他引用看到。`people[0] = Person("Carol", 22)` 只替换该槽位，不会改变原来的 `alice`。

@@ -7,7 +7,7 @@
 - [x] 1.3 实现 stdio LSP server 启动流程，确保 stdout 仅输出 JSON-RPC 数据 [依赖: 1.2] [验证 Req 1]
 - [x] 1.4 实现 `initialize`、`initialized` 与 `shutdown` handler，并只声明首批已规划能力 [依赖: 1.3] [验证 Req 1, Req 6]
 
-阶段 1 实现备注：已在 `mas-lang-lsp` 中接入 `tower-lsp` stdio server，补齐一阶段模块边界、能力声明、基础补全通道和协议 smoke 测试；`examples/projects/yanzhenglsp/src/main.ms` 已改为手工验证用 mas-lang 样例。
+阶段 1 实现备注：已在 `mas-lang-lsp` 中接入 `tower-lsp` stdio server，补齐一阶段模块边界、能力声明、基础补全通道和协议 smoke 测试；`examples/projects/language-server-demo/src/main.ms` 已改为手工验证用 mas-lang 样例。
 
 ## 阶段 2：文档缓存与位置转换
 
@@ -16,7 +16,7 @@
 - [x] 2.3 实现 mas-lang `Span` 与 LSP `Range` 的 UTF-16 位置转换，并覆盖 ASCII、中文和多行源码样例 [依赖: 2.1] [验证 Req 3, Req 6]
 - [x] 2.4 增加非 `.ms` 文档过滤逻辑，避免对无关文件执行语言分析 [依赖: 2.2] [验证 Req 2]
 
-阶段 2 实现备注：已在 `mas-lang-lsp` 中实现文档仓库事件接入、完整文本同步、关闭清理诊断、`.ms` 文档过滤和 `Span` 到 LSP UTF-16 `Range` 转换；`examples/projects/yanzhenglsp/src/main.ms` 已扩展为手工验证样例，并由真实 stdio 协议测试覆盖 `didOpen`、`didChange` 与 `didClose`。
+阶段 2 实现备注：已在 `mas-lang-lsp` 中实现文档仓库事件接入、完整文本同步、关闭清理诊断、`.ms` 文档过滤和 `Span` 到 LSP UTF-16 `Range` 转换；`examples/projects/language-server-demo/src/main.ms` 已扩展为手工验证样例，并由真实 stdio 协议测试覆盖 `didOpen`、`didChange` 与 `didClose`。
 
 ## 阶段 3：编译器前端复用与诊断
 
@@ -26,7 +26,7 @@
 - [x] 3.4 处理模块装载、文件系统错误和编译器错误，确保错误只转为诊断或日志，不终止 LSP 进程 [依赖: 3.3] [验证 Req 3]
 - [x] 3.5 为诊断转换和发布流程添加单元测试，覆盖词法、语法、语义与模块错误样例 [依赖: 3.4] [验证 Req 6]
 
-阶段 3 实现备注：已在 `mas-lang-lsp` 中接入 `AnalysisService` 调用 `maslang::analyze_source`，把 `CompilerError` 转换为带中文阶段、中文消息、严重级别和 UTF-16 range 的 LSP `Diagnostic`；`didOpen` 与完整文本 `didChange` 后会发布最新诊断，源码恢复正常时发布空诊断。为保证编辑器未保存内容参与分析，`maslang` 的模块装载入口已允许入口模块使用传入的内存 `SourceFile`，依赖模块仍按磁盘装载。`examples/projects/yanzhenglsp/src/main.ms` 已更新为第三阶段手工验证样例，并由 stdio 协议测试覆盖打开、报错、修改恢复的诊断通知链路。
+阶段 3 实现备注：已在 `mas-lang-lsp` 中接入 `AnalysisService` 调用 `maslang::analyze_source`，把 `CompilerError` 转换为带中文阶段、中文消息、严重级别和 UTF-16 range 的 LSP `Diagnostic`；`didOpen` 与完整文本 `didChange` 后会发布最新诊断，源码恢复正常时发布空诊断。为保证编辑器未保存内容参与分析，`maslang` 的模块装载入口已允许入口模块使用传入的内存 `SourceFile`，依赖模块仍按磁盘装载。`examples/projects/language-server-demo/src/main.ms` 已更新为第三阶段手工验证样例，并由 stdio 协议测试覆盖打开、报错、修改恢复的诊断通知链路。
 
 ## 阶段 4：符号模型、补全与悬停
 
@@ -39,7 +39,7 @@
 - [x] 4.7 实现 `hover` handler，展示符号种类、类型或函数签名 [依赖: 4.2] [验证 Req 4]
 - [x] 4.8 为文档符号、补全和悬停添加单元测试，覆盖成功分析与语法错误降级场景 [依赖: 4.4, 4.5, 4.7] [验证 Req 4, Req 5, Req 6]
 
-阶段 4 实现备注：已在 `mas-lang-lsp` 中实现 `SymbolSnapshot` 与 `MasSymbol` 共享模型，成功分析路径从 `maslang` AST 提取函数、导入、变量和常量，失败路径使用编译器 Lexer 降级扫描已完整书写的导入、函数、变量和常量声明；降级符号的 `range` 会覆盖完整声明片段，确保 `selectionRange` 始终落在 `range` 内，避免 VS Code 在错误输入时拒绝 `documentSymbol` 响应。`documentSymbol`、`completion` 与 `hover` handler 已接入打开文档的最新分析快照。补全现在组合关键字、基础类型、内建函数和当前文件符号，并在字符串字面量或行注释中抑制语法关键字；`func`、`main`、`if`、`elif`、`else`、`while`、`for`、内建函数和当前文件函数符号使用 LSP snippet 补全代码骨架或调用括号；悬停展示中文符号种类和函数签名或类型详情。`examples/projects/yanzhenglsp/src/main.ms` 已扩展为包含 `time` 导入、常量、函数、局部变量和函数调用的 LSP 验证样例；新增 `phase4_language_features` 与 stdio 协议测试覆盖四阶段能力。
+阶段 4 实现备注：已在 `mas-lang-lsp` 中实现 `SymbolSnapshot` 与 `MasSymbol` 共享模型，成功分析路径从 `maslang` AST 提取函数、导入、变量和常量，失败路径使用编译器 Lexer 降级扫描已完整书写的导入、函数、变量和常量声明；降级符号的 `range` 会覆盖完整声明片段，确保 `selectionRange` 始终落在 `range` 内，避免 VS Code 在错误输入时拒绝 `documentSymbol` 响应。`documentSymbol`、`completion` 与 `hover` handler 已接入打开文档的最新分析快照。补全现在组合关键字、基础类型、内建函数和当前文件符号，并在字符串字面量或行注释中抑制语法关键字；`func`、`main`、`if`、`elif`、`else`、`while`、`for`、内建函数和当前文件函数符号使用 LSP snippet 补全代码骨架或调用括号；悬停展示中文符号种类和函数签名或类型详情。`examples/projects/language-server-demo/src/main.ms` 已扩展为包含 `time` 导入、常量、函数、局部变量和函数调用的 LSP 验证样例；新增 `phase4_language_features` 与 stdio 协议测试覆盖四阶段能力。
 
 ## 阶段 5：协议级验证与编辑器接入
 

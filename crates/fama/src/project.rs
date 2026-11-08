@@ -85,13 +85,19 @@ impl ProjectContext {
     }
 }
 
-/// 把用户给出的项目目录转成绝对路径，便于后续统一处理相对路径。
+/// 规范化项目目录，并向上寻找最近的设置文件；缺少设置时保留原目录用于诊断。
 pub fn resolve_project_root(project_dir: &Path) -> Result<PathBuf, FamaError> {
     if !project_dir.exists() {
         return Err(FamaError::MissingFile(project_dir.to_path_buf()));
     }
 
-    fs::canonicalize(project_dir).map_err(|source| FamaError::io(project_dir.to_path_buf(), source))
+    let directory = fs::canonicalize(project_dir)
+        .map_err(|source| FamaError::io(project_dir.to_path_buf(), source))?;
+    Ok(directory
+        .ancestors()
+        .find(|path| path.join("settings.toml").is_file())
+        .unwrap_or(&directory)
+        .to_path_buf())
 }
 
 /// 读取必需的 UTF-8 文本文件，缺失时返回带路径上下文的错误。

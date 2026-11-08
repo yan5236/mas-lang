@@ -14,8 +14,8 @@ fn module_names_and_diagnostics_use_original_source() {
     let root = std::env::temp_dir().join(format!("mas-source-identity-{}", std::process::id()));
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
-        root.join("mod.yml"),
-        "name: demo\nversion: 0.1.0\ndependencies: {}\n",
+        root.join("settings.toml"),
+        "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n",
     )
     .unwrap();
     let path = root.join("src/main.ms");

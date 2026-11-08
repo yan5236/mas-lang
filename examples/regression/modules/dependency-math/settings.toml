@@ -1,0 +1,11 @@
+[project]
+name = "examplemath"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"
+output = "build"
+opt-level = 2
+
+[dependencies]
+"examplecore" = { path = "../dependency-core", version = "0.1.0" }

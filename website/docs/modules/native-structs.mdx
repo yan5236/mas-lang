@@ -18,8 +18,9 @@ struct Time:
 extern func native_time_fill(output: Time)
 
 var now = Time(0, 0)
-native_time_fill(now)
-print(now.seconds)
+func main():
+    native_time_fill(now)
+    print(now.seconds)
 ```
 
 对应的 C 文件：

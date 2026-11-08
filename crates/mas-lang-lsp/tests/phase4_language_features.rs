@@ -29,14 +29,14 @@ fn analyze(text: &str) -> SymbolSnapshot {
 #[test]
 fn should_extract_document_symbols_from_valid_program() {
     let snapshot = analyze(
-        "import time { now_unix }\nconst title:string = \"demo\"\nfunc add(a:int, b:int) -> int:\n    var total:int = a + b\n    return total\n",
+        "import time { unix_seconds }\nconst title:string = \"demo\"\nfunc add(a:int, b:int) -> int:\n    var total:int = a + b\n    return total\n",
     );
 
     let symbols = snapshot.symbols();
     assert!(
         symbols
             .iter()
-            .any(|symbol| { symbol.name == "time.now_unix" && symbol.kind == SymbolKind::MODULE })
+            .any(|symbol| { symbol.name == "time.unix_seconds" && symbol.kind == SymbolKind::MODULE })
     );
     assert!(symbols.iter().any(|symbol| {
         symbol.name == "title"

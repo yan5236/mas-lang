@@ -19,14 +19,13 @@ import utils.math { add as plus }
 import utils.math.*
 
 // Standard library
-import std.io { print }
+import time { unix_seconds }
 ```
 
 ## Module Paths
 
 - Paths are dot-separated: `utils.math` maps to `src/utils/math.ms`
 - `index.ms` is the directory entry file; `utils` maps to `src/utils/index.ms`
-- The `std` prefix refers to the standard library
 
 ## The local Prefix
 
@@ -38,6 +37,5 @@ import local.time { format }
 
 ## Resolution Order
 
-1. `std.xxx` refers to the standard library
-2. Top-level names matching `mod.yml` entries are external packages
-3. Otherwise, resolved as local modules under `src/`
+1. Names declared in `settings.toml` under `[dependencies]` resolve to the installed package at its declared version.
+2. Other names resolve to local modules under `src/`.

@@ -24,8 +24,8 @@ Fama 默认调用 `maslang` 的库 API，LSP 调用同一包的前端。编译�
 cargo build --workspace --locked
 cargo test --workspace --locked
 cargo run -p maslang --locked -- run examples/regression/compiler-stress/branch-return-matrix.ms
-cargo run -p fama --locked -- install examples/projects/huoqutime
-cargo run -p fama --locked -- run examples/projects/huoqutime
+cargo run -p fama --locked -- install examples/projects/time-api
+cargo run -p fama --locked -- run examples/projects/time-api
 ```
 
 若 Fama 的全局设置指定了旧目录的 `[compiler].binary`，运行示例前可用 `$env:FAMA_HOME = Join-Path (Get-Location) 'target/fama-home'` 创建隔离配置。日常使用可将原配置中的路径指向新构建的 `target/debug/maslang.exe`。
@@ -41,3 +41,22 @@ VS Code 服务端的生成和复制见 [扩展说明](editors/vscode/README.md)�
 ## 迁移来源
 
 本目录基于旧项目各组件的工作树，包含当时的未提交源码。六个迁入组件的原始 Git 提交保留在本仓库的 `archive/*` 分支，并汇入 `main` 的迁移提交。旧目录仍保存原仓库、历史编译器、LuaJIT 对照环境、基准脚本与结果、备份和临时审查文件。构建产物、下载缓存和已安装的依赖可在新目录按需生成。
+
+## 项目配置与入口
+
+项目名、版本、构建选项和依赖统一写在项目根目录的 `settings.toml`。从旧工程迁移时，把 `mod.yml` 中的本地依赖搬到 TOML 的 `[dependencies]`，随后删除旧清单。已有的 `[build]`、`[native]` 以及 `mod-lock.yml` 可继续使用。
+
+```toml
+[project]
+name = "hello"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"
+output = "build"
+
+[dependencies]
+time = { path = "../mas-lang/stdlib/time", version = "0.1.0" }
+```
+
+可执行程序从无参数的 `func main()` 进入，`print` 放在函数体内。库包可通过 `src/index.ms` 导出符号。

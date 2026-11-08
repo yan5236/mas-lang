@@ -9,7 +9,7 @@ The `time` module provides wall-clock time retrieval and monotonic clock timing,
 ## Import
 
 ```mas-lang
-import time { now_unix, now_iso8601, monotonic_millis, sleep }
+import time { unix_seconds, now_utc, monotonic_millis, sleep }
 ```
 
 Import only the functions you need. `time` is a standard library module with no additional dependencies.
@@ -18,11 +18,11 @@ Import only the functions you need. `time` is a standard library module with no 
 
 | Function | Return Type | Description |
 |----------|-------------|-------------|
-| `now_unix()` | `int` | Current Unix timestamp (seconds) |
-| `now_unix_millis()` | `int` | Current Unix timestamp (milliseconds) |
-| `now_iso8601()` | `string` | ISO 8601 / RFC 3339 formatted UTC string |
-| `now_rfc2822()` | `string` | RFC 2822 formatted UTC string |
-| `now_rfc7231()` | `string` | HTTP-date formatted UTC string |
+| `unix_seconds()` | `int` | Current Unix timestamp (seconds) |
+| `unix_millis()` | `int` | Current Unix timestamp (milliseconds) |
+| `now_utc()` | `string` | ISO 8601 / RFC 3339 formatted UTC string |
+| `now_email_date()` | `string` | RFC 2822 formatted UTC string |
+| `now_http_date()` | `string` | HTTP-date formatted UTC string |
 | `monotonic_millis()` | `int` | Monotonic clock millisecond counter |
 | `sleep(ms)` | void | Sleep the thread for the given milliseconds |
 

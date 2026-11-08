@@ -69,9 +69,10 @@ func run():
     var inferred = [alias]
     print(inferred[0].age.value)
     cycle()
-run()
-mas_gc_collect()
-print(mas_gc_live_objects())
+func main():
+    run()
+    mas_gc_collect()
+    print(mas_gc_live_objects())
 "#;
     for level in [OptLevel::O0, OptLevel::O3] {
         let root = TemporaryDirectory::create("record-lists").unwrap();

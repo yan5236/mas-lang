@@ -6,20 +6,20 @@ sidebar_position: 2
 
 Get the current Unix timestamp.
 
-## now_unix — Current Unix Timestamp (Seconds)
+## unix_seconds — Current Unix Timestamp (Seconds)
 
 ```mas-lang
-let ts: int = now_unix()
+var ts: int = unix_seconds()
 // example: 1717050800
 ```
 
 Returns the number of seconds since the Unix epoch (1970-01-01 00:00:00 UTC). Suitable for logging, time-window checks, and signatures.
 
-## now_unix_millis — Current Unix Timestamp (Milliseconds)
+## unix_millis — Current Unix Timestamp (Milliseconds)
 
 ```mas-lang
-let ts: int = now_unix_millis()
+var ts: int = unix_millis()
 // example: 1717050800123
 ```
 
-Returns the number of milliseconds since the Unix epoch, with higher precision than `now_unix`. Suitable for scenarios requiring finer-grained timestamps.
+Returns the number of milliseconds since the Unix epoch, with higher precision than `unix_seconds`. Suitable for scenarios requiring finer-grained timestamps.

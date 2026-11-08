@@ -22,7 +22,8 @@ var s = "你好，世界"
 | `\t` | 制表符 |
 
 ```mas-lang
-print("她说：\"你好！\"\n")
+func main():
+    print("她说：\"你好！\"\n")
 ```
 
 ## 模板字符串
@@ -32,14 +33,16 @@ print("她说：\"你好！\"\n")
 ```mas-lang
 var name = "Mas lang"
 var version = 1
-print("${name} v${version}")
-// 输出：Mas lang v1
+func main():
+    print("${name} v${version}")
+    // 输出：Mas lang v1
 ```
 
 `${}` 中可以包含任意表达式：
 
 ```mas-lang
-print("结果：${1 + 2 * 3}")
+func main():
+    print("结果：${1 + 2 * 3}")
 ```
 
 ## 字符串方法

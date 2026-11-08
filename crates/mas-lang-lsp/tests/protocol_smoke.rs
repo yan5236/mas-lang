@@ -153,7 +153,7 @@ fn should_handle_stdio_initialize_completion_and_shutdown() {
 #[test]
 fn should_handle_validation_project_document_lifecycle() {
     let sample_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/projects/yanzhenglsp");
+        .join("../../examples/projects/language-server-demo");
     let project_uri = tower_lsp::lsp_types::Url::from_directory_path(&sample_path).unwrap();
     let sample_text = std::fs::read_to_string(sample_path.join("src/main.ms")).unwrap();
     let document_url = project_uri.join("src/main.ms").unwrap();

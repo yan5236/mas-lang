@@ -22,7 +22,8 @@ var s = "Hello, World"
 | `\t` | Tab |
 
 ```mas-lang
-print("She said: \"Hello!\"\n")
+func main():
+    print("She said: \"Hello!\"\n")
 ```
 
 ## Template Strings
@@ -32,14 +33,16 @@ Use `${}` to interpolate expressions within strings:
 ```mas-lang
 var name = "Mas lang"
 var version = 1
-print("${name} v${version}")
-// output: Mas lang v1
+func main():
+    print("${name} v${version}")
+    // output: Mas lang v1
 ```
 
 `${}` can contain arbitrary expressions:
 
 ```mas-lang
-print("result: ${1 + 2 * 3}")
+func main():
+    print("result: ${1 + 2 * 3}")
 ```
 
 ## String Methods

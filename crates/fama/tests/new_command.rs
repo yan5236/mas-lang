@@ -29,11 +29,6 @@ fn read_to_string(path: &Path) -> String {
 /// 为本地依赖测试创建一个最小库项目，覆盖 `pub` 与 `export import` 聚合入口。
 fn create_local_library(root: &Path, name: &str) {
     fs::create_dir_all(root.join("src")).expect("创建库 src 目录失败");
-    fs::write(
-        root.join("mod.yml"),
-        format!("name: {name}\nversion: 0.1.0\n\ndependencies: {{}}\n"),
-    )
-    .expect("写入库 mod.yml 失败");
     fs::write(root.join("mod-lock.yml"), "dependencies: {}\n").expect("写入库 mod-lock.yml 失败");
     fs::write(
         root.join("settings.toml"),
@@ -75,9 +70,9 @@ fn should_create_project_scaffold() {
     assert!(project_root.join("mod_module").is_dir());
     assert_eq!(
         read_to_string(&project_root.join("src").join("main.ms")),
-        "print(\"Hello world.\")\n"
+        "func main():\n    print(\"Hello world.\")\n"
     );
-    assert!(read_to_string(&project_root.join("mod.yml")).contains("name: demo"));
+    assert!(!project_root.join("mod.yml").exists());
     assert!(read_to_string(&project_root.join("settings.toml")).contains("name = \"demo\""));
 
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
@@ -173,7 +168,7 @@ fn should_build_project_binary_into_configured_output_directory() {
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
 }
 
-/// 校验 `fama run` 使用临时产物执行程序，不把运行产物写入项目 build 目录。
+/// 校验从 src 目录运行时能找到项目，且临时产物不会写入项目 build 目录。
 #[test]
 fn should_run_project_binary_without_writing_configured_build_output() {
     let workdir = create_temp_dir("run");
@@ -188,13 +183,13 @@ fn should_run_project_binary_without_writing_configured_build_output() {
 
     fs::write(
         workdir.join("demo").join("src").join("main.ms"),
-        "var name:string = \"Mas lang\"\nprint(\"Hello \" + name)\n",
+        "func main():\n    var name:string = \"Mas lang\"\n    print(\"Hello \" + name)\n",
     )
     .expect("写入测试源码失败");
 
     let run_output = fama_command(&workdir)
         .arg("run")
-        .current_dir(workdir.join("demo"))
+        .current_dir(workdir.join("demo/src"))
         .output()
         .expect("执行 fama run 失败");
 
@@ -220,6 +215,11 @@ fn should_install_local_dependency_and_run_imported_module() {
 
     let lib_root = workdir.join("math");
     create_local_library(&lib_root, "math");
+
+    let settings_path = workdir.join("app/settings.toml");
+    let original = read_to_string(&settings_path);
+    let config = format!("# 保留注释\n{original}\n[native]\nabi = 1\n");
+    fs::write(&settings_path, &config).unwrap();
 
     let add_output = fama_command(&workdir)
         .arg("add")
@@ -253,7 +253,11 @@ fn should_install_local_dependency_and_run_imported_module() {
     assert!(stdout.contains("3"));
     assert!(!stdout.contains("已生成可执行文件"));
     assert!(!stdout.contains("已命中预编译原生产物"));
-    assert!(read_to_string(&workdir.join("app").join("mod.yml")).contains("path: ../math"));
+    let settings = read_to_string(&settings_path);
+    assert!(settings.starts_with("# 保留注释"));
+    assert!(settings.contains(&original));
+    assert!(settings.contains("[native]\nabi = 1"));
+    assert!(settings.contains("path = \"../math\""));
     assert!(read_to_string(&workdir.join("app").join("mod-lock.yml")).contains("math@0.1.0"));
     assert!(
         workdir

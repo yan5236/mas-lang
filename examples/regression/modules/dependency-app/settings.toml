@@ -1,0 +1,11 @@
+[project]
+name = "exampleapp"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"
+output = "build"
+opt-level = 2
+
+[dependencies]
+"examplemath" = { path = "../dependency-math", version = "0.1.0" }

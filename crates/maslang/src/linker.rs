@@ -13,7 +13,7 @@ use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
 use crate::temp_directory::TemporaryDirectory;
 
-/// 执行完整的对象文件生成与本机链接流程，并返回最终可执行文件路径。
+/// 检查可执行入口，执行对象文件生成与本机链接，成功时返回产物路径。
 pub fn compile_to_executable(
     source: &SourceFile,
     settings: &CompilerSettings,
@@ -21,6 +21,14 @@ pub fn compile_to_executable(
     package_roots: &[PathBuf],
     options: &CompileOptions,
 ) -> Result<PathBuf, CompilerError> {
+    if !program.statements.iter().any(|statement| {
+        matches!(statement, crate::ast::Stmt::FunctionDecl { name, parameters, .. } if name == "main" && parameters.is_empty())
+    }) {
+        return Err(CompilerError::semantic_message(
+            "可执行程序必须定义无参数的 `func main()`",
+            Span::new(0, 0),
+        ));
+    }
     let output_path = resolve_output_path(source, options)?;
     let generated_object =
         llvm_backend::compile_program_with_options(source, settings, program, options)?;
@@ -275,7 +283,7 @@ mod tests {
     /// 校验最小 Hello World 程序能够被编译并以原生方式运行。
     #[test]
     fn should_build_and_run_hello_world_program() {
-        let output = build_and_run("hello", "print(\"Hello world.\")\n");
+        let output = build_and_run("hello", "func main():\n    print(\"Hello world.\")\n");
         assert_eq!(output, "Hello world.\n");
     }
 
@@ -284,7 +292,7 @@ mod tests {
     fn should_build_and_run_string_concat_program() {
         let output = build_and_run(
             "string",
-            "var name = \"Mas lang\"\nprint(\"Hello \" + name)\n",
+            "var name = \"Mas lang\"\nfunc main():\n    print(\"Hello \" + name)\n",
         );
         assert_eq!(output, "Hello Mas lang\n");
     }

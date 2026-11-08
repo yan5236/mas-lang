@@ -51,8 +51,9 @@ struct Person:
     name: string
 
 var people = array<Person?,2>(Person("Alice"), null)
-people[1] = Person("Bob")
-print(people[1].value.name)
+func main():
+    people[1] = Person("Bob")
+    print(people[1].value.name)
 ```
 
 数组也支持列表、字典和嵌套数组元素，并追踪其中的托管引用。数组赋值复制数组槽位；结构体、列表和字典元素仍共享对象引用。嵌套下标赋值写回原数组位置。

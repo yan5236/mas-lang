@@ -2,9 +2,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use serde::Deserialize;
+use toml_edit::{DocumentMut, InlineTable, Item, Table, Value};
+
 use crate::error::FamaError;
 
-/// 保存项目 `mod.yml` 的核心结构，供命令层统一读写依赖清单。
+/// 保存项目 `settings.toml` 的核心结构，供命令层统一读写依赖清单。
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProjectManifest {
     pub name: String,
@@ -13,7 +16,7 @@ pub struct ProjectManifest {
 }
 
 /// 保存单个依赖的来源路径与期望版本。
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize)]
 pub struct DependencySpec {
     pub path: String,
     pub version: String,
@@ -40,7 +43,7 @@ pub struct LockedDependencySource {
     pub path: String,
 }
 
-/// 从项目根目录读取并解析 `mod.yml`。
+/// 从项目根目录读取并解析 `settings.toml`。
 pub fn load_project_manifest(project_root: &Path) -> Result<ProjectManifest, FamaError> {
     let path = manifest_path(project_root);
     let text = read_required_utf8_file(&path)?;
@@ -50,15 +53,62 @@ pub fn load_project_manifest(project_root: &Path) -> Result<ProjectManifest, Fam
     Ok(manifest)
 }
 
-/// 把项目依赖清单以 UTF-8 无 BOM 形式写回 `mod.yml`。
+/// 更新项目 TOML 的依赖表，保留构建、原生配置和未修改条目的注释。
 pub fn save_project_manifest(
     project_root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<(), FamaError> {
     let path = manifest_path(project_root);
     validate_manifest(manifest, &path)?;
-    let content = render_project_manifest(manifest);
-    write_utf8_file(&path, &content)
+    let mut document = match fs::read_to_string(&path) {
+        Ok(text) => text
+            .parse::<DocumentMut>()
+            .map_err(|error| invalid_manifest(&path, error.to_string()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(error) => return Err(FamaError::io(path, error)),
+    };
+    let project = document
+        .entry("project")
+        .or_insert(Item::Table(Table::new()));
+    let project = project
+        .as_table_like_mut()
+        .ok_or_else(|| invalid_manifest(&path, "project 必须是 TOML 表"))?;
+    for (field, value) in [("name", &manifest.name), ("version", &manifest.version)] {
+        if project.get(field).and_then(Item::as_str) != Some(value.as_str()) {
+            project.insert(field, Item::Value(Value::from(value)));
+        }
+    }
+    if !manifest.dependencies.is_empty() || document.contains_key("dependencies") {
+        let dependencies = document
+            .entry("dependencies")
+            .or_insert(Item::Table(Table::new()));
+        let dependencies = dependencies
+            .as_table_like_mut()
+            .ok_or_else(|| invalid_manifest(&path, "dependencies 必须是 TOML 表"))?;
+        let removed: Vec<_> = dependencies
+            .iter()
+            .filter(|(name, _)| !manifest.dependencies.contains_key(*name))
+            .map(|(name, _)| name.to_string())
+            .collect();
+        for name in removed {
+            dependencies.remove(&name);
+        }
+        for (name, dependency) in &manifest.dependencies {
+            if let Some(item) = dependencies.get(name) {
+                if item.get("path").and_then(Item::as_str) == Some(dependency.path.as_str())
+                    && item.get("version").and_then(Item::as_str)
+                        == Some(dependency.version.as_str())
+                {
+                    continue;
+                }
+            }
+            let mut value = InlineTable::new();
+            value.insert("path", Value::from(&dependency.path));
+            value.insert("version", Value::from(&dependency.version));
+            dependencies.insert(name, Item::Value(Value::InlineTable(value)));
+        }
+    }
+    write_utf8_file(&path, &document.to_string())
 }
 
 /// 从项目根目录读取并解析 `mod-lock.yml`，缺失时返回空锁文件。
@@ -82,9 +132,9 @@ pub fn save_lock_file(project_root: &Path, lock_file: &LockFile) -> Result<(), F
     write_utf8_file(&path, &content)
 }
 
-/// 返回项目 `mod.yml` 的标准路径。
+/// 返回项目 `settings.toml` 的标准路径。
 pub fn manifest_path(project_root: &Path) -> PathBuf {
-    project_root.join("mod.yml")
+    project_root.join("settings.toml")
 }
 
 /// 返回项目 `mod-lock.yml` 的标准路径。
@@ -121,100 +171,28 @@ pub fn resolve_dependency_path(base_root: &Path, raw_path: &Path) -> Result<Path
     fs::canonicalize(&candidate).map_err(|source| FamaError::io(candidate, source))
 }
 
-/// 解析 `mod.yml` 文本，只覆盖当前项目约定的最小 YAML 结构。
+/// 从项目 TOML 读取身份和依赖，构建及原生配置由各自的读取方解析。
 fn parse_project_manifest(path: &Path, text: &str) -> Result<ProjectManifest, FamaError> {
-    let mut name = None;
-    let mut version = None;
-    let mut dependencies: BTreeMap<String, DependencySpec> = BTreeMap::new();
-    let mut current_dependency = None::<String>;
-
-    for raw_line in text.lines() {
-        let line = raw_line.trim_end();
-        let trimmed = line.trim_start();
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("name:") {
-            name = Some(rest.trim().to_string());
-            current_dependency = None;
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("version:") {
-            if raw_line.starts_with("    ") {
-                let dependency_name = current_dependency
-                    .as_ref()
-                    .ok_or_else(|| invalid_manifest(path, "依赖 version 缺少所属依赖名"))?;
-                let dependency = dependencies
-                    .get_mut(dependency_name)
-                    .ok_or_else(|| invalid_manifest(path, "依赖 version 缺少初始化节点"))?;
-                dependency.version = rest.trim().to_string();
-            } else {
-                version = Some(rest.trim().to_string());
-                current_dependency = None;
-            }
-            continue;
-        }
-
-        if trimmed == "dependencies:" || trimmed == "dependencies: {}" {
-            current_dependency = None;
-            continue;
-        }
-
-        if raw_line.starts_with("  ") && line.ends_with(':') && !raw_line.starts_with("    ") {
-            let dependency_name = line.trim_end_matches(':').trim().to_string();
-            dependencies.insert(
-                dependency_name.clone(),
-                DependencySpec {
-                    path: String::new(),
-                    version: String::new(),
-                },
-            );
-            current_dependency = Some(dependency_name);
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("path:") {
-            let dependency_name = current_dependency
-                .as_ref()
-                .ok_or_else(|| invalid_manifest(path, "依赖 path 缺少所属依赖名"))?;
-            let dependency = dependencies
-                .get_mut(dependency_name)
-                .ok_or_else(|| invalid_manifest(path, "依赖 path 缺少初始化节点"))?;
-            dependency.path = rest.trim().to_string();
-            continue;
-        }
-
-        return Err(invalid_manifest(
-            path,
-            format!("无法解析的 mod.yml 行：{line}"),
-        ));
+    #[derive(Deserialize)]
+    struct Settings {
+        project: Identity,
+        #[serde(default)]
+        dependencies: BTreeMap<String, DependencySpec>,
     }
 
+    #[derive(Deserialize)]
+    struct Identity {
+        name: String,
+        version: String,
+    }
+
+    let settings: Settings =
+        toml::from_str(text).map_err(|error| invalid_manifest(path, error.to_string()))?;
     Ok(ProjectManifest {
-        name: name.unwrap_or_default(),
-        version: version.unwrap_or_default(),
-        dependencies,
+        name: settings.project.name,
+        version: settings.project.version,
+        dependencies: settings.dependencies,
     })
-}
-
-/// 把项目依赖清单渲染为稳定、可读的 `mod.yml` 文本。
-fn render_project_manifest(manifest: &ProjectManifest) -> String {
-    let mut output = format!("name: {}\nversion: {}\n\n", manifest.name, manifest.version);
-
-    if manifest.dependencies.is_empty() {
-        output.push_str("dependencies: {}\n");
-        return output;
-    }
-
-    output.push_str("dependencies:\n");
-    for (dependency_name, dependency) in &manifest.dependencies {
-        output.push_str(&format!("  {dependency_name}:\n"));
-        output.push_str(&format!("    path: {}\n", dependency.path));
-        output.push_str(&format!("    version: {}\n", dependency.version));
-    }
-    output
 }
 
 /// 解析 `mod-lock.yml` 文本，只覆盖当前阶段写出的锁文件结构。
@@ -317,7 +295,7 @@ fn render_lock_file(lock_file: &LockFile) -> String {
     output
 }
 
-/// 校验依赖清单的最小字段约束，避免把无效结构继续传给安装流程。
+/// 校验项目身份、依赖字段和缓存路径成分，失败时返回带清单路径的错误。
 fn validate_manifest(manifest: &ProjectManifest, path: &Path) -> Result<(), FamaError> {
     if manifest.name.trim().is_empty() {
         return Err(FamaError::InvalidManifest {
@@ -334,17 +312,19 @@ fn validate_manifest(manifest: &ProjectManifest, path: &Path) -> Result<(), Fama
     }
 
     for (dependency_name, dependency) in &manifest.dependencies {
-        if dependency_name.trim().is_empty() {
+        if !maslang::settings::is_dependency_cache_component(dependency_name)
+            || !maslang::settings::is_dependency_cache_component(&dependency.version)
+        {
             return Err(FamaError::InvalidManifest {
                 path: path.to_path_buf(),
-                message: "dependencies 中存在空依赖名".to_string(),
+                message: "依赖名称或版本含有不安全的缓存路径字符".to_string(),
             });
         }
 
-        if dependency.path.trim().is_empty() || dependency.version.trim().is_empty() {
+        if dependency.path.trim().is_empty() {
             return Err(FamaError::InvalidManifest {
                 path: path.to_path_buf(),
-                message: format!("依赖 `{dependency_name}` 缺少 path 或 version"),
+                message: format!("依赖 `{dependency_name}` 缺少 path"),
             });
         }
     }
@@ -368,7 +348,7 @@ fn write_utf8_file(path: &Path, content: &str) -> Result<(), FamaError> {
     fs::write(path, content.as_bytes()).map_err(|source| FamaError::io(path.to_path_buf(), source))
 }
 
-/// 构造带路径上下文的 `mod.yml` 解析错误，避免重复拼接错误消息。
+/// 构造带路径上下文的 `settings.toml` 解析错误，避免重复拼接错误消息。
 fn invalid_manifest(path: &Path, message: impl Into<String>) -> FamaError {
     FamaError::InvalidManifest {
         path: path.to_path_buf(),
@@ -461,7 +441,7 @@ mod tests {
 
         save_project_manifest(&root, &manifest).unwrap();
 
-        let bytes = fs::read(root.join("mod.yml")).unwrap();
+        let bytes = fs::read(root.join("settings.toml")).unwrap();
         assert!(!bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
     }
 

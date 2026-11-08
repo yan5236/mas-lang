@@ -103,9 +103,10 @@ func run():
     print(optional(false) == null)
     tree.left = tree
     tree.right = null
-run()
-mas_gc_collect()
-print(mas_gc_live_objects())
+func main():
+    run()
+    mas_gc_collect()
+    print(mas_gc_live_objects())
 "#;
     for level in [OptLevel::O0, OptLevel::O3] {
         let output = execute(text, level);
@@ -122,7 +123,7 @@ print(mas_gc_live_objects())
 fn null_access_reports_source_and_short_circuit_is_safe() {
     for level in [OptLevel::O0, OptLevel::O3] {
         let output = execute(
-            "var n: int? = null\nprint(n != null and n.value > 0)\nprint(n.value)\n",
+            "var n: int? = null\nfunc main():\n    print(n != null and n.value > 0)\n    print(n.value)\n",
             level,
         );
         assert!(!output.status.success());
@@ -143,11 +144,11 @@ fn invalid_records_are_rejected() {
         "struct int:\n    x: int",
         "var n: int = null",
         "var n = null",
-        "var n: int? = null\nprint(n + 1)",
+        "var n: int? = null\nfunc main():\n    print(n + 1)",
         "struct A:\n    x: int\nvar a = A(null)",
         "struct A:\n    x: int\nvar a = A()",
-        "struct A:\n    x: int\nvar a = A(1)\nprint(a.missing)",
-        "struct A:\n    x: int\nvar a: A? = null\nprint(a.x)",
+        "struct A:\n    x: int\nvar a = A(1)\nfunc main():\n    print(a.missing)",
+        "struct A:\n    x: int\nvar a: A? = null\nfunc main():\n    print(a.x)",
         "struct A:\n    x: int\n    x: int",
         "struct A:\n    x: Unknown",
         "struct A:\n    x: int\nvar a = A(1)\na.x = false",
@@ -169,8 +170,8 @@ fn imported_records_keep_type_identity() {
     let root = TemporaryDirectory::create("mascript-record-import").unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();
     std::fs::write(
-        root.path().join("mod.yml"),
-        "name: demo\nversion: 0.1.0\ndependencies: {}\n",
+        root.path().join("settings.toml"),
+        "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -183,7 +184,7 @@ fn imported_records_keep_type_identity() {
         "export import local.model { Person, make }\n",
     )
     .unwrap();
-    let text = "import local.api { Person as User, make }\nfunc read(p: User) -> int?:\n    return p.age\nvar p: User = make()\np.age = 20\nprint(read(p).value)\nvar people: list<User> = [p, make()]\npeople.append(make())\nprint(people[1].age.value)\nprint(len(people))\n";
+    let text = "import local.api { Person as User, make }\nfunc read(p: User) -> int?:\n    return p.age\nvar p: User = make()\nfunc main():\n    p.age = 20\n    print(read(p).value)\n    var people: list<User> = [p, make()]\n    people.append(make())\n    print(people[1].age.value)\n    print(len(people))\n";
     let path = root.path().join("src/main.ms");
     std::fs::write(&path, text).unwrap();
     let source = SourceFile::new(path.display().to_string(), text.into());
@@ -217,12 +218,13 @@ func rhs() -> int:
     box = Box(array<int,2>(8,9), 0.0)
     mas_gc_collect()
     return 7
-target().numbers[0] = rhs()
-old.amount += 2
-print(calls)
-print(old.numbers[0])
-print(box.numbers[0])
-print(old.amount)
+func main():
+    target().numbers[0] = rhs()
+    old.amount += 2
+    print(calls)
+    print(old.numbers[0])
+    print(box.numbers[0])
+    print(old.amount)
 "#;
     for level in [OptLevel::O0, OptLevel::O3] {
         let output = execute(text, level);

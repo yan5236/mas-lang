@@ -8,9 +8,9 @@
 
 #### 验收标准 (EARS格式)
 
-1. WHEN 开发者执行 `fama add <本地路径>` THEN 系统 SHALL 读取目标项目的 `mod.yml`，并把依赖名、版本号与相对路径写入当前项目的 `mod.yml`。
-2. WHEN 开发者执行 `fama install` THEN 系统 SHALL 读取当前项目 `mod.yml` 中的本地路径依赖，并把依赖源码安装到当前项目的 `mod_module/` 平铺缓存中。
-3. IF 本地路径不存在、目标目录缺少 `mod.yml`、依赖项目缺少 `src/` 或依赖元数据不完整 THEN 系统 SHALL 给出明确的中文错误，而不是生成部分安装结果。
+1. WHEN 开发者执行 `fama add <本地路径>` THEN 系统 SHALL 读取目标项目的 `settings.toml`，并把依赖名、版本号与相对路径写入当前项目的 `settings.toml`。
+2. WHEN 开发者执行 `fama install` THEN 系统 SHALL 读取当前项目 `settings.toml` 中的本地路径依赖，并把依赖源码安装到当前项目的 `mod_module/` 平铺缓存中。
+3. IF 本地路径不存在、目标目录缺少 `settings.toml`、依赖项目缺少 `src/` 或依赖元数据不完整 THEN 系统 SHALL 给出明确的中文错误，而不是生成部分安装结果。
 4. WHEN 系统生成或更新 `mod-lock.yml` THEN 系统 SHALL 记录每个已安装依赖的名称、版本、来源类型、来源路径和缓存目录。
 
 ## 需求 2：以平铺缓存方式管理依赖，避免嵌套安装
@@ -33,7 +33,7 @@
 1. WHEN 开发者在源码中使用 `import foo.bar { baz }` THEN 系统 SHALL 解析对应模块并把导入符号接入当前编译单元。
 2. WHEN 开发者在源码中使用 `import foo.bar { baz as qux }` 或 `import foo.bar.*` THEN 系统 SHALL 支持别名导入与全部导入。
 3. WHEN 开发者导入本地模块 THEN 系统 SHALL 把项目 `src/` 作为模块根目录，并支持 `a.ms -> a`、`dir/index.ms -> dir`、`dir/file.ms -> dir.file` 的路径映射。
-4. WHEN 顶层模块名命中 `mod.yml` 依赖 THEN 系统 SHALL 从当前项目 `mod_module/` 的已安装缓存中解析该依赖模块；IF 需要强制解析本地同名模块 THEN 系统 SHALL 支持 `local.` 前缀。
+4. WHEN 顶层模块名命中 `settings.toml` 依赖 THEN 系统 SHALL 从当前项目 `mod_module/` 的已安装缓存中解析该依赖模块；IF 需要强制解析本地同名模块 THEN 系统 SHALL 支持 `local.` 前缀。
 5. IF 模块文件不存在、导入符号不存在、导入目标未公开或导入图出现循环 THEN 系统 SHALL 在编译阶段给出明确的中文诊断。
 
 ## 需求 4：支持公开导出与目录聚合入口

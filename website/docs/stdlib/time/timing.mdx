@@ -11,10 +11,10 @@ sidebar_position: 4
 单调时钟用于测量时间间隔，不受系统时间跳变影响。
 
 ```mas-lang
-let start: int = monotonic_millis()
+var start: int = monotonic_millis()
 
 // 执行某些操作...
-let elapsed: int = monotonic_millis() - start
+var elapsed: int = monotonic_millis() - start
 // elapsed 为经过的毫秒数
 ```
 

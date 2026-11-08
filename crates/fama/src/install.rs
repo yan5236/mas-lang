@@ -47,7 +47,7 @@ impl Installer {
         }
     }
 
-    /// 遍历并验证全部传递依赖，缓存命中仅跳过当前包复制；循环或本轮同名冲突返回错误。
+    /// 递归安装依赖及其子依赖，拒绝循环、版本冲突及不安全的缓存目标。
     fn install_dependency(
         &mut self,
         owner_root: &Path,
@@ -90,6 +90,13 @@ impl Installer {
             dependency_name,
             &dependency_manifest.version,
         );
+        ensure_dependency_store_is_local(&self.project_root, &store_dir)?;
+        if source_root.starts_with(&store_dir) {
+            return Err(FamaError::DependencyInstall(format!(
+                "依赖源位于待更新的缓存目录中：{}",
+                source_root.display()
+            )));
+        }
         if !self.should_reuse_locked_dependency(dependency_name, &source_root, &store_dir)? {
             prepare_dependency_store(&store_dir)?;
             copy_dependency_project(&source_root, &store_dir)?;
@@ -242,9 +249,11 @@ fn resolve_locked_store_dir(project_root: &Path, dependency: &LockedDependency) 
     Some(project_root.join(trimmed.replace('/', "\\")))
 }
 
-/// 判断依赖缓存目录是否包含最小可用结构，避免复用空目录或半拷贝目录。
+/// 检查缓存目录是否包含项目设置与源码目录，避免复用不完整的副本。
 fn is_dependency_store_usable(store_dir: &Path) -> bool {
-    store_dir.is_dir() && store_dir.join("mod.yml").is_file() && store_dir.join("src").is_dir()
+    store_dir.is_dir()
+        && store_dir.join("settings.toml").is_file()
+        && store_dir.join("src").is_dir()
 }
 
 /// 比较源依赖目录与缓存目录是否仍然一致，避免路径依赖更新后继续复用陈旧缓存。
@@ -339,14 +348,39 @@ struct DependencyEntrySnapshot {
     is_file: bool,
 }
 
+/// 检查现有缓存根和目标是否仍位于项目下的预期位置，防止链接重定向缓存清理。
+fn ensure_dependency_store_is_local(
+    project_root: &Path,
+    store_dir: &Path,
+) -> Result<(), FamaError> {
+    let root = fs::canonicalize(project_root)
+        .map_err(|error| FamaError::io(project_root.to_path_buf(), error))?;
+    let cache = root.join("mod_module");
+    let expected = cache.join(store_dir.file_name().expect("缓存目录必须包含包名"));
+    for (path, expected) in [
+        (project_root.join("mod_module"), cache),
+        (store_dir.to_path_buf(), expected),
+    ] {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                let actual =
+                    fs::canonicalize(&path).map_err(|error| FamaError::io(path.clone(), error))?;
+                if metadata.is_symlink() || actual != expected {
+                    return Err(FamaError::DependencyInstall(format!(
+                        "依赖缓存路径被重定向：{}",
+                        path.display()
+                    )));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(FamaError::io(path, error)),
+        }
+    }
+    Ok(())
+}
+
 /// 在重新复制依赖前清理残缺缓存目录，保证目标目录处于干净状态。
 fn prepare_dependency_store(store_dir: &Path) -> Result<(), FamaError> {
-    if is_dependency_store_usable(store_dir) {
-        fs::remove_dir_all(store_dir)
-            .map_err(|source| FamaError::io(store_dir.to_path_buf(), source))?;
-        return Ok(());
-    }
-
     if store_dir.exists() {
         if store_dir.is_dir() {
             fs::remove_dir_all(store_dir)

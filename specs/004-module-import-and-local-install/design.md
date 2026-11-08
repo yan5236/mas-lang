@@ -3,13 +3,13 @@
 ## 1. 概述
 
 - **问题陈述**：当前 `fama` 只具备 `new/build/run` 基础能力，且 `build/run` 仍连接遗留 `compiler`；主力编译器 `maslang` 也仍停留在单文件编译阶段，尚不支持 `import`、本地依赖安装、`mod-lock.yml` 更新和 `mod_module` 平铺缓存。
-- **当前状态**：项目骨架已经包含 `mod.yml`、`mod-lock.yml`、`settings.toml` 与 `mod_module/`，但这些文件除模板外没有真实行为。`maslang` 当前只接受单个 `SourceFile`，语义与 LLVM 后端都假定输入是已经展开好的一个顶层 `Program`。这意味着模块系统的最小落地点应放在“解析前装载模块并扁平化 AST”，而不是侵入现有后端主流程。
+- **当前状态**：项目骨架已经包含 `settings.toml`、`mod-lock.yml` 与 `mod_module/`，但这些文件除模板外没有真实行为。`maslang` 当前只接受单个 `SourceFile`，语义与 LLVM 后端都假定输入是已经展开好的一个顶层 `Program`。这意味着模块系统的最小落地点应放在“解析前装载模块并扁平化 AST”，而不是侵入现有后端主流程。
 
 ## 2. 技术方案
 
 ### 2.1 Why：为什么这样设计
 
-- 选择在 `fama` 侧实现 `mod.yml/mod-lock.yml` 管理和依赖安装，而不是把依赖解析塞进编译器，是为了保持包管理和编译职责分离，避免 `maslang` 直接承担文件系统写操作。
+- 选择在 `fama` 侧实现 `settings.toml` 与 `mod-lock.yml` 管理和依赖安装，而不是把依赖解析塞进编译器，是为了保持包管理和编译职责分离，避免 `maslang` 直接承担文件系统写操作。
 - 选择“平铺缓存 + 冲突即失败”的依赖策略，而不是一次性实现完整的 pnpm 式多版本虚拟链接，是因为本次只支持本地路径源，先保证不出现嵌套依赖目录和不确定解析，比过早引入复杂链接模型更稳妥。
 - 选择在主编译器前端新增模块装载器，把多个模块扁平化为单个 `Program` 再进入既有语义与 LLVM 后端，是因为这样能复用现有函数签名收集、作用域分析和代码生成路径，符合最小化改动原则。
 - 选择实现 `pub` 与 `export import`，是因为如果只做 `import` 而不提供公开边界和聚合入口，`index.ms` 目录模块将无法成立，用户会被迫穿透内部文件结构。
@@ -20,14 +20,14 @@
 - **架构模式**：采用“`fama` 负责依赖元数据与安装，编译器负责只读模块解析与 AST 扁平化”的双层架构。
 - **模块划分**：
   - `crates/fama/src/config.rs`：读取 `~/.fama/setting.toml`，解析全局编译器路径等设置。
-  - `crates/fama/src/manifest.rs`：统一定义 `mod.yml` 与 `mod-lock.yml` 的 YAML 结构、读写与校验。
+  - `crates/fama/src/manifest.rs`：统一定义 项目 TOML 与 YAML 锁文件的结构、读写与校验。
   - `crates/fama/src/install.rs`：递归安装本地路径依赖，维护平铺缓存与锁文件。
   - `crates/fama/src/commands/add.rs`、`crates/fama/src/commands/install.rs`：暴露命令入口并复用 manifest/install 模块。
   - `crates/maslang/src/module_loader.rs`：解析入口文件、装载本地模块和已安装依赖、检测循环依赖，并产出扁平化后的 `Program`。
   - `crates/maslang/src/token.rs`、`lexer.rs`、`parser.rs`、`ast.rs`：补充 `import`、`pub`、`export import` 所需词法和语法结构。
   - `crates/fama/src/commands/build.rs`、`run.rs`：改为调用 `maslang` crate，并在编译前加载 `~/.fama/setting.toml`。
 - **数据流 / 控制流**：
-  1. `fama add` 读取目标依赖 `mod.yml`，把依赖写入当前项目 `mod.yml`。
+  1. `fama add` 读取目标依赖 `settings.toml`，把依赖写入当前项目 `settings.toml`。
   2. `fama install` 递归读取依赖图，按 `mod_module/<name>@<version>/` 创建平铺缓存，并回写 `mod-lock.yml`。
   3. `fama build/run` 读取项目 `settings.toml` 和 `~/.fama/setting.toml`，调用主力编译器。
   4. `maslang` 从入口文件开始装载模块，扁平化公开声明和重导出结果，最终再交给既有语义与 LLVM 后端。
@@ -104,15 +104,15 @@ pub fn analyze_module_graph(
 
 #### 数据模型 / API 设计
 
-- `mod.yml` 约定：
+- `settings.toml` 约定：
 
-```yaml
-name: demo
-version: 0.1.0
-dependencies:
-  math:
-    path: ../math-lib
-    version: 0.1.0
+```toml
+[project]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+math = { path = "../math-lib", version = "0.1.0" }
 ```
 
 - `mod-lock.yml` 约定：

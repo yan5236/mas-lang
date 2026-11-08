@@ -50,11 +50,17 @@ struct ModuleLoader<'a> {
     project_root: PathBuf,
     loaded_modules: BTreeMap<PathBuf, LoadedModule>,
     active_modules: HashSet<PathBuf>,
-    dependency_cache: BTreeMap<PathBuf, BTreeSet<String>>,
+    dependency_cache: BTreeMap<PathBuf, BTreeMap<String, DependencyVersion>>,
     package_roots: BTreeSet<PathBuf>,
     origins: Vec<crate::source_map::ModuleOrigin>,
     synthetic_source: String,
     statements: Vec<Stmt>,
+}
+
+/// 保存项目设置中模块解析所需的依赖版本。
+#[derive(Clone, serde::Deserialize)]
+struct DependencyVersion {
+    version: String,
 }
 
 /// 保存单个模块对外可见的公开符号映射。
@@ -244,75 +250,79 @@ impl<'a> ModuleLoader<'a> {
             return Err(CompilerError::syntax_message("导入路径不能为空", path.span));
         }
 
-        let dependency_names = self.read_dependency_names(package_root)?;
-        if !path.is_local() && dependency_names.contains(&segments[0]) {
-            let dependency_root = self.find_dependency_root(&segments[0])?;
-            let target =
-                resolve_module_file(&dependency_root.join("src"), &segments[1..], path.span)?;
-            return Ok((target, dependency_root));
+        if !path.is_local() {
+            let dependencies = self.read_dependencies(package_root)?;
+            if let Some(dependency) = dependencies.get(&segments[0]).cloned() {
+                let dependency_root =
+                    self.find_dependency_root(&segments[0], &dependency.version, path.span)?;
+                let target =
+                    resolve_module_file(&dependency_root.join("src"), &segments[1..], path.span)?;
+                return Ok((target, dependency_root));
+            }
         }
 
         let target = resolve_module_file(&package_root.join("src"), segments, path.span)?;
         Ok((target, package_root.to_path_buf()))
     }
 
-    /// 读取当前包 `mod.yml` 中声明的依赖名集合，供导入解析顺序判断复用。
-    fn read_dependency_names(
+    /// 读取并缓存当前包的 TOML 依赖表；清单格式错误时返回带路径的诊断。
+    fn read_dependencies(
         &mut self,
         package_root: &Path,
-    ) -> Result<BTreeSet<String>, CompilerError> {
-        if let Some(cached) = self.dependency_cache.get(package_root) {
-            return Ok(cached.clone());
+    ) -> Result<&BTreeMap<String, DependencyVersion>, CompilerError> {
+        #[derive(serde::Deserialize)]
+        struct Settings {
+            #[serde(default)]
+            dependencies: BTreeMap<String, DependencyVersion>,
         }
 
-        let manifest_path = package_root.join("mod.yml");
-        let text = fs::read_to_string(&manifest_path).map_err(|error| {
-            CompilerError::build_message(
-                format!("读取依赖清单失败：{}: {error}", manifest_path.display()),
-                Span::new(0, 0),
-            )
-        })?;
-        let names = parse_dependency_names(&text);
-        self.dependency_cache
-            .insert(package_root.to_path_buf(), names.clone());
-        Ok(names)
+        let manifest_path = package_root.join("settings.toml");
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            self.dependency_cache.entry(package_root.to_path_buf())
+        {
+            let text = fs::read_to_string(&manifest_path).map_err(|error| {
+                CompilerError::build_message(
+                    format!("读取项目设置失败：{}: {error}", manifest_path.display()),
+                    Span::new(0, 0),
+                )
+            })?;
+            let settings: Settings = toml::from_str(&text).map_err(|error| {
+                CompilerError::build_message(
+                    format!("解析项目设置失败：{}: {error}", manifest_path.display()),
+                    Span::new(0, 0),
+                )
+            })?;
+            entry.insert(settings.dependencies);
+        }
+        Ok(&self.dependency_cache[package_root])
     }
 
-    /// 在当前项目根目录的 `mod_module/` 平铺缓存中定位依赖包根目录。
-    fn find_dependency_root(&self, dependency_name: &str) -> Result<PathBuf, CompilerError> {
-        let store_root = self.project_root.join("mod_module");
-        let mut matches = Vec::new();
-        for entry in fs::read_dir(&store_root).map_err(|error| {
-            CompilerError::build_message(
-                format!("读取依赖缓存目录失败：{}: {error}", store_root.display()),
-                Span::new(0, 0),
-            )
-        })? {
-            let entry = entry.map_err(|error| {
-                CompilerError::build_message(format!("读取依赖缓存失败：{error}"), Span::new(0, 0))
-            })?;
-            let path = entry.path();
-            if path.is_dir()
-                && path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&format!("{dependency_name}@")))
-            {
-                matches.push(path);
-            }
+    /// 按清单中的精确版本定位已安装依赖，避免历史缓存参与选择。
+    fn find_dependency_root(
+        &self,
+        name: &str,
+        version: &str,
+        span: Span,
+    ) -> Result<PathBuf, CompilerError> {
+        if !crate::settings::is_dependency_cache_component(name)
+            || !crate::settings::is_dependency_cache_component(version)
+        {
+            return Err(CompilerError::build_message(
+                "依赖名称或版本含有不安全的缓存路径字符",
+                span,
+            ));
         }
-
-        match matches.len() {
-            1 => Ok(matches.remove(0)),
-            0 => Err(CompilerError::build_message(
-                format!("未安装依赖 `{dependency_name}`，请先执行 fama install"),
-                Span::new(0, 0),
-            )),
-            _ => Err(CompilerError::build_message(
-                format!("依赖 `{dependency_name}` 出现多个缓存版本，请先解决冲突"),
-                Span::new(0, 0),
-            )),
+        let path = self
+            .project_root
+            .join("mod_module")
+            .join(format!("{name}@{version}"));
+        if path.is_dir() {
+            return Ok(path);
         }
+        Err(CompilerError::build_message(
+            format!("未安装依赖 `{name}@{version}`，请先执行 fama install"),
+            span,
+        ))
     }
 }
 
@@ -784,30 +794,6 @@ fn merge_imports(
     Ok(inserted)
 }
 
-fn parse_dependency_names(text: &str) -> BTreeSet<String> {
-    let mut dependencies = BTreeSet::new();
-    let mut in_dependencies = false;
-    for raw_line in text.lines() {
-        let line = raw_line.trim_end();
-        let trimmed = line.trim_start();
-        if trimmed == "dependencies:" || trimmed == "dependencies: {}" {
-            in_dependencies = true;
-            continue;
-        }
-        if !raw_line.starts_with("  ") {
-            in_dependencies = false;
-        }
-        if in_dependencies
-            && raw_line.starts_with("  ")
-            && !raw_line.starts_with("    ")
-            && trimmed.ends_with(':')
-        {
-            dependencies.insert(trimmed.trim_end_matches(':').to_string());
-        }
-    }
-    dependencies
-}
-
 fn resolve_module_file(
     module_root: &Path,
     segments: &[String],
@@ -853,10 +839,11 @@ fn read_module_source(path: &Path) -> Result<SourceFile, CompilerError> {
     Ok(SourceFile::new(path.display().to_string(), text))
 }
 
+/// 从入口所在目录向上寻找最近的项目设置文件。
 fn discover_project_root(entry_path: &Path) -> Option<PathBuf> {
     let mut current = entry_path.parent();
     while let Some(path) = current {
-        if path.join("mod.yml").is_file() {
+        if path.join("settings.toml").is_file() {
             return Some(path.to_path_buf());
         }
         current = path.parent();
@@ -864,13 +851,16 @@ fn discover_project_root(entry_path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// 为入口或缓存模块定位所属包，找不到设置文件时返回构建诊断。
 fn discover_package_root(
     module_path: &Path,
     project_root: &Path,
 ) -> Result<PathBuf, CompilerError> {
     let mut current = module_path.parent();
     while let Some(path) = current {
-        if path.join("mod.yml").is_file() && path.join("src").is_dir() {
+        if path.join("settings.toml").is_file()
+            && (path == project_root || path.join("src").is_dir())
+        {
             return Ok(path.to_path_buf());
         }
         if path == project_root {

@@ -8,7 +8,7 @@ use std::process::Command;
 #[test]
 fn length_matches_documented_types() {
     let root = TemporaryDirectory::create("mascript-length-test").unwrap();
-    let text = "print(len(\"hello\"))\nprint(len(\"你好\"))\nprint(len(\"😀\"))\nprint(len(\"é\"))\nprint(len(\"\"))\nvar s = \"你\" + \"好\"\nprint(len(s))\nprint(len([1,2,3]))\nprint(len({1:2}))\nvar a = array<int,3>(1,2,3)\nprint(len(a))\nfunc make() -> array<int,2>:\n    print(42)\n    return array<int,2>(1,2)\nprint(len(make()))\n";
+    let text = "func make() -> array<int,2>:\n    print(42)\n    return array<int,2>(1,2)\nfunc main():\n    print(len(\"hello\"))\n    print(len(\"你好\"))\n    print(len(\"😀\"))\n    print(len(\"é\"))\n    print(len(\"\"))\n    var s = \"你\" + \"好\"\n    print(len(s))\n    print(len([1,2,3]))\n    print(len({1:2}))\n    var a = array<int,3>(1,2,3)\n    print(len(a))\n    print(len(make()))\n";
     let source = SourceFile::new(
         root.path().join("main.ms").display().to_string(),
         text.to_string(),
@@ -26,7 +26,7 @@ fn length_matches_documented_types() {
         String::from_utf8(output.stdout).unwrap(),
         "5\n2\n1\n2\n0\n2\n3\n1\n3\n42\n2\n"
     );
-    let invalid = SourceFile::new("invalid.ms", "print(len(1))\n".to_string());
+    let invalid = SourceFile::new("invalid.ms", "func main():\n    print(len(1))\n".to_string());
     assert!(
         analyze_source(&invalid, &settings)
             .unwrap_err()

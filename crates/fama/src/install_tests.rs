@@ -159,7 +159,7 @@ fn should_reinstall_when_lock_file_exists_but_store_dir_is_missing() {
     install_project_dependencies(&app_root).expect("补装依赖失败");
 
     assert!(store_dir.is_dir());
-    assert!(store_dir.join("mod.yml").is_file());
+    assert!(store_dir.join("settings.toml").is_file());
     assert!(store_dir.join("src").is_dir());
 }
 
@@ -239,9 +239,10 @@ fn should_refresh_store_when_dependency_source_changes() {
         .join("artifacts")
         .join("x86_64-pc-windows-msvc");
     fs::create_dir_all(&artifact_root).expect("创建新增预编译目录失败");
-    fs::write(
-        lib_root.join("settings.toml"),
-        "[native.prebuilt.x86_64-pc-windows-msvc]\nmanifest = \"native/artifacts/x86_64-pc-windows-msvc/manifest.toml\"\nobjects = [\"native/artifacts/x86_64-pc-windows-msvc/time_common.obj\"]\n",
+    use std::io::Write;
+    fs::OpenOptions::new().append(true).open(lib_root.join("settings.toml"))
+        .expect("打开 settings.toml 失败").write_all(
+        b"\n[native.prebuilt.x86_64-pc-windows-msvc]\nmanifest = \"native/artifacts/x86_64-pc-windows-msvc/manifest.toml\"\nobjects = [\"native/artifacts/x86_64-pc-windows-msvc/time_common.obj\"]\n",
     )
     .expect("写入 settings.toml 失败");
     fs::write(artifact_root.join("manifest.toml"), "target = \"x\"\n")
@@ -388,4 +389,26 @@ fn cached_graph_still_rejects_cycles_and_conflicts() {
     ));
     assert_eq!(fs::read(app.join("mod-lock.yml")).unwrap(), old_lock);
     fs::remove_dir_all(root).unwrap();
+}
+
+/// 恶意依赖版本不能用于拼接缓存路径，即使依赖源本身存在。
+#[test]
+fn rejects_dependency_versions_with_path_components() {
+    let app = create_temp_dir("unsafe-version");
+    fs::write(
+        app.join("settings.toml"),
+        r#"[project]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+lib = { path = ".", version = "0/../../outside" }
+"#,
+    )
+    .unwrap();
+
+    let error = install_project_dependencies(&app).unwrap_err();
+    assert!(error.to_string().contains("不安全的缓存路径字符"));
+    assert!(!app.join("mod_module").exists());
+    fs::remove_dir_all(app).unwrap();
 }

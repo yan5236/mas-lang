@@ -6,28 +6,28 @@ sidebar_position: 3
 
 Format the current UTC time as standard strings.
 
-## now_iso8601 — ISO 8601 Format
+## now_utc — ISO 8601 Format
 
 ```mas-lang
-let s: string = now_iso8601()
+var s: string = now_utc()
 // example: "2026-05-30T12:34:56+00:00"
 ```
 
 Returns an RFC 3339 / ISO 8601 formatted UTC string with a fixed `+00:00` offset. Suitable for data interchange, log files, and API responses.
 
-## now_rfc2822 — RFC 2822 Format
+## now_email_date — RFC 2822 Format
 
 ```mas-lang
-let s: string = now_rfc2822()
+var s: string = now_email_date()
 // example: "Fri, 30 May 2026 12:34:56 +0000"
 ```
 
 Returns an RFC 2822 formatted UTC string using English weekday and month abbreviations. Suitable for email and other legacy protocols.
 
-## now_rfc7231 — HTTP-date Format
+## now_http_date — HTTP-date Format
 
 ```mas-lang
-let s: string = now_rfc7231()
+var s: string = now_http_date()
 // example: "Fri, 30 May 2026 12:34:56 GMT"
 ```
 

@@ -1,0 +1,8 @@
+[project]
+name = "basic-conversions"
+version = "0.1.0"
+
+[build]
+entry = "main.ms"
+output = "build"
+opt-level = 2

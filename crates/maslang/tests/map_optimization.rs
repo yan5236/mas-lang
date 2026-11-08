@@ -74,10 +74,11 @@ func exercise():
             if i % 17 == 0:
                 mas_gc_collect()
     print(values[0])
-print(count_words())
-exercise()
-mas_gc_collect()
-print(mas_gc_live_objects())
+func main():
+    print(count_words())
+    exercise()
+    mas_gc_collect()
+    print(mas_gc_live_objects())
 "#;
     for level in [OptLevel::O0, OptLevel::O2, OptLevel::O3] {
         let output = execute(source, level);
@@ -93,15 +94,15 @@ print(mas_gc_live_objects())
 #[test]
 fn missing_integer_keys_keep_source_diagnostics() {
     for source in [
-        "var m:map<int,int> = {}\nm[2] = 7\nprint(m[1])\n",
-        "var m = {2:7}\nm.remove(2)\nprint(m[2])\n",
+        "var m:map<int,int> = {}\nfunc main():\n    m[2] = 7\n    print(m[1])\n",
+        "var m = {2:7}\nfunc main():\n    m.remove(2)\n    print(m[2])\n",
     ] {
         for level in [OptLevel::O0, OptLevel::O2, OptLevel::O3] {
             let output = execute(source, level);
             assert_eq!(output.status.code(), Some(1));
             let error = String::from_utf8(output.stderr).unwrap();
             assert!(error.contains("字典中不存在目标键"), "{error}");
-            assert!(error.contains("main.ms:3:"), "{error}");
+            assert!(error.contains("main.ms:4:"), "{error}");
         }
     }
 }
@@ -166,9 +167,10 @@ func exercise():
     print(detached[0])
     print(detached[79])
     other_values()
-exercise()
-mas_gc_collect()
-print(mas_gc_live_objects())
+func main():
+    exercise()
+    mas_gc_collect()
+    print(mas_gc_live_objects())
 "#;
     for level in [OptLevel::O0, OptLevel::O2, OptLevel::O3] {
         let output = execute(source, level);
@@ -223,7 +225,8 @@ func exercise():
         counted[key] = 1
     print(calls)
     print(len(counted))
-exercise()
+func main():
+    exercise()
 "#;
     for level in [OptLevel::O0, OptLevel::O2, OptLevel::O3] {
         let output = execute(source, level);
@@ -247,12 +250,13 @@ func mul(a:int,b:int) -> int:
     return a*b
 var high = int("9223372036854775807")
 var low = int("-9223372036854775808")
-print(add(high - 1,1))
-print(sub(low + 1,1))
-print(sub(low,-1))
-print(mul(low,1))
-print(mul(int("-3037000499"),3037000499))
-print(mul(low,0))
+func main():
+    print(add(high - 1,1))
+    print(sub(low + 1,1))
+    print(sub(low,-1))
+    print(mul(low,1))
+    print(mul(int("-3037000499"),3037000499))
+    print(mul(low,0))
 "#;
     for level in [OptLevel::O0, OptLevel::O2, OptLevel::O3] {
         let output = execute(good, level);
@@ -270,7 +274,7 @@ print(mul(low,0))
             ("*", "3037000500", "3037000500"),
         ] {
             let source = format!(
-                "func calc(a:int,b:int) -> int:\n    return a {op} b\nprint(calc(int(\"{a}\"),int(\"{b}\")))\n"
+                "func calc(a:int,b:int) -> int:\n    return a {op} b\nfunc main():\n    print(calc(int(\"{a}\"),int(\"{b}\")))\n"
             );
             let output = execute(&source, level);
             assert_eq!(output.status.code(), Some(1), "{source}: {output:?}");
