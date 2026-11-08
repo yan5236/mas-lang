@@ -1,0 +1,63 @@
+---
+sidebar_position: 1
+---
+
+# Strings
+
+## String Literals
+
+Strings are enclosed in double quotes:
+
+```mas-lang
+var s = "Hello, World"
+```
+
+## Escape Sequences
+
+| Sequence | Meaning |
+|----------|---------|
+| `\"` | Double quote |
+| `\\` | Backslash |
+| `\n` | Newline |
+| `\t` | Tab |
+
+```mas-lang
+print("She said: \"Hello!\"\n")
+```
+
+## Template Strings
+
+Use `${}` to interpolate expressions within strings:
+
+```mas-lang
+var name = "Mas lang"
+var version = 1
+print("${name} v${version}")
+// output: Mas lang v1
+```
+
+`${}` can contain arbitrary expressions:
+
+```mas-lang
+print("result: ${1 + 2 * 3}")
+```
+
+## String Methods
+
+```mas-lang
+var s = "  Hello World  "
+
+s.trim()          // "Hello World"
+s.contains("llo") // true
+s.starts_with("  He") // true
+s.ends_with("d  ")    // true
+s.replace("World", "Mas lang")  // "  Hello Mas lang  "
+```
+
+## String Concatenation
+
+Use `+` for concatenation:
+
+```mas-lang
+"Hello, " + "world"   // "Hello, world"
+```

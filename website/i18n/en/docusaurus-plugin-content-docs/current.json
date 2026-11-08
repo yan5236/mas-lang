@@ -1,0 +1,38 @@
+{
+  "version.label": {
+    "message": "Next",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.语言参考": {
+    "message": "Language Reference",
+    "description": "The label for category '语言参考' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.基础语法": {
+    "message": "Basic Syntax",
+    "description": "The label for category '基础语法' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.控制流": {
+    "message": "Control Flow",
+    "description": "The label for category '控制流' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.函数": {
+    "message": "Functions",
+    "description": "The label for category '函数' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.数据结构": {
+    "message": "Data Structures",
+    "description": "The label for category '数据结构' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.模块系统": {
+    "message": "Module System",
+    "description": "The label for category '模块系统' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.附录": {
+    "message": "Appendix",
+    "description": "The label for category '附录' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.标准库": {
+    "message": "Standard Library",
+    "description": "The label for category '标准库' in sidebar 'docsSidebar'"
+  }
+}

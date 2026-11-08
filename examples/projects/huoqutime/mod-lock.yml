@@ -1,0 +1,7 @@
+dependencies:
+  time:
+    version: 0.1.0
+    source:
+      type: path
+      path: ../../../stdlib/time
+    store_path: mod_module/time@0.1.0

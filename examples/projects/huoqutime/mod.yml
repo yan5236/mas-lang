@@ -1,0 +1,7 @@
+name: huoqutime
+version: 0.1.0
+
+dependencies:
+  time:
+    path: ../../../stdlib/time
+    version: 0.1.0

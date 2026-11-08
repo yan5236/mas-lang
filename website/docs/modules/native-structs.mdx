@@ -1,0 +1,133 @@
+---
+sidebar_position: 5
+---
+
+# 用结构体连接 C 库
+
+当 C 库需要一次接收或返回多个相关值时，可以定义自己的结构体，例如 `Time`，再用 `extern func` 声明指针接口。Mas lang 编译器负责传递对象引用，C 侧按同样的字段顺序和类型定义结构体。
+
+## 先从填写已有对象开始
+
+Mas lang 的 `Time` 参数对应 C 的 `Time*`，不是 C 的按值 `Time`。因此下面的 C 函数可以直接写回传入对象：
+
+```mas-lang
+struct Time:
+    seconds: int
+    nanoseconds: int
+
+extern func native_time_fill(output: Time)
+
+var now = Time(0, 0)
+native_time_fill(now)
+print(now.seconds)
+```
+
+对应的 C 文件：
+
+```c
+#include <stdint.h>
+#include <time.h>
+
+typedef struct Time {
+    int64_t seconds;
+    int64_t nanoseconds;
+} Time;
+
+/* 填写调用方提供的对象；不保存、不释放 output 指针。 */
+void native_time_fill(Time *output) {
+    output->seconds = (int64_t)time(NULL);
+    output->nanoseconds = 0;
+}
+```
+
+这已经足以封装许多现有 C 库：先在 Mas lang 创建对象，再让 C 的薄封装读取宿主类型并逐字段写入。现有库如果要求 `struct tm*` 或按值返回结构体，可由这个薄封装转换；不要把 `Time*` 直接当作布局不同的宿主结构体指针。
+
+## 可空参数与返回值
+
+`Time?` 也对应 `Time*`，但允许 `NULL`。非空时直接共享原来的对象，不再包一层。返回 `Time` 时不允许 `NULL`。
+
+```mas-lang
+struct Time:
+    seconds: int
+    nanoseconds: int
+
+extern func native_time_find(found: bool) -> Time?
+
+var result = native_time_find(true)
+if result != null:
+    print(result.value.seconds)
+```
+
+C 新建并返回对象时，使用编译器提供的 `native/include/mas_runtime.h`：
+
+```c
+#include "mas_runtime.h"
+
+typedef struct Time {
+    int64_t seconds;
+    int64_t nanoseconds;
+} Time;
+
+/* 找到时分配由 GC 管理的 Time，未找到返回 NULL。 */
+Time *native_time_find(uint8_t found) {
+    if (!found) return NULL;
+    Time *value = (Time *)mas_record_alloc(sizeof(Time), NULL, 0);
+    value->seconds = 1234;
+    value->nanoseconds = 0;
+    return value;
+}
+```
+
+这个 `Time` 只含数值，没有需要 GC 继续追踪的子引用，所以偏移表为空。C 也可以直接返回此前借入的托管对象，保留同一个对象的身份。不能返回局部变量地址、静态结构体地址或普通 `malloc` 分配的地址来充当 Mas lang 对象；返回边界会拒绝非托管对象，避免把不受管理的地址留在语言堆中。
+
+## 布局与所有权约定
+
+| Mas lang 字段 | C 字段 |
+| --- | --- |
+| `int` | `int64_t` |
+| `float` | `double` |
+| `bool` | `uint8_t`，只能写 0 或 1 |
+| `string` | `MasString`，UTF-8 指针与 `uint64_t` 长度 |
+| `Other`、`Other?` | `Other*`；只有可空类型允许 NULL |
+| `int?`、`float?`、`bool?`、`string?` | 指向对应载荷的指针，NULL 表示缺失 |
+| `list<T>`、`map<K,V>` | 不透明托管指针；不要依赖其内部布局 |
+| `array<T,N>` | 结构体内对应的 C 固定数组，元素按此表映射 |
+
+字段按声明顺序排列，使用目标平台的自然对齐，不使用 `#pragma pack`。结构体与可空值在函数边界按指针传递；基础类型的原有 ABI 保持不变。`string` 返回值仍采用字节指针返回值和尾部 `out_len` 参数，不是直接返回 `MasString`。
+
+可空基础值使用单字段托管载荷。例如 `int?` 对应 `int64_t*`，C 可以读取非空指针，也可以用 `mas_record_alloc(sizeof(int64_t), NULL, 0)` 创建返回值。可空列表等类型的载荷存放容器句柄；不能把容器句柄直接当作该载荷地址。
+
+如果 C 新建的对象包含字符串或其他托管引用，`mas_record_alloc` 的偏移表必须列出每一个托管指针在对象中的字节位置。表需声明为 `static const uint64_t[]`，保持整个程序生命周期有效；字符串列出 `ptr` 的偏移，数组列出每个元素的引用位置。分配返回零初始化存储，字段随后写入，对象不能由 C `free` 或 `realloc`。
+
+```c
+#include "mas_runtime.h"
+
+typedef struct NamedTime { int64_t seconds; MasString label; } NamedTime;
+
+/* 追踪 label.ptr；文本通过运行时复制，避免保存临时 C 缓冲区。 */
+NamedTime *native_named_time(void) {
+    static const uint64_t refs[] = { offsetof(NamedTime, label) };
+    NamedTime *value = (NamedTime *)mas_record_alloc(sizeof(NamedTime), refs, 1);
+    value->seconds = 1234;
+    value->label = mas_runtime_string_clone((const uint8_t *)"UTC", 3);
+    return value;
+}
+```
+
+原生调用在当前线程同步执行。借入指针只保证在调用期间及仍有 Mas lang 引用时存活；C 不得把它保存到后台线程或长期全局状态后继续访问。类型声明、对象实际布局和偏移表必须一致：所有权检查不会替 C 验证每个字段。
+
+## 接入工程
+
+把 C 源与 `mas_runtime.h` 放入包中，在 `settings.toml` 中配置现有原生源码链路：
+
+```toml
+[native]
+abi = 1
+include = ["native/include"]
+source_fallback = "explicit"
+
+[native.sources]
+common = ["native/time.c"]
+```
+
+维护者可运行 `maslang build src/main.ms --allow-native-source-build`，由现有工具链编译 C 源并链接；分发仍沿用包的预编译产物流程。当前验证平台为 Windows x86_64 MSVC。此接口采用显式指针与薄封装，不自动适配任意 C 结构体的按值调用约定。

@@ -1,0 +1,34 @@
+{
+  "version.label": {
+    "message": "最新",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.语言参考": {
+    "message": "语言参考",
+    "description": "Sidebar category label for 语言参考"
+  },
+  "sidebar.docsSidebar.category.基础语法": {
+    "message": "基础语法",
+    "description": "Sidebar category label for 基础语法"
+  },
+  "sidebar.docsSidebar.category.控制流": {
+    "message": "控制流",
+    "description": "Sidebar category label for 控制流"
+  },
+  "sidebar.docsSidebar.category.函数": {
+    "message": "函数",
+    "description": "Sidebar category label for 函数"
+  },
+  "sidebar.docsSidebar.category.数据结构": {
+    "message": "数据结构",
+    "description": "Sidebar category label for 数据结构"
+  },
+  "sidebar.docsSidebar.category.模块系统": {
+    "message": "模块系统",
+    "description": "Sidebar category label for 模块系统"
+  },
+  "sidebar.docsSidebar.category.附录": {
+    "message": "附录",
+    "description": "Sidebar category label for 附录"
+  }
+}

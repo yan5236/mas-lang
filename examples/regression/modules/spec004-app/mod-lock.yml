@@ -1,0 +1,13 @@
+dependencies:
+  spec004core_tmp:
+    version: 0.1.0
+    source:
+      type: path
+      path: ../spec004-core
+    store_path: mod_module/spec004core_tmp@0.1.0
+  spec004e2elib_tmp:
+    version: 0.1.0
+    source:
+      type: path
+      path: ../spec004-lib
+    store_path: mod_module/spec004e2elib_tmp@0.1.0

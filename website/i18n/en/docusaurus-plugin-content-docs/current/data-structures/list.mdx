@@ -1,0 +1,59 @@
+---
+sidebar_position: 2
+---
+
+# Lists
+
+## Type and Literals
+
+`list<T>` is a dynamic array storing elements of the same type:
+
+```mas-lang
+var list = [1, 2, 3, 4]           // list<int>
+var names: list<string> = ["a", "b"]
+var empty: list<int> = []
+```
+
+## Indexing
+
+Indexes start at 0:
+
+```mas-lang
+var list = [10, 20, 30]
+list[0]   // 10
+list[2]   // 30
+```
+
+## Slicing
+
+```mas-lang
+var list = [1, 2, 3, 4, 5]
+list[1:3]   // [2, 3]
+list[:3]    // [1, 2, 3]
+list[2:]    // [3, 4, 5]
+```
+
+Slice ranges are half-open (start inclusive, end exclusive).
+
+## List Methods
+
+```mas-lang
+var list = [1, 2, 3]
+
+list.append(4)              // [1, 2, 3, 4]
+list.remove(2)              // [1, 3, 4]
+list.pop()                  // returns 4, list is [1, 3]
+list.pop(0)                 // returns 1, list is [3]
+list.sort()                 // sort in place
+list.reverse()              // reverse in place
+list.index(3)               // returns index (error if not found)
+list.contains(3)            // true
+len(list)                   // length
+```
+
+## Iteration
+
+```mas-lang
+for item in list:
+    print(item)
+```

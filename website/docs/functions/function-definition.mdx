@@ -1,0 +1,61 @@
+---
+sidebar_position: 1
+---
+
+# 函数定义
+
+## 基本语法
+
+使用 `func` 关键字定义函数：
+
+```mas-lang
+func 函数名(参数名: 类型, ...) -> 返回类型:
+    函数体
+```
+
+## 无参数无返回值
+
+```mas-lang
+func hello():
+    print("Hello!")
+```
+
+## 有参数
+
+参数需要标注类型：
+
+```mas-lang
+func greet(name: string):
+    print("Hello " + name)
+
+func add(a: int, b: int):
+    print(a + b)
+```
+
+## 有返回值
+
+使用 `-> 类型` 标注返回类型，`return` 返回值：
+
+```mas-lang
+func add(a: int, b: int) -> int:
+    return a + b
+
+func max(a: int, b: int) -> int:
+    if a > b:
+        return a
+    return b
+```
+
+## 函数调用
+
+```mas-lang
+var result = add(3, 5)   // result = 8
+greet("Mas lang")
+```
+
+## 规则
+
+- 参数必须有类型标注
+- 标注了返回类型的函数必须有 `return` 语句返回值
+- 没有标注返回类型时，等价于返回 `unit`（无需 return）
+- 不支持函数重载（同名不同参函数）

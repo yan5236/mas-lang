@@ -1,0 +1,7 @@
+name: spec004e2elib_tmp
+version: 0.1.0
+
+dependencies:
+  spec004core_tmp:
+    path: ../spec004-core
+    version: 0.1.0

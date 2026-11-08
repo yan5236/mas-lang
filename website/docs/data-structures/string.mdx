@@ -1,0 +1,63 @@
+---
+sidebar_position: 1
+---
+
+# 字符串
+
+## 字面量
+
+字符串用双引号包裹：
+
+```mas-lang
+var s = "你好，世界"
+```
+
+## 转义序列
+
+| 序列 | 含义 |
+|------|------|
+| `\"` | 双引号 |
+| `\\` | 反斜杠 |
+| `\n` | 换行 |
+| `\t` | 制表符 |
+
+```mas-lang
+print("她说：\"你好！\"\n")
+```
+
+## 模板字符串
+
+使用 `${}` 在字符串中插值表达式：
+
+```mas-lang
+var name = "Mas lang"
+var version = 1
+print("${name} v${version}")
+// 输出：Mas lang v1
+```
+
+`${}` 中可以包含任意表达式：
+
+```mas-lang
+print("结果：${1 + 2 * 3}")
+```
+
+## 字符串方法
+
+```mas-lang
+var s = "  Hello World  "
+
+s.trim()          // "Hello World"
+s.contains("llo") // true
+s.starts_with("  He") // true
+s.ends_with("d  ")    // true
+s.replace("World", "Mas lang")  // "  Hello Mas lang  "
+```
+
+## 字符串拼接
+
+使用 `+` 拼接字符串：
+
+```mas-lang
+"Hello, " + "world"   // "Hello, world"
+```

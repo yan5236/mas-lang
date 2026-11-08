@@ -1,0 +1,8 @@
+[project]
+name = "spec004core_tmp"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"
+output = "build"
+opt-level = 2

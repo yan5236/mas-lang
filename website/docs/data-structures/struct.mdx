@@ -1,0 +1,160 @@
+---
+sidebar_position: 5
+---
+
+# 结构体：把相关数据放在一起
+
+一个人有姓名、年龄和是否为学生。分别保存这些变量，很容易把张三的名字和李四的年龄弄混。**结构体（`struct`）让你给这组数据起一个类型名**，每一项数据叫作“字段”。
+
+## 定义、创建和读取
+
+和 `func`、`if` 一样，定义以冒号结束，内部使用缩进，不使用花括号：
+
+```mas-lang
+struct Person:
+    name: string
+    age: int
+    student: bool
+
+var person = Person("小明", 18, true)
+print(person.name)
+print(person.age)
+```
+
+`Person` 是你定义的新类型，`person` 是这个类型的一个对象。`Person(...)` 按**字段声明顺序**传入值：姓名、年龄、是否为学生。每个字段都必须提供，类型必须匹配；不会自动把字符串 `"18"` 转成整数。
+
+字段写成 `字段名: 类型`，不加 `var`。结构体必须定义在文件顶层，不能放在函数或 `if` 里面。类型可以在使用它的函数后面定义；仍建议初学者把定义放在前面，方便阅读。
+
+## 修改和传参
+
+```mas-lang
+struct Counter:
+    count: int
+
+// 将传入计数器增加一次；调用者会看到字段变化。
+func increment(counter: Counter):
+    counter.count += 1
+
+var counter = Counter(0)
+increment(counter)
+print(counter.count) // 1
+```
+
+可以使用 `=` 修改字段；数值和字符串字段支持与现有变量一致的复合赋值规则。
+
+**结构体采用引用语义，和列表一样。** `var other = counter` 会让两个变量指向同一个对象，不会复制字段。通过其中一个变量修改字段，另一个也能看到。传给函数也是如此。要创建独立对象，应重新调用构造函数，例如 `Counter(counter.count)`。如果字段自身是结构体或列表，传入那个字段仍会共享它指向的对象。
+
+`const counter = Counter(0)` 只禁止重新绑定 `counter`，不冻结字段；这与现有列表的规则一致。对象由垃圾回收自动管理，不需要手动释放。
+
+## 嵌套结构体与容器字段
+
+```mas-lang
+struct Address:
+    city: string
+
+struct Customer:
+    name: string
+    address: Address
+    scores: list<int>
+
+var customer = Customer("小明", Address("杭州"), [90, 95])
+customer.address.city = "上海"
+customer.scores.append(100)
+print(customer.address.city)
+print(customer.scores[2])
+```
+
+字段可以是基础类型、另一个结构体、可空类型，或已有的列表、字典、定长数组。结构体名字不同就是不同类型，即使字段恰好一样，也不能互相赋值。
+
+## 没有子节点：结构体配合可空类型
+
+树的叶子没有子节点。用 `Node?` 表示“一个节点，或者没有节点”，用 `null` 表示“没有”：
+
+```mas-lang
+struct Node:
+    item: int
+    left: Node?
+    right: Node?
+
+// 空子树计为零，否则累加本节点和左右子树。
+func total(node: Node?) -> int:
+    if node == null:
+        return 0
+    var current = node.value
+    return current.item + total(current.left) + total(current.right)
+
+var root = Node(1, Node(2, null, null), null)
+print(total(root)) // 3
+```
+
+`Node` 必须是节点；`Node?` 还可以是 `null`。普通节点可自动传给接收 `Node?` 的函数。反过来必须显式取 `.value`，不能把可能为空的值直接当作节点使用。
+
+关于判空、默认值和常见错误，继续阅读[可空类型](../basics/nullable)。
+
+## 跨文件使用
+
+在 `src/model.ms` 中公开类型：
+
+```mas-lang
+pub struct Person:
+    name: string
+    age: int?
+```
+
+在 `src/main.ms` 中导入：
+
+```mas-lang
+import local.model { Person }
+var person = Person("小明", null)
+print(person.name)
+```
+
+与函数一样支持导入别名、`*` 导入及 `export import` 重导出。字段不需要单独加 `pub`；能够使用这个类型就能访问其字段。
+
+## 什么时候应该使用
+
+- 同一对象有不同类型的数据，例如商品的名字、价格和库存：用结构体。
+- 多个函数总是一起传递同一组数据：把它们组织成结构体，参数更清楚。
+- 需要树或链表等节点：用结构体表示节点，用可空字段表示不存在的连接。
+- 只有一组同类型数字：继续使用列表；键名由用户输入、运行时才知道：继续使用字典。
+
+不必为了一个计数就创建结构体，也不必用它替换所有字典。
+
+## 当前边界
+
+当前提供字段定义、构造、读写和模块公开，不提供成员函数、继承、字段默认值、命名构造参数或自动深复制。每次构造必须传入全部字段。
+
+结构体和可空值可以用于列表元素、数组元素和字典值，例如 `list<Person?>`、`array<Person,2>`、`map<string,Person>`。列表和字典值也支持嵌套列表、字典。字典键支持基础类型及结构体引用；结构体键按对象身份匹配，不按字段比较。
+
+`extern func` 支持结构体和可空值，使用明确的 C 指针接口。详见[结构体原生接口](../modules/native-structs)，包含自定义 `Time` 类型的完整用法。
+
+不能直接 `print(person)` 或比较两个结构体是否相等；应读取并打印、比较所需的字段。
+
+## 用列表管理多个结构体
+
+多个同类对象可以放进 `list<Person>`，例如班级学生、购物车商品或任务列表。空列表需要标注元素类型，非空列表可以从元素推断类型。
+
+```mas-lang
+struct Person:
+    name: string
+    age: int
+
+var people: list<Person> = []
+var alice = Person("Alice", 18)
+people.append(alice)
+people.append(Person("Bob", 20))
+people[0].age = 19
+print(alice.age) // 19：列表里保存的是同一个对象
+
+for person in people:
+    print(person.name)
+
+var selected = people[0:1]
+print(selected[0].age) // 19
+var last = people.pop()
+print(last.name) // Bob
+```
+
+列表保存结构体引用。取出元素、传参或切片都会共享原对象；修改其字段能从其他引用看到。`people[0] = Person("Carol", 22)` 只替换该槽位，不会改变原来的 `alice`。
+
+`contains`、`index` 和 `remove` 按同一个对象匹配，不逐字段比较。因此 `people.contains(alice)` 为真，但新建一个字段完全相同的 `Person("Alice", 19)` 不会匹配。`reverse()` 支持结构体列表；`sort()` 不支持，因为结构体没有默认排序规则。列表不会自动按姓名或年龄排序。

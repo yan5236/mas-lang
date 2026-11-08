@@ -1,0 +1,7 @@
+name: spec004e2eapp_tmp
+version: 0.1.0
+
+dependencies:
+  spec004e2elib_tmp:
+    path: ../spec004-lib
+    version: 0.1.0

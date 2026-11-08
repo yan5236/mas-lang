@@ -1,0 +1,167 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Mascript",
+  "scopeName": "source.mascript",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#functionDeclarations"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#booleans"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#functionCalls"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.mascript",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.mascript",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.mascript"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.mascript"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.mascript",
+              "match": "\\\\(?:[\"\\\\nt])"
+            }
+          ]
+        }
+      ]
+    },
+    "functionDeclarations": {
+      "patterns": [
+        {
+          "name": "meta.function.mascript",
+          "match": "\\b(func)\\b\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.function.mascript"
+            },
+            "2": {
+              "name": "entity.name.function.mascript"
+            }
+          }
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.mascript",
+          "match": "\\bprint(?=\\s*\\()"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.mascript",
+          "match": "\\b(var|const|if|elif|else|while|for|in|break|continue|return|and|or|not)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.mascript",
+          "match": "\\b(int|float|bool|string)\\b"
+        }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.mascript",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.mascript",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.mascript",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "functionCalls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.mascript",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.mascript",
+          "match": "%/%|\\+=|-=|\\*=|/=|%=|==|!=|<=|>=|->|\\.\\.|[=+\\-*/%<>]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.mascript",
+          "match": "[:,]"
+        },
+        {
+          "name": "punctuation.section.parens.begin.mascript",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.parens.end.mascript",
+          "match": "\\)"
+        }
+      ]
+    }
+  }
+}

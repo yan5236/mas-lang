@@ -1,0 +1,45 @@
+use std::collections::HashMap;
+
+use crate::settings::CompilerSettings;
+
+mod analysis;
+mod annotations;
+mod containers;
+mod expressions;
+mod operations;
+mod records;
+mod scope;
+mod statements;
+#[cfg(test)]
+mod tests;
+mod types;
+
+pub use self::types::{FunctionSignature, ValueType};
+
+use self::types::SymbolInfo;
+
+/// 使用作用域栈和函数符号表对 AST 进行静态语义检查。
+pub struct SemanticAnalyzer<'a> {
+    settings: &'a CompilerSettings,
+    scopes: Vec<HashMap<String, SymbolInfo>>,
+    frame_starts: Vec<usize>,
+    structs: HashMap<String, Vec<crate::ast::Parameter>>,
+    functions: HashMap<String, FunctionSignature>,
+    current_return_type: Option<ValueType>,
+    loop_depth: usize,
+}
+
+impl<'a> SemanticAnalyzer<'a> {
+    /// 创建一个新的语义分析器，并初始化全局作用域。
+    pub fn new(settings: &'a CompilerSettings) -> Self {
+        Self {
+            settings,
+            scopes: vec![HashMap::new()],
+            frame_starts: vec![0],
+            structs: HashMap::new(),
+            functions: HashMap::new(),
+            current_return_type: None,
+            loop_depth: 0,
+        }
+    }
+}

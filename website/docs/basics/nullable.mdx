@@ -1,0 +1,140 @@
+---
+sidebar_position: 5
+---
+
+# 可空类型：明确表示“没有值”
+
+`int` 表示一定有一个整数。**`int?` 表示一个整数，或者没有值。** 问号 `?` 写在类型后面；没有值时写 `null`。你不需要先学习指针或“可空引用”这些术语。
+
+```mas-lang
+var age: int? = null // 还不知道年龄
+age = 18            // 现在知道了
+age = null          // 清除记录
+```
+
+`null` 不是零、不是 `false`，也不是空字符串。它表达的是“没有数据”：库存 `0` 表示已经售罄，库存 `null` 可以表示尚未查询。
+
+## 先判空，再取值
+
+```mas-lang
+var age: int? = 18
+if age != null:
+    print(age.value + 1) // 19
+else:
+    print("还不知道年龄")
+```
+
+`age != null` 判断是否有值；`age.value` 取出整数。取出的类型是 `int`，可以正常计算。
+
+**即使已经判空，当前版本仍显式写 `.value`。** 编译器不会因为 `if` 条件而自动改变变量类型。`.value` 也会在运行时检查空值：如果是 `null`，程序报告错误和源码位置后退出，不会把空值偷偷变成 `0`。
+
+需要默认值时，使用熟悉的 `if/else`：
+
+```mas-lang
+var saved: int? = null
+var count = 0
+if saved != null:
+    count = saved.value
+print(count) // 0
+```
+
+`and`、`or` 保持短路规则，所以下面也是安全的：
+
+```mas-lang
+var score: int? = null
+if score != null and score.value >= 60:
+    print("及格")
+```
+
+如果可空值可能被另一个函数修改，建议判空后立即保存 `var actual = score.value`，后续使用 `actual`；对可空结构体取出的对象仍是共享引用。
+
+## 函数有时找不到结果
+
+```mas-lang
+// 返回库存；未知商品没有记录，因此返回 null。
+func find_stock(name: string) -> int?:
+    if name == "铅笔":
+        return 0
+    if name == "本子":
+        return 12
+    return null
+
+var stock = find_stock("铅笔")
+if stock == null:
+    print("没有这个商品的记录")
+else:
+    print(stock.value) // 0：有记录，只是没有库存
+```
+
+这比约定 `-1` 表示“没找到”更清楚：`-1` 可能本来就是合法数据，而 `null` 的含义独立于数值范围。
+
+返回类型为 `int?` 的函数可以返回整数或 `null`，但仍必须在所有路径上返回。只有不返回任何数据的函数才省略返回类型；`null` 与这种“无返回值”不是同一回事。
+
+## 可以在哪些地方使用
+
+```mas-lang
+struct Profile:
+    name: string
+    nickname: string?
+
+// 接受明确的分数或尚未得到的分数。
+func show_score(score: int?):
+    if score == null:
+        print("尚无成绩")
+    else:
+        print(score.value)
+
+var profile = Profile("小明", null)
+var enabled: bool? = false
+var temperature: float? = 0.0
+var items: list<int>? = []
+show_score(90)
+show_score(null)
+print(enabled.value) // false 是有效值
+print(len(items.value)) // 0：空列表依然是有效值
+```
+
+问号也可以用于结构体、字符串以及整个列表、字典或数组：例如 `Profile?`、`string?`、`list<int>?`。
+
+`list<int>?` 表示“列表本身可能不存在”；`[]` 表示“存在一个列表，但里面没有元素”。两者用途不同。`list<int?>` 则表示“列表存在，但其中每个整数可能缺失”；`list<Person?>` 同样支持空的结构体位置。
+
+可空变量不会自动初始化；请明确写 `= null` 或初始值。只有现有的定长数组声明保留省略初始值的规则。
+
+## 常见错误
+
+| 写法 | 原因与修正 |
+| --- | --- |
+| `var age: int = null` | `int` 不允许空值；确实可能缺失时改用 `int?`。 |
+| `var age = null` | 无法从 null 推断实际类型；写 `var age: int? = null`。 |
+| `age + 1`（age 为 int?） | 可能没有整数；先判空，再用 `age.value + 1`。 |
+| `person.name`（person 为 Person?） | 可能没有对象；先判空，再用 `person.value.name`。 |
+| `age.value`（age 为 null） | 运行时错误；先判断 `age != null`。 |
+| `print(age)`（age 为 int?） | 当前 print 接受基础类型；判空后打印 `.value`，空时打印说明文字。 |
+
+可空值当前支持与 `null` 的 `==`、`!=` 比较。要比较两个可空值的实际内容，先分别判空，再比较 `.value`。没有 `?.`、`??` 或 `!` 解包语法，使用上述显式写法即可。
+
+## 什么时候用，什么时候不用
+
+用在“正常情况下也可能没有”的数据上：可选昵称、查询未命中、树节点没有子节点、尚未填写的日期。确实总有值的字段仍用普通类型，这样漏填时编译器能立即发现。
+
+不要把所有类型都加问号，也不要用 `null` 掩盖本应处理的程序错误。例如索引越界仍然是错误，不会因为增加可空类型就自动返回 null。
+
+现有 `try_int` 等[安全转换](../functions/safe-conversion)继续返回 `.ok` / `.value` 结果，没有改变成可空类型。如果你的业务只需要“有整数或没有整数”，可以自行将失败映射成 `null`。
+
+当前实现中，结构体的可空值复用对象引用；其他非空可空值由运行时保存并自动回收。`T?` 不是免费性能优化：只在需要表达缺失时使用它。
+
+## 容器中的缺失值
+
+```mas-lang
+var scores: list<int?> = [90, null]
+scores.append(100)
+scores[1] = 80
+print(scores[1].value) // 80
+print(scores.contains(90)) // true：可空基础值按内容查找
+
+var cached: map<string,int?> = {"today": null}
+cached["today"] = 42
+print(cached["today"].value)
+```
+
+往 `T?` 元素位置写入 `T` 会自动提升，写入 `null` 表示缺失。读取时保留 `T?` 类型，需要判空后用 `.value`。字典中“键不存在”和“键对应的值为 null”不同：前者下标访问仍会报错，先用 `contains(key)` 判断。

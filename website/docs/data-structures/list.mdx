@@ -1,0 +1,65 @@
+---
+sidebar_position: 2
+---
+
+# 列表
+
+## 类型与字面量
+
+`list<T>` 是动态数组，存储同类型的基础值、结构体、可空值、列表或字典：
+
+```mas-lang
+var list = [1, 2, 3, 4]           // list<int>
+var names: list<string> = ["a", "b"]
+var empty: list<int> = []
+```
+
+## 索引访问
+
+索引从 0 开始：
+
+```mas-lang
+var list = [10, 20, 30]
+list[0]   // 10
+list[2]   // 30
+```
+
+## 切片
+
+```mas-lang
+var list = [1, 2, 3, 4, 5]
+list[1:3]   // [2, 3]
+list[:3]    // [1, 2, 3]
+list[2:]    // [3, 4, 5]
+```
+
+切片范围左闭右开。
+
+## 列表方法
+
+```mas-lang
+var list = [1, 2, 3]
+
+list.append(4)              // [1, 2, 3, 4]
+list.remove(2)              // [1, 3, 4]
+list.pop()                  // 返回 4，list 变为 [1, 3]
+list.pop(0)                 // 返回 1，list 变为 [3]
+list.sort()                 // 排序
+list.reverse()              // 反转
+list.index(3)               // 返回元素索引（不存在时报错）
+list.contains(3)            // true
+len(list)                   // 长度
+```
+
+## 遍历
+
+```mas-lang
+for item in list:
+    print(item)
+```
+
+## 结构体元素
+
+可以用 `list<Person>` 存储已经定义的 `Person` 结构体，也可以用 `[Person(...)]` 推断类型。支持追加、下标读写、遍历、切片、弹出和反转；元素共享对象引用。`contains/index/remove` 按对象引用匹配，`sort()` 不支持结构体元素。完整示例见[结构体列表](./struct#用列表管理多个结构体)。
+
+可空基础元素的 `contains/index/remove` 按内容匹配（两个 `null` 相同），结构体和容器按对象引用匹配。`sort()` 仅支持非可空基础元素。嵌套空列表需要上下文，例如 `var rows: list<list<int>> = [[], [1, 2]]`。固定数组是内联值，目前不能直接作为动态列表元素；这类场景使用嵌套列表。

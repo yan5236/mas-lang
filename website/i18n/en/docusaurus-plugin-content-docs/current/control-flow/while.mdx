@@ -1,0 +1,49 @@
+---
+sidebar_position: 2
+---
+
+# while Loops
+
+## Basic Syntax
+
+```mas-lang
+while condition:
+    // loop body
+```
+
+The loop body executes repeatedly while the condition is `true`:
+
+```mas-lang
+var i = 0
+while i < 5:
+    print(i)
+    i += 1
+// prints 0 1 2 3 4
+```
+
+## break
+
+`break` exits the loop immediately:
+
+```mas-lang
+var i = 0
+while i < 10:
+    if i == 5:
+        break
+    i += 1
+// i ends up as 5
+```
+
+## continue
+
+`continue` skips the current iteration and proceeds to the next:
+
+```mas-lang
+var i = 0
+while i < 5:
+    i += 1
+    if i == 3:
+        continue
+    print(i)
+// prints 1 2 4 5 (skipped 3)
+```

@@ -1,1 +1,7 @@
-/target
+/target/
+**/node_modules/
+**/mod_module/
+**/build/
+**/.fama-home/
+**/.pnpm-store/
+/editors/vscode/server/mas-lang-lsp.exe

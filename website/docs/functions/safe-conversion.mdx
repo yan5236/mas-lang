@@ -1,0 +1,63 @@
+---
+sidebar_position: 3
+---
+
+# 安全转换
+
+安全转换函数在转换失败时不会产生运行时错误，而是返回一个结果对象，可通过 `.ok` 和 `.value` 判断转换是否成功。
+
+## try_int()
+
+```mas-lang
+var result = try_int("123")
+if result.ok:
+    print(result.value)   // 123
+else:
+    print("转换失败")
+```
+
+## try_float()
+
+```mas-lang
+var result = try_float("3.14")
+if result.ok:
+    print(result.value)   // 3.14
+```
+
+## try_bool()
+
+```mas-lang
+var result = try_bool("true")
+if result.ok:
+    print(result.value)   // true
+```
+
+## 返回值结构
+
+安全转换函数返回 `SafeConvertResult<T>` 类型，包含两个属性：
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `.ok` | bool | 转换是否成功 |
+| `.value` | T | 转换后的值（仅在 ok 为 true 时有效） |
+
+`try_string()` 不存在，因为字符串转换几乎不会失败。
+
+`try_int` 接受整数、布尔值、字符串和浮点数。整数与布尔值转换总是成功；浮点数先检查范围，向零截断小数部分。NaN、正负无穷，以及小于 `-9223372036854775808.0` 或大于等于 `9223372036854775808.0` 的值返回 `ok=false`，失败时 `value` 为 `0`。
+
+`int(float)` 使用同一范围检查，失败时报告带源码位置的运行时错误并以状态码 1 退出。
+
+例如：
+
+```mas-lang
+var result = try_int(true)   // result.ok == true, result.value == 1
+```
+
+```mas-lang
+var huge = try_int(float("1e20"))
+print(huge.ok)      // false
+var small = try_int(-3.9)
+print(small.value)  // -3
+```
+
+浮点转整数检查的是已经舍入为 64 位浮点数的值，可用范围是 `[-2^63, 2^63)`。例如 `-9223372036854776000.0` 和 `-9223372036854775809.0` 都会先舍入为精确的 `-2^63`，因此转换成功；真正更小的相邻值 `-9223372036854777856.0` 转换失败。`9223372036854775807.0` 则会舍入为 `2^63`，因此转换失败。需要精确保留十进制整数时，使用整数字面量或 `try_int("...")`，不要先经过 `float`。

@@ -1,0 +1,24 @@
+---
+sidebar_position: 2
+---
+
+# Operator Precedence
+
+From lowest to highest:
+
+| Precedence | Operators | Description |
+|------------|-----------|-------------|
+| 1 (lowest) | `or` | Logical OR |
+| 2 | `and` | Logical AND |
+| 3 | `==` `!=` | Equality |
+| 4 | `<` `<=` `>` `>=` | Comparison |
+| 5 | `+` `-` | Addition, subtraction, string concatenation |
+| 6 | `*` `/` `%` `%/%` | Multiplication, division, modulo, integer division |
+| 7 | `-` `not` | Unary negation, logical NOT |
+| 8 (highest) | `()` `[]` `.` `[:]` | Call, index, member access, slice |
+
+All binary operators are left-associative. Use parentheses `()` to override precedence:
+
+```mas-lang
+var result = (2 + 3) * 4   // 20
+```

@@ -1,0 +1,12 @@
+[package]
+name = "mas-lang-lsp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+maslang.workspace = true
+tokio = { version = "1", features = ["full"] }
+tower-lsp = "0.20"
+
+[dev-dependencies]
+serde_json = "1"

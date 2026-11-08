@@ -1,0 +1,43 @@
+---
+sidebar_position: 1
+---
+
+# 导入
+
+## 导入语法
+
+使用 `import` 导入其他模块中的公开符号：
+
+```mas-lang
+// 导入特定符号
+import utils.math { add, sub }
+
+// 带别名导入
+import utils.math { add as plus }
+
+// 通配导入
+import utils.math.*
+
+// 导入标准库
+import std.io { print }
+```
+
+## 模块路径
+
+- 路径使用点分隔：`utils.math` 对应 `src/utils/math.ms`
+- `index.ms` 是目录入口文件，路径 `utils` 对应 `src/utils/index.ms`
+- `std` 前缀指向标准库
+
+## local 前缀
+
+当本地模块与外部包名冲突时，使用 `local.` 前缀强制指向本地模块：
+
+```mas-lang
+import local.time { format }
+```
+
+## 导入解析顺序
+
+1. `std.xxx` 指向标准库
+2. 顶层名称匹配合 `mod.yml` 中的外部包
+3. 否则解析为 `src/` 下的本地模块

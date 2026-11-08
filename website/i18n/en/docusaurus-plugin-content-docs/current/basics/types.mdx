@@ -1,0 +1,63 @@
+---
+sidebar_position: 1
+---
+
+# Type System
+
+Mas lang is statically typed — every value has a definite type.
+
+## Primitive Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `int` | 64-bit signed integer | `42`, `-3` |
+| `float` | 64-bit floating point | `3.14`, `-0.5` |
+| `bool` | Boolean | `true`, `false` |
+| `string` | UTF-8 string | `"hello"` |
+
+## Composite Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `list<T>` | Dynamic array | `[1, 2, 3]` |
+| `map<K,V>` | Key-value dictionary | `{"a": 1}` |
+| `array<T,N>` | Fixed-length array | `array<int,3>(1,2,3)` |
+
+## Type Annotations
+
+Use `: type` after a variable or parameter name:
+
+```mas-lang
+var count: int = 0
+var price: float = 9.99
+var name: string = "Mas lang"
+var items: list<int> = [1, 2, 3]
+var user: map<string, int> = {"age": 18}
+var fixed: array<int, 3>
+```
+
+## Type Inference
+
+When an initial value is provided, the type annotation can be omitted:
+
+```mas-lang
+var count = 0         // inferred as int
+var price = 9.99      // inferred as float
+var name = "Mas lang"  // inferred as string
+var items = [1, 2, 3]  // inferred as list<int>
+```
+
+## unit Type
+
+Functions without a return value have type `unit` (similar to void):
+
+```mas-lang
+func greet(name: string):
+    print("Hello " + name)
+// This function returns unit — no return statement needed
+```
+
+## Type Constraints
+
+- Container elements can only be primitive types (int, float, bool, string); nested containers are not supported
+- When mixing `int` and `float` in arithmetic, `int` is automatically promoted to `float`

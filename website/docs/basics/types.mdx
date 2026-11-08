@@ -1,0 +1,67 @@
+---
+sidebar_position: 1
+---
+
+# 类型系统
+
+Mas lang 是静态类型语言，每个值都有确定的类型。
+
+## 基本类型
+
+| 类型 | 描述 | 示例 |
+|------|------|------|
+| `int` | 64 位有符号整数 | `42`、`-3` |
+| `float` | 64 位浮点数 | `3.14`、`-0.5` |
+| `bool` | 布尔值 | `true`、`false` |
+| `string` | UTF-8 字符串 | `"你好"`、`"hello"` |
+
+`int` 的范围为 `-9223372036854775808` 到 `9223372036854775807`，两端均可直接写为字面量。整数运算超出范围时报告运行时错误，不会回绕。
+
+## 复合类型
+
+| 类型 | 描述 | 示例 |
+|------|------|------|
+| `list<T>` | 动态数组 | `[1, 2, 3]` |
+| `map<K,V>` | 键值对字典 | `{"a": 1}` |
+| `array<T,N>` | 固定长度数组 | `array<int,3>(1,2,3)` |
+
+使用 [`struct`](../data-structures/struct) 可以定义自己的复合类型；使用 [`T?`](./nullable) 可以表示一个值也可能是 `null`。例如 `Person` 表示一个人，`Person?` 表示一个人或没有人。
+
+## 类型标注
+
+在变量或参数名后加 `: 类型` 进行类型标注：
+
+```mas-lang
+var count: int = 0
+var price: float = 9.99
+var name: string = "Mas lang"
+var items: list<int> = [1, 2, 3]
+var user: map<string, int> = {"age": 18}
+var fixed: array<int, 3>
+```
+
+## 类型推断
+
+若声明时提供了初始值，可省略类型标注：
+
+```mas-lang
+var count = 0        // 推断为 int
+var price = 9.99     // 推断为 float
+var name = "Mas lang" // 推断为 string
+var items = [1, 2, 3] // 推断为 list<int>
+```
+
+## unit 类型
+
+没有返回值的函数，其返回类型为 `unit`（类似于其他语言中的 void）。
+
+```mas-lang
+func greet(name: string):
+    print("Hello " + name)
+// 该函数返回 unit，无需 return 语句
+```
+
+## 类型限制
+
+- 复合类型元素只能是基本类型（int、float、bool、string），不支持嵌套容器
+- `int` 和 `float` 混合运算时，`int` 会自动提升为 `float`

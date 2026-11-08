@@ -1,0 +1,8 @@
+# 编译产物与派生目录（可重新生成）
+build/
+target/
+mod_module/
+*.exe
+*.pdb
+*.lib
+*.obj

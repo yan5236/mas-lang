@@ -1,0 +1,7 @@
+package = "time"
+package_version = "0.1.0"
+target = "x86_64-pc-windows-msvc"
+abi = 1
+source_hash = "fnv1a64:4c9acfa82841bb72"
+header_hash = "fnv1a64:c96b34f33e3061a4"
+objects = ["time_common.obj", "time_windows.obj"]

@@ -1,0 +1,52 @@
+---
+sidebar_position: 3
+---
+
+# for Loops
+
+## Range Loops
+
+Use `for i in start..end` to iterate over an integer range (half-open):
+
+```mas-lang
+for i in 0..5:
+    print(i)
+// prints 0 1 2 3 4
+```
+
+## Iterating Over Lists
+
+```mas-lang
+var items = ["apple", "banana", "orange"]
+for item in items:
+    print(item)
+```
+
+## Iterating Over Maps
+
+Iterate over keys and values:
+
+```mas-lang
+var user = {"name": "Alice", "age": 18}
+for key, value in user:
+    print("${key}: ${value}")
+```
+
+Iterate over keys only:
+
+```mas-lang
+for key in user:
+    print(key)
+```
+
+## break and continue
+
+`break` and `continue` work in for loops as well:
+
+```mas-lang
+for i in 0..10:
+    if i % 2 == 0:
+        continue
+    print(i)
+// prints odd numbers: 1 3 5 7 9
+```

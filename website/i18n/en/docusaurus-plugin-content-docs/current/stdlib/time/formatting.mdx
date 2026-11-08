@@ -1,0 +1,34 @@
+---
+sidebar_position: 3
+---
+
+# Time Formatting
+
+Format the current UTC time as standard strings.
+
+## now_iso8601 — ISO 8601 Format
+
+```mas-lang
+let s: string = now_iso8601()
+// example: "2026-05-30T12:34:56+00:00"
+```
+
+Returns an RFC 3339 / ISO 8601 formatted UTC string with a fixed `+00:00` offset. Suitable for data interchange, log files, and API responses.
+
+## now_rfc2822 — RFC 2822 Format
+
+```mas-lang
+let s: string = now_rfc2822()
+// example: "Fri, 30 May 2026 12:34:56 +0000"
+```
+
+Returns an RFC 2822 formatted UTC string using English weekday and month abbreviations. Suitable for email and other legacy protocols.
+
+## now_rfc7231 — HTTP-date Format
+
+```mas-lang
+let s: string = now_rfc7231()
+// example: "Fri, 30 May 2026 12:34:56 GMT"
+```
+
+Returns an RFC 7231 HTTP-date formatted UTC string with `GMT` timezone identifier. Suitable for HTTP headers such as `Date`, `Last-Modified`, and `Expires`.

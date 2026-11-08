@@ -1,0 +1,69 @@
+---
+sidebar_position: 3
+---
+
+# Operators
+
+## Arithmetic Operators
+
+| Operator | Meaning | Example |
+|----------|---------|---------|
+| `+` | Addition | `3 + 2` → `5` |
+| `-` | Subtraction | `5 - 2` → `3` |
+| `*` | Multiplication | `3 * 2` → `6` |
+| `/` | Division (returns float) | `6 / 2` → `3.0` |
+| `%` | Modulo (int only) | `7 % 3` → `1` |
+| `%/%` | Integer division | `7 %/% 2` → `3` |
+
+`/` always returns `float`. `%` and `%/%` only work with `int` operands.
+
+## Comparison Operators
+
+| Operator | Meaning |
+|----------|---------|
+| `==` | Equal |
+| `!=` | Not equal |
+| `<` | Less than |
+| `<=` | Less or equal |
+| `>` | Greater than |
+| `>=` | Greater or equal |
+
+Comparisons return `bool`. `<`, `<=`, `>`, `>=` are for numeric types only (int, float).
+
+## Logical Operators
+
+```mas-lang
+true and false   // false
+true or false    // true
+not true         // false
+```
+
+`and` and `or` support short-circuit evaluation:
+
+```mas-lang
+if x != 0 and y / x > 1 :  // y / x is not evaluated when x == 0
+    print("ok")
+```
+
+## String Concatenation
+
+`+` concatenates strings:
+
+```mas-lang
+"Hello, " + "world"   // "Hello, world"
+```
+
+## Operator Precedence
+
+From lowest to highest:
+
+1. `or`
+2. `and`
+3. `==` `!=`
+4. `<` `<=` `>` `>=`
+5. `+` `-`
+6. `*` `/` `%` `%/%`
+7. unary `-`, `not`
+8. call `()`, index `[]`, member `.`, slice `[:]`
+
+Use parentheses `()` to change evaluation order.
