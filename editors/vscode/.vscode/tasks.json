@@ -4,43 +4,90 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-            "label": "watch",
-            "dependsOn": [
-                "npm: watch:tsc",
-                "npm: watch:esbuild"
-            ],
-            "presentation": {
-                "reveal": "never"
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
-            "type": "npm",
-            "script": "watch:esbuild",
-            "group": "build",
-            "problemMatcher": "$esbuild-watch",
-            "isBackground": true,
-            "label": "npm: watch:esbuild",
-            "presentation": {
-                "group": "watch",
-                "reveal": "never"
-            }
-        },
+			// 一键构建：编译 LSP -> 编译扩展 -> 复制 LSP 到 server/。
+			// F5 调试使用的默认构建任务（见 launch.json 的 preLaunchTask）。
+			"label": "build",
+			"dependsOn": [
+				"build-lsp",
+				"compile",
+				"copy-lsp-server"
+			],
+			"dependsOrder": "sequence",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": []
+		},
 		{
-            "type": "npm",
-            "script": "watch:tsc",
-            "group": "build",
-            "problemMatcher": "$tsc-watch",
-            "isBackground": true,
-            "label": "npm: watch:tsc",
-            "presentation": {
-                "group": "watch",
-                "reveal": "never"
-            }
-        },
+			// 构建 mas-lang LSP server，产物在 target/debug/mas-lang-lsp.exe。
+			"label": "build-lsp",
+			"type": "shell",
+			"command": "cargo build -p mas-lang-lsp --locked",
+			"options": {
+				"cwd": "${workspaceFolder}/../.."
+			},
+			"problemMatcher": []
+		},
+		{
+			// 类型检查 + ESLint + esbuild 打包，产物在 dist/extension.js。
+			"label": "compile",
+			"type": "shell",
+			"command": "pnpm run compile",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"group": "build",
+			"problemMatcher": [
+				"$tsc"
+			]
+		},
+		{
+			// 复制 target/debug/mas-lang-lsp.exe 到扩展的 server/ 目录。
+			"label": "copy-lsp-server",
+			"type": "shell",
+			"command": "pnpm run copy-lsp-server",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			// 开发时可选：tsc 与 esbuild 持续监听（不结束的后台任务）。
+			"label": "watch",
+			"dependsOn": [
+				"npm: watch:tsc",
+				"npm: watch:esbuild"
+			],
+			"presentation": {
+				"reveal": "never"
+			},
+			"group": "build"
+		},
+		{
+			"type": "npm",
+			"script": "watch:esbuild",
+			"group": "build",
+			"problemMatcher": "$esbuild-watch",
+			"isBackground": true,
+			"label": "npm: watch:esbuild",
+			"presentation": {
+				"group": "watch",
+				"reveal": "never"
+			}
+		},
+		{
+			"type": "npm",
+			"script": "watch:tsc",
+			"group": "build",
+			"problemMatcher": "$tsc-watch",
+			"isBackground": true,
+			"label": "npm: watch:tsc",
+			"presentation": {
+				"group": "watch",
+				"reveal": "never"
+			}
+		},
 		{
 			"type": "npm",
 			"script": "watch-tests",

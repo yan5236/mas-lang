@@ -39,6 +39,26 @@ server/mas-lang-lsp.exe
 
 如果该文件缺失，扩展会提示当前版本缺少 mas-lang LSP server，但 `.ms` 文件识别和语法高亮仍可继续使用。
 
+## 本地构建与调试（F5）
+
+用 VS Code 直接打开 `editors\vscode` 目录（不要打开仓库根目录），首次执行一次 `pnpm install`，然后按 F5 并选择 `Run Extension`。调试配置会自动执行 `.vscode/tasks.json` 里的 `build` 任务：
+
+1. `build-lsp`：在仓库根目录执行 `cargo build -p mas-lang-lsp --locked`
+2. `compile`：执行 `pnpm run compile`（类型检查 + ESLint + esbuild）
+3. `copy-lsp-server`：把 `target\debug\mas-lang-lsp.exe` 复制到 `server\`
+
+也可以从 `Terminal > Run Task` 单独运行这些任务。等价的命令行步骤：
+
+```powershell
+cargo build -p mas-lang-lsp --locked
+cd editors\vscode
+pnpm install
+pnpm run compile
+pnpm run copy-lsp-server
+```
+
+`watch` 任务仍然保留，用于持续监听 TypeScript/esbuild；它是不会结束的后台任务，适合长时间开发，不要作为 F5 的预启动任务。
+
 ## 更新内置 server
 
 LSP 通过静态链接复用编译器前端。编译器语法或语义变更后，必须重新构建 LSP 并复制内置 server；只构建编译器不会更新编辑器诊断。已安装扩展使用安装目录的独立副本，更新源码目录后还需要重新打包、安装扩展并执行 `Developer: Reload Window`。

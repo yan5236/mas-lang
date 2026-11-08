@@ -12,6 +12,11 @@ const config: Config = {
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
     v4: true, // Improve compatibility with the upcoming Docusaurus v4
+    // Docusaurus Faster 依赖 @swc/core / @swc/html 的原生绑定。SWC 1.16.x
+    // 会校验原生绑定缓存目录及其祖先的 Windows 权限，运行在带沙箱授权项的
+    // 机器上时校验必然失败（C:\ 等盘根目录带 CodexSandboxUsers 授权）。
+    // 关闭 Faster 后回退到 webpack，功能不受影响，只是构建略慢。
+    faster: false,
   },
 
   url: 'https://nanhai.github.io',

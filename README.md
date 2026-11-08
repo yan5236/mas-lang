@@ -9,7 +9,7 @@ Mas lang 的 LLVM 编译器、Fama 包管理器和语言服务器共用一个 Ca
 | `crates/mas-lang-lsp` | 复用编译器前端的 LSP 服务端 |
 | `stdlib/time` | Mas lang 标准库包及原生分发文件 |
 | `editors/vscode` | VS Code 扩展，使用 pnpm |
-| `website` | Docusaurus 文档站，使用 npm |
+| `website` | Docusaurus 文档站，使用 pnpm |
 | `specs`、`examples` | 语言规范、回归样例和示例工程 |
 
 Fama 默认调用 `maslang` 的库 API，LSP 调用同一包的前端。编译器可通过 `maslang` 命令单独运行。标准库由 Fama 按 Mas lang 包安装。
@@ -30,7 +30,7 @@ cargo run -p fama --locked -- run examples/projects/huoqutime
 
 若 Fama 的全局设置指定了旧目录的 `[compiler].binary`，运行示例前可用 `$env:FAMA_HOME = Join-Path (Get-Location) 'target/fama-home'` 创建隔离配置。日常使用可将原配置中的路径指向新构建的 `target/debug/maslang.exe`。
 
-VS Code 服务端的生成和复制见 [扩展说明](editors/vscode/README.md)。文档站可在 `website` 内执行 `npm ci` 和 `npm run build`。
+VS Code 服务端的生成和复制见 [扩展说明](editors/vscode/README.md)。文档站见 [website/README.md](website/README.md)，本地预览在 `website` 内执行 `pnpm start`。
 
 ## 存储
 
