@@ -87,7 +87,7 @@ fn resolve_output_path(
 }
 
 /// 链接程序及原生依赖；工具链匹配时复用相同优化档的预构建运行时，否则用当前 rustc 编译完整运行时。
-/// 源码、对象写入或 rustc 执行失败时返回构建诊断。
+/// GNU/Linux 在原生对象之后重申 libc 依赖，确保 C 对象所需的符号也参与解析。链接失败时返回构建诊断。
 fn link_executable(
     object_path: &Path,
     bootstrap_path: &Path,
@@ -124,6 +124,9 @@ fn link_executable(
         command
             .arg("-C")
             .arg(format!("link-arg={}", native_object.display()));
+    }
+    if cfg!(all(target_os = "linux", target_env = "gnu")) && !native_objects.is_empty() {
+        command.args(["-C", "link-arg=-lc"]);
     }
     let status = command.status().map_err(|error| {
         CompilerError::build(
