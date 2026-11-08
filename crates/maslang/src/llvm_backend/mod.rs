@@ -251,7 +251,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 }
 
-/// 用宿主 CPU 和指定目标创建 LLVM 目标机器；Unix 对象使用 PIC 以链接到位置无关可执行文件。
+/// 为指定三元组创建 LLVM 目标机器，Unix 使用 PIC，Intel macOS 使用通用 x86-64 指令集。
 fn create_target_machine(
     source: &SourceFile,
     triple: &TargetTriple,
@@ -265,11 +265,20 @@ fn create_target_machine(
         )
     })?;
 
+    // Intel macOS 的 LLVM 19 按宿主特性生成浮点边界代码时会留下未定义的常量符号。
+    let (cpu, features) = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        ("x86-64".to_string(), String::new())
+    } else {
+        (
+            TargetMachine::get_host_cpu_name().to_string(),
+            TargetMachine::get_host_cpu_features().to_string(),
+        )
+    };
     target
         .create_target_machine(
             triple,
-            TargetMachine::get_host_cpu_name().to_string().as_str(),
-            TargetMachine::get_host_cpu_features().to_string().as_str(),
+            &cpu,
+            &features,
             level.llvm(),
             if cfg!(unix) {
                 RelocMode::PIC
