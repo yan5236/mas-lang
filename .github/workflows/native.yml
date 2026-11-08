@@ -30,7 +30,7 @@ jobs:
           brew install llvm@19
           echo "LLVM_SYS_191_PREFIX=$(brew --prefix llvm@19)" >> "$GITHUB_ENV"
       - name: Test workspace
-        run: cargo +stable test --workspace --locked
+        run: cargo +stable test --workspace --locked --no-fail-fast
       - name: Verify executable format and output
         env:
           BINARY_FORMAT: ${{ matrix.format }}

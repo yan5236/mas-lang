@@ -167,7 +167,7 @@ mod tests {
         let context = ProjectContext::load(&root).unwrap();
 
         assert_eq!(context.name, "demo");
-        assert!(context.entry_path.ends_with("src\\main.ms"));
+        assert!(context.entry_path.ends_with("src/main.ms"));
         assert!(context.output_dir.ends_with("build"));
 
         fs::remove_dir_all(root).expect("删除临时目录失败");

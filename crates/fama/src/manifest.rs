@@ -473,7 +473,7 @@ mod tests {
     fn should_build_flat_store_directory_path() {
         let root = create_temp_dir("store");
         let path = dependency_store_dir(&root, "math", "0.1.0");
-        assert!(path.ends_with("mod_module\\math@0.1.0"));
+        assert!(path.ends_with("mod_module/math@0.1.0"));
     }
 
     /// 校验依赖来源路径会优先写成相对于当前项目根目录的相对路径。
