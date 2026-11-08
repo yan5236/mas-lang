@@ -13,7 +13,11 @@ jobs:
         include:
           - os: ubuntu-24.04
             format: ELF
+          - os: ubuntu-24.04-arm
+            format: ELF
           - os: macos-15
+            format: Mach-O
+          - os: macos-15-intel
             format: Mach-O
     runs-on: ${{ matrix.os }}
     steps:
@@ -25,10 +29,33 @@ jobs:
           sudo apt-get install -y llvm-19-dev libpolly-19-dev libzstd-dev libxml2-dev
           echo "LLVM_SYS_191_PREFIX=/usr/lib/llvm-19" >> "$GITHUB_ENV"
       - name: Install LLVM on macOS
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
         run: |
           brew install llvm@19
           echo "LLVM_SYS_191_PREFIX=$(brew --prefix llvm@19)" >> "$GITHUB_ENV"
+      - name: Install LLVM on Intel macOS
+        if: runner.os == 'macOS' && runner.arch == 'X64'
+        run: |
+          llvm="$RUNNER_TEMP/llvm-19"
+          mkdir -p "$llvm"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-macOS-X64.tar.xz \
+            | tar -xJ --strip-components=1 -C "$llvm"
+          "$llvm/bin/llvm-config" --version
+          echo "LLVM_SYS_191_PREFIX=$llvm" >> "$GITHUB_ENV"
+      - name: Generate time objects
+        run: |
+          cargo +stable run --locked -p fama -- build examples/projects/time-api --allow-native-source-build
+          target="$(rustc +stable --print host-tuple)"
+          artifacts="examples/projects/time-api/mod_module/time@0.1.0/native/artifacts/$target"
+          file "$artifacts/"*.o
+          mkdir -p "$RUNNER_TEMP/time-artifacts/$target"
+          cp "$artifacts/manifest.toml" "$artifacts/"*.o "$RUNNER_TEMP/time-artifacts/$target/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: time-${{ matrix.os }}
+          path: ${{ runner.temp }}/time-artifacts/
+          if-no-files-found: error
       - name: Verify executable format and output
         env:
           BINARY_FORMAT: ${{ matrix.format }}
