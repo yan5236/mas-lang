@@ -305,6 +305,40 @@ func main():
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
 
+    /// 验证同源重复导入可以共存，具名、通配和重导出引入异源同名绑定时会报错。
+    #[test]
+    fn rejects_conflicting_imports() {
+        let root = create_temp_project("conflicting-imports");
+        for module in ["a", "b"] {
+            fs::write(
+                root.join("src").join(format!("{module}.ms")),
+                "pub func pick() -> int:\n    return 1\n",
+            )
+            .unwrap();
+        }
+        let path = root.join("src").join("main.ms");
+        fs::write(&path, "").unwrap();
+        let source = |imports: &str| SourceFile::new(path.display().to_string(), imports.to_string());
+        analyze_source(
+            &source("import local.a { pick }\nimport local.a.*\n"),
+            &zh_settings(),
+        )
+        .unwrap();
+        for conflict in [
+            "import local.b { pick }",
+            "import local.b.*",
+            "export import local.b { pick }",
+        ] {
+            let error = analyze_source(
+                &source(&format!("import local.a {{ pick }}\n{conflict}\n")),
+                &zh_settings(),
+            )
+            .unwrap_err();
+            assert!(error.render(UiLanguage::ZhCn, None).contains("`pick` 重复"));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// 校验导入未公开符号时会在编译阶段给出明确失败。
     #[test]
     fn should_reject_importing_private_symbol() {

@@ -838,20 +838,66 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         runtime
     }
 
-    /// 把字符串字面量构造成 `{ ptr, len }` 结构值。
+    /// 构造 `{ ptr, len }` 字符串；对用户长字面量记录已知标量数，诊断专用文本跳过登记。
     pub(super) fn build_string_literal(
         &mut self,
         value: &str,
+        user_literal: bool,
     ) -> Result<StructValue<'ctx>, CompilerError> {
         let global = self.map_builder(
             self.builder
                 .build_global_string_ptr(value, &format!("string.{}", self.string_index)),
         )?;
         self.string_index += 1;
+        // shortcut: 只登记长字面量以限制启动开销；短字面量扫描成为热点时再按测量调整阈值。
+        if user_literal && value.len() >= 256 {
+            self.long_string_literals.push((
+                global.as_pointer_value(),
+                value.len(),
+                value.chars().count(),
+            ));
+        }
         self.build_runtime_string(
             global.as_pointer_value(),
             self.context.i64_type().const_int(value.len() as u64, false),
         )
+    }
+
+    /// 程序需要运行时取长时，在执行用户代码前登记已知长字面量的字节数与标量数。
+    /// 使用独立入口块，避免移动现有的全局初始化和 GC 根帧指令。
+    pub(super) fn register_string_literal_lengths(&self) -> Result<(), CompilerError> {
+        if self.long_string_literals.is_empty() || self.module.get_function("string_len").is_none() {
+            return Ok(());
+        }
+        let entry = self.entry_function.unwrap().get_first_basic_block().unwrap();
+        let setup = self.context.prepend_basic_block(entry, "string.lengths");
+        self.builder.position_at_end(setup);
+        let i64_type = self.context.i64_type();
+        let function = self.module.add_function(
+            "mas_register_string_length",
+            self.context.void_type().fn_type(
+                &[
+                    self.context.ptr_type(AddressSpace::default()).into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                ],
+                false,
+            ),
+            None,
+        );
+        for &(pointer, bytes, scalars) in &self.long_string_literals {
+            self.map_builder(self.builder.build_call(
+                function,
+                &[
+                    pointer.into(),
+                    i64_type.const_int(bytes as u64, false).into(),
+                    i64_type.const_int(scalars as u64, false).into(),
+                ],
+                "",
+            ))?;
+        }
+        self.map_builder(self.builder.build_unconditional_branch(entry))?;
+        Ok(())
     }
 
     /// 使用运行期值构造内部字符串结构。
@@ -898,14 +944,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let path_value = if let Some(value) = self.source_path_value {
             value
         } else {
-            let value = self.build_string_literal(self.source.path())?;
+            let value = self.build_string_literal(self.source.path(), false)?;
             self.source_path_value = Some(value);
             value
         };
         let source_value = if let Some(value) = self.source_text_value {
             value
         } else {
-            let value = self.build_string_literal(self.source.text())?;
+            let value = self.build_string_literal(self.source.text(), false)?;
             self.source_text_value = Some(value);
             value
         };

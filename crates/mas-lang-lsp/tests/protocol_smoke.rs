@@ -272,7 +272,7 @@ fn should_handle_validation_project_document_lifecycle() {
     assert!(status.is_some_and(|status| status.success()));
 }
 
-/// 验证真实 stdio 服务在打开错误源码后发布诊断，修改为合法列表及数组下标赋值后清除诊断。
+/// 验证真实 stdio 服务发布打开诊断，并合并连续编辑，只发布最新版本的下标赋值分析结果。
 #[test]
 fn should_publish_diagnostics_after_open_and_change() {
     let document_uri = "file:///validation/src/main.ms";
@@ -345,15 +345,27 @@ fn should_publish_diagnostics_after_open_and_change() {
             .contains("无法识别的字符")
     );
 
+    let mut changes = Vec::new();
     write_lsp_message(
-        &mut stdin,
+        &mut changes,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": document_uri, "version": 2 },
+                "contentChanges": [{ "text": "func main():\n    print(@)\n" }]
+            }
+        }),
+    );
+    write_lsp_message(
+        &mut changes,
         json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didChange",
             "params": {
                 "textDocument": {
                     "uri": document_uri,
-                    "version": 2
+                    "version": 3
                 },
                 "contentChanges": [{
                     "text": "func main():\n    var xs = [1, 2]\n    xs[0] = 3\n    var a = array<int,2>(1,2)\n    a[1] = 4\n"
@@ -361,8 +373,11 @@ fn should_publish_diagnostics_after_open_and_change() {
             }
         }),
     );
+    stdin.write_all(&changes).unwrap();
+    stdin.flush().unwrap();
     let change_diagnostics =
         recv_notification_with_method(&receiver, "textDocument/publishDiagnostics");
+    assert_eq!(change_diagnostics["params"]["version"], 3);
     assert_eq!(
         change_diagnostics["params"]["diagnostics"]
             .as_array()

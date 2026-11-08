@@ -38,22 +38,23 @@ impl AnalysisService {
         &self.settings
     }
 
+    /// 只解析当前源码以生成编辑器符号；语法未完成时退回词法扫描，不加载依赖模块。
+    pub(crate) fn symbols_for_source(&self, source: &SourceFile) -> SymbolSnapshot {
+        Lexer::new(source, &self.settings)
+            .tokenize()
+            .and_then(|tokens| Parser::new(tokens, &self.settings).parse_program())
+            .map(|program| symbols_from_program(source.text(), &program))
+            .unwrap_or_else(|_| fallback_symbols_from_source(source, &self.settings))
+    }
+
     /// 对打开文档执行完整前端分析，并把所有可恢复错误收敛为 LSP 诊断。
     pub fn analyze_document(&self, document: &OpenDocument) -> DocumentAnalysis {
         let source = SourceFile::new(document.path.display().to_string(), document.text.clone());
         match maslang::analyze_source(&source, &self.settings) {
-            Ok(_) => {
-                // 编辑器符号只取当前内存文档的原始 AST，不能使用模块展开后的内部名称及偏移。
-                let symbols = Lexer::new(&source, &self.settings)
-                    .tokenize()
-                    .and_then(|tokens| Parser::new(tokens, &self.settings).parse_program())
-                    .map(|program| symbols_from_program(source.text(), &program))
-                    .unwrap_or_else(|_| fallback_symbols_from_source(&source, &self.settings));
-                DocumentAnalysis {
-                    diagnostics: Vec::new(),
-                    symbols,
-                }
-            }
+            Ok(_) => DocumentAnalysis {
+                diagnostics: Vec::new(),
+                symbols: self.symbols_for_source(&source),
+            },
             Err(error) => DocumentAnalysis {
                 diagnostics: vec![compiler_error_to_diagnostic(&error, &source, self.settings)],
                 symbols: fallback_symbols_from_source(&source, &self.settings),

@@ -64,4 +64,4 @@ func greet(name: string):
 ## 类型限制
 
 - 复合类型元素只能是基本类型（int、float、bool、string），不支持嵌套容器
-- `int` 和 `float` 混合运算时，`int` 会自动提升为 `float`
+- `int` 和 `float` 混合算术时，`int` 会自动提升为 `float`。使用 `<`、`<=`、`>`、`>=` 混合比较时，保留整数的完整精度。任何一侧为 NaN 时，这四个比较都返回 `false`。

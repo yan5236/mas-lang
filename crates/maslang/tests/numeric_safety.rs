@@ -3,6 +3,19 @@ use maslang::source::SourceFile;
 use maslang::{CompileOptions, analyze_source, compile_to_executable};
 use std::process::{Command, Output};
 
+/// 校验混合排序在正负舍入边界、整数上界、分数、无穷和 NaN 上保留数学顺序。
+#[test]
+fn mixed_order_comparison_preserves_integer_precision() {
+    let output = execute(
+        "func main():\n    print(9007199254740993 > 9007199254740992.0)\n    print(9007199254740992.0 < 9007199254740993)\n    print(-9007199254740993 >= -9007199254740992.0)\n    print(9223372036854775807 < 9223372036854775808.0)\n    print(-9223372036854775808 >= -9223372036854775808.0)\n    print(0 <= -0.0)\n    print(2 < 2.5)\n    print(1 < (1.0 / 0.0))\n    print(1 >= (0.0 / 0.0))\n    print((0.0 / 0.0) >= 1)\n",
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        output.stdout,
+        b"true\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\n"
+    );
+}
+
 /// 使用当前编译器生成并运行 EXE；清理本用例目录后返回输出，编译错误保留完整诊断。
 fn execute(text: &str) -> Output {
     let unique = std::time::SystemTime::now()

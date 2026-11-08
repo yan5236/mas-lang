@@ -39,11 +39,6 @@ pub fn compile_to_executable(
         &generated_object.object_bytes,
         source,
     )?;
-    write_text(
-        &workspace.bootstrap_path,
-        runtime_bootstrap::bootstrap_source(),
-        source,
-    )?;
     let native_objects = resolve_native_link_inputs(
         package_roots,
         &workspace.native_root,
@@ -91,7 +86,8 @@ fn resolve_output_path(
         .join(format!("{}.exe", source_name.to_string_lossy())))
 }
 
-/// 以生成程序的显式档位优化完整 Rust 运行时，再与目标文件及原生依赖链接；失败返回构建诊断。
+/// 链接程序及原生依赖；工具链匹配时复用相同优化档的预构建运行时，否则用当前 rustc 编译完整运行时。
+/// 源码、对象写入或 rustc 执行失败时返回构建诊断。
 fn link_executable(
     object_path: &Path,
     bootstrap_path: &Path,
@@ -101,7 +97,17 @@ fn link_executable(
     opt_level: crate::optimization::OptLevel,
 ) -> Result<(), CompilerError> {
     let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
-    let mut command = Command::new(rustc);
+    let mut command = Command::new(&rustc);
+    if let Some(runtime) = bundled_runtime(&rustc, opt_level) {
+        let library = bootstrap_path.with_file_name("libmas_runtime.rlib");
+        write_bytes(&library, runtime, source)?;
+        write_text(bootstrap_path, "fn main() { mas_runtime::run(); }", source)?;
+        command
+            .arg("--extern")
+            .arg(format!("mas_runtime={}", library.display()));
+    } else {
+        write_text(bootstrap_path, runtime_bootstrap::bootstrap_source(), source)?;
+    }
     command
         .arg("--edition")
         .arg("2024")
@@ -136,6 +142,30 @@ fn link_executable(
             Span::new(0, source.text().len()),
         ))
     }
+}
+
+/// 查找与实际执行的 rustc 完全同版的嵌入运行时；未知工具链或不支持的宿主走源码链接。
+#[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
+fn bundled_runtime(rustc: &str, level: crate::optimization::OptLevel) -> Option<&'static [u8]> {
+    use crate::optimization::OptLevel::*;
+    let version = Command::new(rustc).arg("-vV").output().ok()?;
+    if !version.status.success()
+        || version.stdout != include_bytes!(concat!(env!("OUT_DIR"), "/runtime-rustc.txt"))
+    {
+        return None;
+    }
+    Some(match level {
+        O0 => include_bytes!(concat!(env!("OUT_DIR"), "/libmas_runtime_0.rlib")),
+        O1 => include_bytes!(concat!(env!("OUT_DIR"), "/libmas_runtime_1.rlib")),
+        O2 => include_bytes!(concat!(env!("OUT_DIR"), "/libmas_runtime_2.rlib")),
+        O3 => include_bytes!(concat!(env!("OUT_DIR"), "/libmas_runtime_3.rlib")),
+    })
+}
+
+/// 非 Windows MSVC 宿主保留原有的运行时源码链接流程。
+#[cfg(not(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc")))]
+fn bundled_runtime(_: &str, _: crate::optimization::OptLevel) -> Option<&'static [u8]> {
+    None
 }
 
 /// 确保目标输出路径的父目录存在，不存在时自动递归创建。

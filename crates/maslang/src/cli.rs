@@ -1,7 +1,6 @@
 use crate::temp_directory::TemporaryDirectory;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
@@ -199,7 +198,7 @@ fn build_file(
     }
 }
 
-/// 在独占临时目录编译并运行源码；子进程结束或任何错误返回后清理 EXE 与 PDB。
+/// 在独占临时目录编译源码并继承终端输入输出运行；返回子进程退出码，退出后清理 EXE 与 PDB。
 fn run_file(settings: &CompilerSettings, path: PathBuf, mut options: CompileOptions) -> ExitCode {
     let source = match read_source(&path) {
         Ok(source) => source,
@@ -230,35 +229,22 @@ fn run_file(settings: &CompilerSettings, path: PathBuf, mut options: CompileOpti
         }
     };
 
-    match Command::new(binary).output() {
-        Ok(output) if output.status.success() => {
-            if write_child_output(&output.stdout, &output.stderr).is_err() {
-                eprintln!(
-                    "{}",
-                    CompilerError::cli(
-                        MessageId::CliRunBinaryFailed,
-                        vec!["写入子进程输出失败".to_string()]
-                    )
-                    .render(settings.language, None)
-                );
-                return ExitCode::FAILURE;
-            }
-            ExitCode::SUCCESS
-        }
-        Ok(output) if !output.stderr.is_empty() => {
-            let _ = io::stderr().write_all(&output.stderr);
-            ExitCode::FAILURE
-        }
-        Ok(output) => {
+    match Command::new(binary).status() {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(status) if status.code() == Some(1) => ExitCode::FAILURE,
+        Ok(status) => {
             eprintln!(
                 "{}",
                 CompilerError::cli(
                     MessageId::CliRunBinaryExited,
-                    vec![output.status.to_string()]
+                    vec![status.to_string()]
                 )
                 .render(settings.language, None)
             );
-            ExitCode::FAILURE
+            status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .map_or(ExitCode::FAILURE, ExitCode::from)
         }
         Err(error) => {
             eprintln!(
@@ -269,13 +255,6 @@ fn run_file(settings: &CompilerSettings, path: PathBuf, mut options: CompileOpti
             ExitCode::FAILURE
         }
     }
-}
-
-/// 把子进程的标准输出和标准错误原样转发到当前终端，保留运行时诊断文本。
-fn write_child_output(stdout: &[u8], stderr: &[u8]) -> io::Result<()> {
-    io::stdout().write_all(stdout)?;
-    io::stderr().write_all(stderr)?;
-    Ok(())
 }
 
 /// 从磁盘读取 UTF-8 源码，并包装成统一的源码对象。

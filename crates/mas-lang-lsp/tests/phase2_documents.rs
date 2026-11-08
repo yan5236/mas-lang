@@ -4,9 +4,9 @@ use mas_lang_lsp::server::Backend;
 use maslang::source::Span;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, Position,
-    Range, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, Url,
-    VersionedTextDocumentIdentifier,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentSymbolParams, DocumentSymbolResponse, Position, Range, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, Url, VersionedTextDocumentIdentifier,
 };
 
 /// 验证文档仓库能够按 URI 保存、完整替换和删除编辑器中的当前文本。
@@ -28,7 +28,7 @@ fn should_store_replace_and_remove_open_documents() {
     assert!(store.get(&uri).is_none());
 }
 
-/// 验证 LSP 文档事件会驱动后端缓存打开、完整替换和关闭当前文档。
+/// 验证文档事件更新缓存，且等待后台诊断期间仍可立即查询修改后的符号。
 #[tokio::test]
 async fn should_update_backend_documents_from_lsp_events() {
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);
@@ -60,15 +60,27 @@ async fn should_update_backend_documents_from_lsp_events() {
             content_changes: vec![TextDocumentContentChangeEvent {
                 range: None,
                 range_length: None,
-                text: "func main() {\n  return\n}".to_string(),
+                text: "func refreshed():\n    return\n".to_string(),
             }],
         })
         .await;
 
     assert_eq!(
         backend.document_text(&uri).await,
-        Some("func main() {\n  return\n}".to_string())
+        Some("func refreshed():\n    return\n".to_string())
     );
+    let Some(DocumentSymbolResponse::Nested(symbols)) = backend
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            partial_result_params: Default::default(),
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("文档符号响应应包含最新文档");
+    };
+    assert_eq!(symbols[0].name, "refreshed");
 
     backend
         .did_close(DidCloseTextDocumentParams {

@@ -19,6 +19,24 @@ fn collect_boundary() {
     mas_gc_collect();
 }
 
+/// 托管字符串重复取长复用缓存，切片仍按实参字节计数，GC 释放对象时清除长度缓存。
+#[test]
+fn caches_unicode_length_only_for_full_managed_strings() {
+    mas_gc_enter();
+    let value = text("你e\u{301}😀");
+    assert_eq!(string_len(value.ptr, 3), 1);
+    assert_eq!(string_len(value.ptr, value.len), 4);
+    GC_HEAP.with(|heap| {
+        assert!(matches!(
+            heap.borrow().objects.get(&(value.ptr as usize)),
+            Some(GcObject::String(_, Some(4)))
+        ));
+    });
+    collect_boundary();
+    assert_eq!(mas_gc_live_objects(), 0);
+    mas_gc_leave();
+}
+
 /// 创建和丢弃多类对象后必须清空注册表，容器内部缓冲区随对象析构释放。
 #[test]
 fn reclaims_discarded_objects() {

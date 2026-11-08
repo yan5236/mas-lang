@@ -47,7 +47,7 @@ fn concurrent_directories_are_exclusive_and_removed() {
     assert!(paths.iter().all(|p| !p.exists()));
 }
 
-/// 真正并行构建并执行六个 EXE；链接失败、运行成功和运行失败均不能留下临时文件。
+/// 并行构建六个 EXE，校验成功、失败均清理临时文件，且运行失败保留已经打印的日志。
 #[test]
 fn compiler_cleans_success_failure_and_parallel_builds() {
     let root = TemporaryDirectory::create("mascript-cleanup-test").unwrap();
@@ -86,9 +86,10 @@ fn compiler_cleans_success_failure_and_parallel_builds() {
     let run = compiler(&["run".as_ref(), source.as_os_str()], &temp);
     assert!(run.status.success(), "{run:?}");
     assert_empty(&temp);
-    fs::write(&source, "func main():\n    print(10 %/% 0)\n").unwrap();
+    fs::write(&source, "func main():\n    print(42)\n    print(10 %/% 0)\n").unwrap();
     let run = compiler(&["run".as_ref(), source.as_os_str()], &temp);
     assert!(!run.status.success(), "{run:?}");
+    assert_eq!(run.stdout, b"42\n");
     assert!(String::from_utf8_lossy(&run.stderr).contains("整数除零"));
     assert_empty(&temp);
     fs::write(

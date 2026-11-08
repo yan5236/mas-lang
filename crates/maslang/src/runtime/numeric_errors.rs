@@ -24,3 +24,16 @@ pub extern "C" fn mas_numeric_error(
         ),
     )
 }
+
+/// 精确比较 i64 与 f64，返回小于 -1、等于 0、大于 1，或遇到 NaN 时返回 2。
+/// 整数转换为浮点后若恰好相等，再用整数比较找回转换时舍入掉的差值。
+#[unsafe(no_mangle)]
+pub extern "C" fn mas_compare_int_float(integer: i64, float: f64) -> i8 {
+    use std::cmp::Ordering;
+    match (integer as f64).partial_cmp(&float) {
+        Some(Ordering::Equal) if float >= -(i64::MIN as f64) => -1,
+        Some(Ordering::Equal) => integer.cmp(&(float as i64)) as i8,
+        Some(order) => order as i8,
+        None => 2,
+    }
+}

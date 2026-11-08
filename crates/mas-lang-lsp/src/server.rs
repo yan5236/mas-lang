@@ -1,7 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
+use maslang::source::SourceFile;
 use std::collections::HashMap;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::jsonrpc::Result;
 
 use tower_lsp::lsp_types::{
@@ -16,17 +18,18 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::analysis::AnalysisService;
 use crate::completion::completion_items_for;
-use crate::documents::{DocumentStore, is_mas_document};
+use crate::documents::{DocumentStore, OpenDocument, is_mas_document};
 use crate::hover::hover_for;
 use crate::symbols::{SymbolSnapshot, document_symbols_for};
 
 /// 保存 LSP 后端运行时需要的协议客户端句柄。
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Backend {
     client: Client,
     documents: Arc<RwLock<DocumentStore>>,
-    snapshots: Arc<RwLock<HashMap<Url, SymbolSnapshot>>>,
+    snapshots: Arc<RwLock<HashMap<Url, (Weak<OpenDocument>, SymbolSnapshot)>>>,
     analysis: Arc<AnalysisService>,
+    analysis_gate: Arc<Mutex<()>>,
 }
 
 impl Backend {
@@ -37,6 +40,7 @@ impl Backend {
             documents: Arc::new(RwLock::new(DocumentStore::new())),
             snapshots: Arc::new(RwLock::new(HashMap::new())),
             analysis: Arc::new(AnalysisService::new()),
+            analysis_gate: Arc::new(Mutex::new(())),
         }
     }
 
@@ -54,16 +58,71 @@ impl Backend {
             .map(|document| document.text.clone())
     }
 
-    /// 分析指定打开文档并向客户端发布最新诊断，避免事件处理器重复诊断流程。
-    async fn publish_document_diagnostics(&self, uri: &Url) {
-        let Some(document) = self.documents.read().await.get(uri).cloned() else {
+    /// 返回同一份当前文本及其符号；后台诊断尚未完成时，只解析当前文件以响应交互请求。
+    async fn document_with_symbols(
+        &self,
+        uri: &Url,
+    ) -> Option<(Arc<OpenDocument>, SymbolSnapshot)> {
+        let document = self.documents.read().await.snapshot(uri)?.upgrade()?;
+        let snapshots = self.snapshots.read().await;
+        let symbols = snapshots
+            .get(uri)
+            .filter(|(snapshot, _)| snapshot.as_ptr() == Arc::as_ptr(&document))
+            .map(|(_, symbols)| symbols.clone());
+        drop(snapshots);
+        let symbols = symbols.unwrap_or_else(|| {
+            let source =
+                SourceFile::new(document.path.display().to_string(), document.text.clone());
+            self.analysis.symbols_for_source(&source)
+        });
+        Some((document, symbols))
+    }
+
+    /// 安排当前快照的后台诊断；连续编辑期间仅分析安静期结束时仍有效的文档。
+    fn schedule_diagnostics(&self, document: Weak<OpenDocument>, delay: Duration) {
+        let backend = self.clone();
+        tokio::spawn(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            backend.publish_document_diagnostics(document).await;
+        });
+    }
+
+    /// 每次只运行一份阻塞前端分析，发布前再次检查快照身份，避免覆盖新版本或已关闭文档。
+    async fn publish_document_diagnostics(&self, pending: Weak<OpenDocument>) {
+        let _permit = self.analysis_gate.lock().await;
+        let Some(document) = pending.upgrade() else {
             return;
         };
-        let analysis = self.analysis.analyze_document(&document);
+        if !self
+            .documents
+            .read()
+            .await
+            .snapshot(&document.uri)
+            .is_some_and(|current| current.ptr_eq(&pending))
+        {
+            return;
+        }
+        let service = Arc::clone(&self.analysis);
+        let input = Arc::clone(&document);
+        let Ok(analysis) =
+            tokio::task::spawn_blocking(move || service.analyze_document(&input)).await
+        else {
+            return;
+        };
+        let documents = self.documents.read().await;
+        let uri = &document.uri;
+        if !documents
+            .get(uri)
+            .is_some_and(|current| std::ptr::eq(current, document.as_ref()))
+        {
+            return;
+        }
         self.snapshots
             .write()
             .await
-            .insert(uri.clone(), analysis.symbols);
+            .insert(uri.clone(), (pending, analysis.symbols));
         self.client
             .publish_diagnostics(uri.clone(), analysis.diagnostics, Some(document.version))
             .await;
@@ -111,7 +170,7 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
-    /// 处理文档打开事件，缓存 `.ms` 文档的完整文本并为后续分析保留当前版本。
+    /// 缓存打开的 Mas lang 文档并立即安排首轮后台诊断。
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let document = params.text_document;
         if !is_mas_document(&document.language_id, &document.uri) {
@@ -119,35 +178,40 @@ impl LanguageServer for Backend {
         }
 
         let uri = document.uri.clone();
-        self.documents
-            .write()
-            .await
-            .upsert(document.uri, document.version, document.text);
-        self.publish_document_diagnostics(&uri).await;
+        let mut documents = self.documents.write().await;
+        documents.upsert(document.uri, document.version, document.text);
+        if let Some(snapshot) = documents.snapshot(&uri) {
+            self.schedule_diagnostics(snapshot, Duration::ZERO);
+        }
     }
 
-    /// 处理完整文本变更事件，按 LSP FULL sync 语义用最后一条完整文本替换缓存。
+    /// 立即缓存较新的完整文本，等连续编辑停顿后再运行完整模块分析。
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let Some(change) = params.content_changes.into_iter().last() else {
             return;
         };
 
         let uri = params.text_document.uri;
-        if !self.has_document(&uri).await {
+        let version = params.text_document.version;
+        let mut documents = self.documents.write().await;
+        if !documents
+            .get(&uri)
+            .is_some_and(|current| version > current.version)
+        {
             return;
         }
 
-        self.documents
-            .write()
-            .await
-            .upsert(uri.clone(), params.text_document.version, change.text);
-        self.publish_document_diagnostics(&uri).await;
+        documents.upsert(uri.clone(), version, change.text);
+        if let Some(snapshot) = documents.snapshot(&uri) {
+            self.schedule_diagnostics(snapshot, Duration::from_millis(120));
+        }
     }
 
-    /// 处理文档关闭事件，删除缓存并发布空诊断以清理客户端旧问题列表。
+    /// 关闭文档并按同一顺序清除符号与诊断，避免后台结果在关闭后重新出现。
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        let removed = self.documents.write().await.remove(&uri);
+        let mut documents = self.documents.write().await;
+        let removed = documents.remove(&uri);
         if removed.is_some() {
             self.snapshots.write().await.remove(&uri);
             self.client.publish_diagnostics(uri, Vec::new(), None).await;
@@ -158,22 +222,17 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let Some(text) = self.document_text(&uri).await else {
+        let Some((document, snapshot)) = self.document_with_symbols(&uri).await else {
             return Ok(Some(CompletionResponse::Array(completion_items_for(
                 "",
                 &SymbolSnapshot::default(),
                 position,
             ))));
         };
-        let snapshot = self
-            .snapshots
-            .read()
-            .await
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
         Ok(Some(CompletionResponse::Array(completion_items_for(
-            &text, &snapshot, position,
+            &document.text,
+            &snapshot,
+            position,
         ))))
     }
 
@@ -181,17 +240,10 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let Some(text) = self.document_text(&uri).await else {
+        let Some((document, snapshot)) = self.document_with_symbols(&uri).await else {
             return Ok(None);
         };
-        let snapshot = self
-            .snapshots
-            .read()
-            .await
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
-        Ok(hover_for(&text, &snapshot, position))
+        Ok(hover_for(&document.text, &snapshot, position))
     }
 
     /// 跳转到当前内存文档中的结构体或字段声明；未知名称和跨文件目标返回空结果。
@@ -215,11 +267,9 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
         let snapshot = self
-            .snapshots
-            .read()
+            .document_with_symbols(&uri)
             .await
-            .get(&uri)
-            .cloned()
+            .map(|(_, symbols)| symbols)
             .unwrap_or_default();
         Ok(Some(DocumentSymbolResponse::Nested(document_symbols_for(
             &snapshot,

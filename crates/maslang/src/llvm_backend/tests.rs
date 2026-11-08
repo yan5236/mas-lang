@@ -116,15 +116,16 @@ fn should_emit_for_range_blocks() {
     assert!(ir.contains("for.exit"));
 }
 
-/// 校验整数提升到浮点数、浮点比较、整数除法与取模路径仍保持原先指令选择。
+/// 校验混合算术提升、纯浮点比较、精确混合比较、整数除法和取模分别生成对应指令。
 #[test]
 fn should_emit_numeric_and_compare_instructions() {
     let (source, program, _) = parse_program(
-        "var left:int = 1\nvar right:float = 2.5\nvar dividend:int = 7\nvar divisor:int = 2\nprint(left + right)\nprint(left < right)\nprint(dividend %/% divisor)\nprint(dividend % divisor)\n",
+        "var left:int = 1\nvar right:float = 2.5\nvar dividend:int = 7\nvar divisor:int = 2\nprint(left + right)\nprint(left < right)\nprint(right < 3.0)\nprint(dividend %/% divisor)\nprint(dividend % divisor)\n",
     );
     let ir = compile_program_to_ir(&source, &program).unwrap();
     assert!(ir.contains("fadd double"));
     assert!(ir.contains("fcmp olt double"));
+    assert!(ir.contains("call i8 @mas_compare_int_float"));
     assert!(ir.contains("sdiv i64"));
     assert!(ir.contains("srem i64"));
 }

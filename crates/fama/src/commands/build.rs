@@ -124,7 +124,7 @@ fn write_external_compiler_output(stdout: &[u8], stderr: &[u8]) -> Result<(), Fa
     Ok(())
 }
 
-/// 调用全局配置中声明的主力编译器二进制执行 `run`，保持临时产物语义由编译器负责。
+/// 通过外部编译器执行 `run` 并继承终端输入输出；编译器负责清理临时产物，非零退出转为 Fama 错误。
 pub(crate) fn run_external_compiler_entry(
     binary_path: &Path,
     context: &ProjectContext,
@@ -143,17 +143,16 @@ pub(crate) fn run_external_compiler_entry(
     if allow_native_source_build {
         command.arg("--allow-native-source-build");
     }
-    let output = command
-        .output()
+    let status = command
+        .status()
         .map_err(|source| FamaError::io(binary_path.to_path_buf(), source))?;
-    write_external_compiler_output(&output.stdout, &output.stderr)?;
 
-    if output.status.success() {
+    if status.success() {
         Ok(())
     } else {
         Err(FamaError::CommandFailed {
             command: binary_path.display().to_string(),
-            code: output.status.code(),
+            code: status.code(),
         })
     }
 }

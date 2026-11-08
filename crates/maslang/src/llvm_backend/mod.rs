@@ -131,6 +131,7 @@ struct CodeGenerator<'ctx, 'src> {
     runtime: RuntimeFunctions<'ctx>,
     string_type: StructType<'ctx>,
     string_index: usize,
+    long_string_literals: Vec<(PointerValue<'ctx>, usize, usize)>,
     global_index: usize,
     source_path_value: Option<StructValue<'ctx>>,
     source_text_value: Option<StructValue<'ctx>>,
@@ -192,6 +193,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             runtime,
             string_type,
             string_index: 0,
+            long_string_literals: Vec::new(),
             global_index: 0,
             source_path_value: None,
             source_text_value: None,
@@ -216,7 +218,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
-    /// 把整个程序编译为入口函数和所有用户函数的 LLVM IR。
+    /// 生成入口及用户函数的 LLVM IR，随后在入口注册可供运行时取长的长字符串字面量。
     fn compile_program(&mut self, program: &Program) -> Result<(), CompilerError> {
         for statement in &program.statements {
             if let Stmt::StructDecl { name, fields, .. } = statement {
@@ -240,7 +242,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             }
         }
 
-        Ok(())
+        self.register_string_literal_lengths()
     }
 }
 

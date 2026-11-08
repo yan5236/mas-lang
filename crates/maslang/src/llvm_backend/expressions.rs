@@ -107,7 +107,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             },
             Literal::String(value) => TypedValue {
                 value_type: ValueType::String,
-                value: self.build_string_literal(value)?.into(),
+                value: self.build_string_literal(value, true)?.into(),
             },
         })
     }
@@ -173,7 +173,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         Ok(CodegenValue::Value(result))
     }
 
-    /// 编译内建与用户函数调用；len 对字符串计数 Unicode 标量，对数组返回静态长度但仍求值实参。
+    /// 编译内建与用户函数调用；len 在编译期计算字符串字面量的标量数，对数组仍正常求值实参。
     pub(super) fn compile_call(
         &mut self,
         callee: &Expr,
@@ -228,6 +228,16 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
 
         if name == "len" {
+            let mut expression = &arguments[0];
+            while let Expr::Grouped { expression: inner, .. } = expression {
+                expression = inner;
+            }
+            if let Expr::Literal { value: Literal::String(text), .. } = expression {
+                return Ok(CodegenValue::Value(TypedValue {
+                    value_type: ValueType::Int,
+                    value: self.context.i64_type().const_int(text.chars().count() as u64, false).into(),
+                }));
+            }
             let compiled = self.compile_expr(&arguments[0])?;
             let argument = self.expect_value(compiled)?;
             let (function, args, call_name): (

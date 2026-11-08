@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 
 use tower_lsp::lsp_types::Url;
 
@@ -15,7 +16,7 @@ pub struct OpenDocument {
 /// 维护按 URI 索引的打开文档集合，后续分析与补全统一从这里读取当前文本。
 #[derive(Debug, Default)]
 pub struct DocumentStore {
-    documents: HashMap<Url, OpenDocument>,
+    documents: HashMap<Url, Arc<OpenDocument>>,
 }
 
 impl DocumentStore {
@@ -35,18 +36,23 @@ impl DocumentStore {
             path,
             text,
         };
-        self.documents.insert(uri, document.clone());
+        self.documents.insert(uri, Arc::new(document.clone()));
         document
     }
 
     /// 按 URI 读取当前缓存文档，供请求型 LSP 能力复用最新文本。
     pub fn get(&self, uri: &Url) -> Option<&OpenDocument> {
-        self.documents.get(uri)
+        self.documents.get(uri).map(Arc::as_ref)
+    }
+
+    /// 返回当前快照的弱引用；替换或关闭文档后，等待中的诊断不会保留旧文本。
+    pub(crate) fn snapshot(&self, uri: &Url) -> Option<Weak<OpenDocument>> {
+        self.documents.get(uri).map(Arc::downgrade)
     }
 
     /// 删除已经关闭的文档，并把旧文档返回给调用方用于清理诊断。
     pub fn remove(&mut self, uri: &Url) -> Option<OpenDocument> {
-        self.documents.remove(uri)
+        self.documents.remove(uri).map(Arc::unwrap_or_clone)
     }
 }
 

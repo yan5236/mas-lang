@@ -817,7 +817,8 @@ fn collect_top_level_declarations(
         .collect()
 }
 
-/// 将选中的公开符号加入绑定表并返回本次新增项；带模块别名时只生成限定名称，缺失或重复的限定成员会报错。
+/// 将选中的公开符号加入绑定表并返回本条语句提供的绑定，供重导出复用。
+/// 同一可见名只允许重复指向同一符号；缺失成员、异源冲突或同条语句内重复的限定名会报错。
 fn merge_imports(
     kind: &ImportKind,
     exports: &BTreeMap<String, String>,
@@ -825,11 +826,23 @@ fn merge_imports(
     path: &ImportPath,
 ) -> Result<BTreeMap<String, String>, CompilerError> {
     let mut inserted = BTreeMap::new();
+    let mut bind = |name: String, internal: &String| {
+        if (path.alias.is_some() && inserted.contains_key(&name))
+            || imports.get(&name).is_some_and(|previous| previous != internal)
+        {
+            return Err(CompilerError::build_message(
+                format!("导入的成员名 `{name}` 重复"),
+                path.span,
+            ));
+        }
+        imports.insert(name.clone(), internal.clone());
+        inserted.insert(name, internal.clone());
+        Ok(())
+    };
     match kind {
         ImportKind::All => {
             for (name, internal) in exports {
-                imports.insert(name.clone(), internal.clone());
-                inserted.insert(name.clone(), internal.clone());
+                bind(name.clone(), internal)?;
             }
         }
         ImportKind::Named(items) => {
@@ -845,14 +858,7 @@ fn merge_imports(
                     Some(namespace) => format!("{namespace}.{member}"),
                     None => member.clone(),
                 };
-                if path.alias.is_some() && inserted.contains_key(&visible_name) {
-                    return Err(CompilerError::build_message(
-                        format!("导入的成员名 `{visible_name}` 重复"),
-                        path.span,
-                    ));
-                }
-                imports.insert(visible_name.clone(), internal.clone());
-                inserted.insert(visible_name, internal.clone());
+                bind(visible_name, internal)?;
             }
         }
     }

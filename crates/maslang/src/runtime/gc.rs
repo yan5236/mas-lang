@@ -6,7 +6,7 @@ enum GcObject {
         words: Box<[u64]>,
         offsets: &'static [u64],
     },
-    String(Box<[u8]>),
+    String(Box<[u8]>, Option<usize>),
     StringBuilder(Box<Vec<u8>>),
     List(*mut MsList),
     Map(*mut MsMap),
@@ -17,7 +17,7 @@ impl GcObject {
     fn bytes(&self) -> usize {
         match self {
             Self::Record { words, .. } => words.len() * 8,
-            Self::String(bytes) => bytes.len(),
+            Self::String(bytes, _) => bytes.len(),
             Self::StringBuilder(bytes) => std::mem::size_of::<Vec<u8>>() + bytes.capacity(),
             Self::List(ptr) => unsafe {
                 std::mem::size_of::<MsList>()
@@ -48,7 +48,7 @@ impl GcObject {
                     });
                 }
             }
-            Self::String(_) | Self::StringBuilder(_) => {}
+            Self::String(..) | Self::StringBuilder(_) => {}
             Self::List(ptr) => unsafe {
                 let list = &**ptr;
                 if (KIND_RECORD..=9).contains(&list.elem_kind) {
@@ -94,7 +94,7 @@ impl Drop for GcObject {
     fn drop(&mut self) {
         unsafe {
             match self {
-                Self::Record { .. } | Self::String(_) | Self::StringBuilder(_) => {}
+                Self::Record { .. } | Self::String(..) | Self::StringBuilder(_) => {}
                 Self::List(ptr) => {
                     let list = Box::from_raw(*ptr);
                     if !list.data.is_null() {
@@ -128,6 +128,7 @@ struct GcFrame {
 #[derive(Default)]
 struct GcHeap {
     objects: HashMap<usize, GcObject>,
+    literal_lengths: HashMap<usize, (u64, usize)>,
     frames: Vec<GcFrame>,
     allocated: usize,
     threshold: usize,
@@ -189,14 +190,39 @@ fn gc_track(address: usize, object: GcObject) {
     });
 }
 
-/// 接管字符串并返回稳定地址；空字符串使用静态存储，无需注册和释放。
+/// 接管字符串并返回稳定地址；空字符串使用静态存储，非空字符串首次取长度时才记录标量数。
 fn gc_allocate_string(bytes: Box<[u8]>) -> *const u8 {
     if bytes.is_empty() {
         return b"".as_ptr();
     }
     let ptr = bytes.as_ptr();
-    gc_track(ptr as usize, GcObject::String(bytes));
+    gc_track(ptr as usize, GcObject::String(bytes, None));
     ptr
+}
+
+/// 读取编译器登记的字面量长度，或缓存完整托管字符串的 Unicode 标量数。
+/// 外部缓冲区和局部切片返回 None，交给调用方逐次校验和计数。
+fn gc_string_scalar_count(ptr: *const u8, len: u64) -> Option<usize> {
+    GC_HEAP.with(|heap| {
+        let mut heap = heap.borrow_mut();
+        match heap.objects.get_mut(&(ptr as usize)) {
+            Some(GcObject::String(bytes, count)) if bytes.len() as u64 == len => {
+                Some(*count.get_or_insert_with(|| parse_runtime_text(ptr, len).chars().count()))
+            }
+            _ => heap
+                .literal_lengths
+                .get(&(ptr as usize))
+                .and_then(|&(bytes, count)| (bytes == len).then_some(count)),
+        }
+    })
+}
+
+/// 登记编译器生成的只读字面量；指针在程序生命周期内保持有效，长度来自编译期 UTF-8 文本。
+#[unsafe(no_mangle)]
+pub extern "C" fn mas_register_string_length(ptr: *const u8, bytes: u64, scalars: u64) {
+    GC_HEAP.with(|heap| {
+        heap.borrow_mut().literal_lengths.insert(ptr as usize, (bytes, scalars as usize));
+    });
 }
 
 /// 进入语言函数；原生函数共享调用者保护帧，不允许跨线程保存托管指针。
@@ -262,12 +288,13 @@ pub extern "C" fn mas_gc_collections() -> i64 {
     GC_HEAP.with(|heap| heap.borrow().collections as i64)
 }
 
-/// 正常退出时释放全部剩余对象；此时不允许继续访问托管指针。
+/// 正常退出时释放全部剩余对象和字面量长度索引；此时不允许继续访问托管指针。
 fn gc_shutdown() {
     GC_HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         assert!(heap.frames.is_empty(), "GC frames still active at shutdown");
         heap.objects.clear();
+        heap.literal_lengths.clear();
     });
 }
 

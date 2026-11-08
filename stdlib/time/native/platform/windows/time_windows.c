@@ -36,16 +36,43 @@ long long mas_time_platform_monotonic_millis(void) {
 }
 
 /**
- * 使用 Windows `Sleep` 实现阻塞等待，并在负数输入时返回明确中文错误。
+ * 阻塞当前线程至少 ms 毫秒。按 Win32 的最大有限等待值分段，
+ * 用高精度单调计数器补足提前唤醒的时间。负数或计时失败时终止程序并报告错误。
  */
 void mas_time_platform_sleep(long long ms) {
     if (ms < 0) {
         mas_runtime_abort("sleep(ms) 只接受大于等于 0 的毫秒整数");
     }
+    if (ms == 0) {
+        return;
+    }
 
+    LARGE_INTEGER frequency;
+    if (!QueryPerformanceFrequency(&frequency)) {
+        mas_runtime_abort("无法读取单调时钟频率");
+    }
+    const DWORD max_slice = INFINITE - 1;
     while (ms > 0) {
-        DWORD slice = ms > 0xFFFFFFFFLL ? 0xFFFFFFFFU : (DWORD)ms;
-        Sleep(slice);
+        const DWORD slice = ms > (long long)max_slice ? max_slice : (DWORD)ms;
+        LARGE_INTEGER started;
+        LARGE_INTEGER now;
+        if (!QueryPerformanceCounter(&started)) {
+            mas_runtime_abort("无法读取单调时钟");
+        }
+        double remaining = slice;
+        do {
+            DWORD delay = (DWORD)remaining;
+            if (delay < remaining) {
+                ++delay;
+            }
+            Sleep(delay);
+            if (!QueryPerformanceCounter(&now)) {
+                mas_runtime_abort("无法读取单调时钟");
+            }
+            double elapsed = (double)(now.QuadPart - started.QuadPart) * 1000.0
+                / (double)frequency.QuadPart;
+            remaining = (double)slice - elapsed;
+        } while (remaining > 0);
         ms -= (long long)slice;
     }
 }

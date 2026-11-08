@@ -61,7 +61,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             }
             BinaryOp::Equal | BinaryOp::NotEqual => self.compile_equality(left, right, op, span),
             BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
-                self.compile_order_compare(left, right, op, span)
+                self.compile_order_compare(left, right, op)
             }
             BinaryOp::And | BinaryOp::Or => unreachable!("短路逻辑在外层单独处理"),
         }
@@ -348,13 +348,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         })
     }
 
-    /// 编译大小比较表达式。
+    /// 编译大小比较；同类型使用 LLVM 指令，混合比较保留整数精度，并使 NaN 的排序比较为假。
     pub(super) fn compile_order_compare(
         &mut self,
         left: TypedValue<'ctx>,
         right: TypedValue<'ctx>,
         op: BinaryOp,
-        span: Span,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         let value = if left.value_type == ValueType::Int && right.value_type == ValueType::Int {
             self.map_builder(self.builder.build_int_compare(
@@ -370,8 +369,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 "cmp.order.int",
             ))?
             .into()
-        } else {
-            let (left_float, right_float) = self.coerce_to_float_pair(left, right, span)?;
+        } else if left.value_type == ValueType::Float && right.value_type == ValueType::Float {
             self.map_builder(self.builder.build_float_compare(
                 match op {
                     BinaryOp::Less => FloatPredicate::OLT,
@@ -380,16 +378,68 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     BinaryOp::GreaterEqual => FloatPredicate::OGE,
                     _ => unreachable!(),
                 },
-                left_float,
-                right_float,
+                left.value.into_float_value(),
+                right.value.into_float_value(),
                 "cmp.order.float",
             ))?
             .into()
+        } else {
+            self.compile_mixed_order_compare(left, right, op)?.into()
         };
 
         Ok(TypedValue {
             value_type: ValueType::Bool,
             value,
         })
+    }
+
+    /// 把混合排序统一为“整数对浮点数”，比较运行时返回的四种结果，排除 NaN。
+    fn compile_mixed_order_compare(
+        &self,
+        left: TypedValue<'ctx>,
+        right: TypedValue<'ctx>,
+        op: BinaryOp,
+    ) -> Result<inkwell::values::IntValue<'ctx>, CompilerError> {
+        let (integer, float, op) = if left.value_type == ValueType::Int {
+            (left, right, op)
+        } else {
+            let reversed = match op {
+                BinaryOp::Less => BinaryOp::Greater,
+                BinaryOp::LessEqual => BinaryOp::GreaterEqual,
+                BinaryOp::Greater => BinaryOp::Less,
+                BinaryOp::GreaterEqual => BinaryOp::LessEqual,
+                _ => unreachable!(),
+            };
+            (right, left, reversed)
+        };
+        let result_type = self.context.i8_type();
+        let function = self.module.get_function("mas_compare_int_float").unwrap_or_else(|| {
+            self.module.add_function(
+                "mas_compare_int_float",
+                result_type.fn_type(
+                    &[self.context.i64_type().into(), self.context.f64_type().into()],
+                    false,
+                ),
+                None,
+            )
+        });
+        let call = self.map_builder(self.builder.build_call(
+            function,
+            &[integer.value.into(), float.value.into()],
+            "cmp.order.mixed",
+        ))?;
+        let (predicate, expected) = match op {
+            BinaryOp::Less => (IntPredicate::EQ, u8::MAX),
+            BinaryOp::LessEqual => (IntPredicate::SLE, 0),
+            BinaryOp::Greater => (IntPredicate::EQ, 1),
+            BinaryOp::GreaterEqual => (IntPredicate::ULE, 1),
+            _ => unreachable!(),
+        };
+        self.map_builder(self.builder.build_int_compare(
+            predicate,
+            call.try_as_basic_value().unwrap_basic().into_int_value(),
+            result_type.const_int(u64::from(expected), false),
+            "cmp.order.result",
+        ))
     }
 }
