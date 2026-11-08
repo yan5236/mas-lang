@@ -36,14 +36,15 @@ jobs:
       - name: Install LLVM on Intel macOS
         if: runner.os == 'macOS' && runner.arch == 'X64'
         run: |
-          llvm="$RUNNER_TEMP/llvm-19"
-          mkdir -p "$llvm"
+          pkg="$RUNNER_TEMP/macports.pkg"
           curl --fail --silent --show-error --location --retry 3 \
-            https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-macOS-X64.tar.xz \
-            | tar -xJ --strip-components=1 -C "$llvm"
-          "$llvm/bin/llvm-config" --version
-          echo "LLVM_SYS_191_PREFIX=$llvm" >> "$GITHUB_ENV"
-      - name: Generate time objects
+            https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-15-Sequoia.pkg \
+            -o "$pkg"
+          sudo installer -pkg "$pkg" -target /
+          sudo /opt/local/bin/port -N -b install llvm-19
+          echo "LLVM_SYS_191_PREFIX=/opt/local/libexec/llvm-19" >> "$GITHUB_ENV"
+      - name: Generate Intel macOS time objects
+        if: runner.os == 'macOS' && runner.arch == 'X64'
         run: |
           cargo +stable run --locked -p fama -- build examples/projects/time-api --allow-native-source-build
           target="$(rustc +stable --print host-tuple)"
@@ -52,6 +53,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/time-artifacts/$target"
           cp "$artifacts/manifest.toml" "$artifacts/"*.o "$RUNNER_TEMP/time-artifacts/$target/"
       - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS' && runner.arch == 'X64'
         with:
           name: time-${{ matrix.os }}
           path: ${{ runner.temp }}/time-artifacts/
