@@ -27,7 +27,7 @@ fn project_build_and_run_support_records() {
         .output()
         .unwrap();
     assert!(built.status.success(), "{built:?}");
-    let output = Command::new(project.join("build/demo.exe"))
+    let output = Command::new(project.join(format!("build/demo{}", std::env::consts::EXE_SUFFIX)))
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");

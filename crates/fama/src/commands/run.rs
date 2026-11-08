@@ -7,7 +7,7 @@ use crate::config::load_settings;
 use crate::error::FamaError;
 use crate::project::ProjectContext;
 
-/// 刷新依赖后运行项目；内嵌路径持有临时目录直到子进程退出，随后清理 EXE/PDB，外部路径由编译器负责清理。
+/// 刷新依赖后运行项目；内嵌模式在子进程退出后清理临时产物，外部模式由编译器负责清理。
 pub fn run(args: RunArgs) -> Result<(), FamaError> {
     let context = ProjectContext::load(&args.project_dir)?;
     let global_settings = load_settings()?;
@@ -22,7 +22,9 @@ pub fn run(args: RunArgs) -> Result<(), FamaError> {
 
     let workspace = TemporaryDirectory::create("fama-run")
         .map_err(|source| FamaError::io(env::temp_dir(), source))?;
-    let binary_path = workspace.path().join("program.exe");
+    let binary_path = workspace
+        .path()
+        .join(format!("program{}", env::consts::EXE_SUFFIX));
 
     super::build::compile_project_entry(&context, &binary_path, args.allow_native_source_build)?;
 

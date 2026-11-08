@@ -3,12 +3,14 @@ mod runtime_bootstrap;
 
 use std::{env, fs, path::PathBuf, process::Command};
 
-/// 以 Cargo 使用的 rustc 为 Windows 目标构建各优化档的运行时库，并记录工具链版本供链接端校验。
+/// 把 Cargo 目标传给编译器，并为 Windows MSVC x64 构建各优化档的运行时库。
 /// 编译或写入失败时终止 Cargo 构建，避免把不完整的运行时嵌入编译器。
 fn main() {
     println!("cargo:rerun-if-changed=src/runtime");
     println!("cargo:rerun-if-changed=src/runtime_bootstrap.rs");
-    if env::var("TARGET").as_deref() != Ok("x86_64-pc-windows-msvc") {
+    let target = env::var("TARGET").unwrap();
+    println!("cargo:rustc-env=MASLANG_TARGET={target}");
+    if target != "x86_64-pc-windows-msvc" {
         return;
     }
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());

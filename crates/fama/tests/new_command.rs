@@ -161,7 +161,7 @@ fn should_build_project_binary_into_configured_output_directory() {
         workdir
             .join("demo")
             .join("build")
-            .join("demo.exe")
+            .join(format!("demo{}", std::env::consts::EXE_SUFFIX))
             .is_file()
     );
 
@@ -196,7 +196,13 @@ fn should_run_project_binary_without_writing_configured_build_output() {
     assert!(run_output.status.success(), "{run_output:?}");
     let stdout = String::from_utf8_lossy(&run_output.stdout);
     assert!(stdout.contains("Hello Mas lang"));
-    assert!(!workdir.join("demo").join("build").join("demo.exe").exists());
+    assert!(
+        !workdir
+            .join("demo")
+            .join("build")
+            .join(format!("demo{}", std::env::consts::EXE_SUFFIX))
+            .exists()
+    );
 
     fs::remove_dir_all(workdir).expect("删除临时目录失败");
 }

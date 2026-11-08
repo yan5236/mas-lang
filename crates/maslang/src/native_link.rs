@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::diagnostic::{CompilerError, MessageId};
 use crate::source::{SourceFile, Span};
 
-pub const DEFAULT_TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+/// Cargo 构建当前编译器时使用的目标，也是生成的可执行程序的目标。
+pub const DEFAULT_TARGET_TRIPLE: &str = env!("MASLANG_TARGET");
 
 /// 按目标平台解析模块图中所有包的原生链接输入，默认优先消费包内预编译产物。
 pub fn resolve_native_link_inputs(

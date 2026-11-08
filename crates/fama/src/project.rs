@@ -70,9 +70,10 @@ impl ProjectContext {
         })
     }
 
-    /// 根据项目名和输出目录推导默认可执行文件路径。
+    /// 以项目名及宿主系统的可执行文件后缀拼接默认构建路径。
     pub fn default_binary_path(&self) -> PathBuf {
-        self.output_dir.join(format!("{}.exe", self.name))
+        self.output_dir
+            .join(format!("{}{}", self.name, std::env::consts::EXE_SUFFIX))
     }
 
     /// 把命令行传入的输出路径规范化为可写的目标文件路径。

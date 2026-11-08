@@ -57,7 +57,7 @@ pub fn compile_to_executable(
     Ok(output_path)
 }
 
-/// 根据源码路径和命令行选项推导最终输出文件位置。
+/// 优先使用显式输出路径，否则在源码旁的 build 目录使用原文件主名及系统可执行文件后缀。
 fn resolve_output_path(
     source: &SourceFile,
     options: &CompileOptions,
@@ -81,9 +81,9 @@ fn resolve_output_path(
             Span::new(0, 0),
         )
     })?;
-    Ok(parent
-        .join("build")
-        .join(format!("{}.exe", source_name.to_string_lossy())))
+    let mut binary_name = source_name.to_os_string();
+    binary_name.push(env::consts::EXE_SUFFIX);
+    Ok(parent.join("build").join(binary_name))
 }
 
 /// 链接程序及原生依赖；工具链匹配时复用相同优化档的预构建运行时，否则用当前 rustc 编译完整运行时。

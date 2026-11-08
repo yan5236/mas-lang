@@ -192,7 +192,7 @@ mod tests {
         }
     }
 
-    /// 校验原生后端能够把最小程序编译为可执行文件。
+    /// 校验默认输出保留源码主名及宿主可执行文件后缀，并执行产物核对输出。
     #[test]
     fn should_compile_minimal_program() {
         let unique = SystemTime::now()
@@ -201,14 +201,23 @@ mod tests {
             .as_nanos();
         let source_path = env::temp_dir()
             .join(format!("mascript-llvm-minimal-{unique}"))
-            .join("minimal.ms");
+            .join("minimal.program.ms");
         let source = SourceFile::new(
             source_path.display().to_string(),
             "func main():\n    print(\"Hello world.\")\n".to_string(),
         );
         let binary =
             compile_to_executable(&source, &zh_settings(), &CompileOptions::new(None)).unwrap();
-        assert!(binary.extension().is_some_and(|ext| ext == "exe"));
+        assert_eq!(
+            binary,
+            source_path
+                .with_file_name("build")
+                .join(format!("minimal.program{}", env::consts::EXE_SUFFIX))
+        );
+        let output = std::process::Command::new(binary).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout, b"Hello world.\n");
+        fs::remove_dir_all(source_path.parent().unwrap()).unwrap();
     }
 
     /// 校验本地模块、`index.ms` 聚合入口与 `export import` 能在前端被正确装载。
@@ -473,7 +482,7 @@ func main():
         let binary = compile_to_executable(
             &source,
             &zh_settings(),
-            &CompileOptions::new(Some(output_path)),
+            &CompileOptions::new(Some(output_path)).with_allow_native_source_build(cfg!(unix)),
         )
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();
@@ -516,7 +525,7 @@ func main():
         let binary = compile_to_executable(
             &source,
             &zh_settings(),
-            &CompileOptions::new(Some(output_path)),
+            &CompileOptions::new(Some(output_path)).with_allow_native_source_build(cfg!(unix)),
         )
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();
@@ -546,6 +555,7 @@ func main():
     }
 
     /// 校验缺少预编译矩阵声明时，普通消费路径会返回明确的中文错误而不是隐式源码编译。
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
     #[test]
     fn should_fail_when_time_prebuilt_matrix_is_missing() {
         let root = create_temp_project("time-missing-matrix");
@@ -583,6 +593,7 @@ func main():
     }
 
     /// 校验缺少对象文件时会返回中文诊断，并明确提示维护者刷新预编译产物。
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
     #[test]
     fn should_fail_when_time_prebuilt_object_is_missing() {
         let root = create_temp_project("time-missing-object");
@@ -617,6 +628,7 @@ func main():
     }
 
     /// 校验 ABI 版本不匹配时会在链接前被阻止，并提示维护者先刷新对应目标的预编译产物。
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
     #[test]
     fn should_fail_when_time_prebuilt_abi_mismatches() {
         let root = create_temp_project("time-abi-mismatch");
@@ -651,6 +663,7 @@ func main():
     }
 
     /// 校验维护者显式开启源码构建模式后，缺失的预编译对象和清单会被重新生成并立即可用。
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
     #[test]
     fn should_refresh_time_prebuilt_when_maintainer_mode_is_enabled() {
         let root = create_temp_project("time-refresh");

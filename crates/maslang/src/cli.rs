@@ -198,7 +198,7 @@ fn build_file(
     }
 }
 
-/// 在独占临时目录编译源码并继承终端输入输出运行；返回子进程退出码，退出后清理 EXE 与 PDB。
+/// 在独占临时目录编译并运行源码，继承终端输入输出；退出后清理可执行文件及链接附属文件。
 fn run_file(settings: &CompilerSettings, path: PathBuf, mut options: CompileOptions) -> ExitCode {
     let source = match read_source(&path) {
         Ok(source) => source,
@@ -219,7 +219,9 @@ fn run_file(settings: &CompilerSettings, path: PathBuf, mut options: CompileOpti
             return ExitCode::FAILURE;
         }
     };
-    let output_path = workspace.path().join("program.exe");
+    let output_path = workspace
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
     options.output_path = Some(output_path);
     let binary = match compile_to_executable(&source, settings, &options) {
         Ok(binary) => binary,

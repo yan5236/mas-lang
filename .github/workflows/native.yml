@@ -1,0 +1,40 @@
+name: Native compiler
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            format: ELF
+          - os: macos-15
+            format: Mach-O
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-19-dev libpolly-19-dev libzstd-dev libxml2-dev
+          echo "LLVM_SYS_191_PREFIX=/usr/lib/llvm-19" >> "$GITHUB_ENV"
+      - name: Install LLVM on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@19
+          echo "LLVM_SYS_191_PREFIX=$(brew --prefix llvm@19)" >> "$GITHUB_ENV"
+      - name: Test workspace
+        run: cargo +stable test --workspace --locked
+      - name: Verify executable format and output
+        env:
+          BINARY_FORMAT: ${{ matrix.format }}
+        run: |
+          cargo +stable run --locked -p maslang -- build examples/regression/syntax/standalone-hello/main.ms -o "$RUNNER_TEMP/mas-hello"
+          file "$RUNNER_TEMP/mas-hello" | grep -F "$BINARY_FORMAT"
+          test "$("$RUNNER_TEMP/mas-hello")" = Helloworld

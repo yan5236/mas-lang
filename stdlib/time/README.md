@@ -39,6 +39,8 @@ native/
 
 `fama install` 会保留 `native/artifacts/` 目录，因此本地路径依赖安装到 `mod_module/time@0.1.0/` 后仍然可以直接被消费。
 
+在 Linux 和 macOS 上，使用本机 C 编译器和 `fama run --allow-native-source-build examples/projects/time-api` 运行示例。该选项显式允许从包内 POSIX 源码构建原生对象。
+
 ## 角色分流
 
 普通调用方：

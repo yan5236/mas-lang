@@ -3,7 +3,7 @@ use inkwell::targets::FileType;
 use super::*;
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 校验模块并执行指定档位的完整优化管线，再输出 COFF；可选写出优化前后 IR 与汇编，失败停止构建。
+    /// 校验模块并执行指定档位的优化管线，再输出目标平台的对象文件；可选写出 IR 与汇编，失败停止构建。
     pub(super) fn finish_object(
         self,
         options: &CompileOptions,

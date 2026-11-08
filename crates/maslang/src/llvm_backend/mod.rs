@@ -156,7 +156,7 @@ struct CodeGenerator<'ctx, 'src> {
 }
 
 impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
-    /// 初始化模块、目标三元组、运行时函数声明和第二阶段代码生成状态。
+    /// 按编译器的 Cargo 目标初始化 LLVM 模块和运行时声明；目标不可用时返回构建诊断。
     fn new(context: &'ctx Context, source: &'src SourceFile) -> Result<Self, CompilerError> {
         Target::initialize_native(&InitializationConfig::default()).map_err(|error| {
             CompilerError::build(
@@ -168,7 +168,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         let target_machine = create_target_machine(
             source,
-            &TargetMachine::get_default_triple(),
+            &TargetTriple::create(crate::native_link::DEFAULT_TARGET_TRIPLE),
             OptLevel::default(),
         )?;
         let module = context.create_module("mascript");
@@ -246,7 +246,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 }
 
-/// 复用宿主默认配置为指定三元组构造目标机器，避免初始化与输出阶段重复拼装。
+/// 用宿主 CPU 和指定目标创建 LLVM 目标机器；Unix 对象使用 PIC 以链接到位置无关可执行文件。
 fn create_target_machine(
     source: &SourceFile,
     triple: &TargetTriple,
@@ -266,7 +266,11 @@ fn create_target_machine(
             TargetMachine::get_host_cpu_name().to_string().as_str(),
             TargetMachine::get_host_cpu_features().to_string().as_str(),
             level.llvm(),
-            RelocMode::Default,
+            if cfg!(unix) {
+                RelocMode::PIC
+            } else {
+                RelocMode::Default
+            },
             CodeModel::Default,
         )
         .ok_or_else(|| {
