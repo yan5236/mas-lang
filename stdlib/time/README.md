@@ -66,13 +66,13 @@ func main():
 
 | 目标三元组 | 产物目录 | 当前状态 |
 | --- | --- | --- |
-| `x86_64-pc-windows-msvc` | `native/artifacts/x86_64-pc-windows-msvc/` | 已按 0.2.0 / ABI 2 刷新 |
-| `x86_64-unknown-linux-gnu` | `native/artifacts/x86_64-unknown-linux-gnu/` | **待刷新**：仍是 0.1.0 / ABI 1，链接前会被明确拒绝 |
-| `aarch64-unknown-linux-gnu` | `native/artifacts/aarch64-unknown-linux-gnu/` | **待刷新**：同上 |
-| `x86_64-apple-darwin` | `native/artifacts/x86_64-apple-darwin/` | **待刷新**：同上 |
-| `aarch64-apple-darwin` | `native/artifacts/aarch64-apple-darwin/` | **待刷新**：同上 |
+| `x86_64-pc-windows-msvc` | `native/artifacts/x86_64-pc-windows-msvc/` | 已按 0.2.0 / ABI 2 刷新（本机 MSVC 工具链生成） |
+| `x86_64-unknown-linux-gnu` | `native/artifacts/x86_64-unknown-linux-gnu/` | 已按 0.2.0 / ABI 2 刷新（Actions `ubuntu-24.04` 生成） |
+| `aarch64-unknown-linux-gnu` | `native/artifacts/aarch64-unknown-linux-gnu/` | 已按 0.2.0 / ABI 2 刷新（Actions `ubuntu-24.04-arm` 生成） |
+| `x86_64-apple-darwin` | `native/artifacts/x86_64-apple-darwin/` | 已按 0.2.0 / ABI 2 刷新（Actions `macos-15-intel` 生成） |
+| `aarch64-apple-darwin` | `native/artifacts/aarch64-apple-darwin/` | 已按 0.2.0 / ABI 2 刷新（Actions `macos-15` 生成） |
 
-“待刷新”是预期状态：旧对象的调用约定与新 ABI 不兼容，链接器会在消费前用中文诊断拒绝，而不是把新旧对象混着链接。四个非 Windows 目标由 `.github/workflows/time-artifacts.yml` 在对应原生 runner 上重新生成后回填，不手工伪造。
+五个目标的产物均已随 0.2.0 源码重建；四个非 Windows 目标由 `.github/workflows/time-artifacts.yml` 在对应原生 runner 上生成后回填。后续如果 C 源码、头文件或 `native.abi` 再次变化，必须重新触发该工作流，否则链接器会因清单指纹或 ABI 不匹配用中文诊断拒绝，而不是把新旧对象混着链接。
 
 普通调用方构建 `import time { ... }` 时，编译器读取 `settings.toml` 中对应的 `native.prebuilt.<target>` 条目，直接链接该目录下的对象文件，不需要本机 C 编译器。
 

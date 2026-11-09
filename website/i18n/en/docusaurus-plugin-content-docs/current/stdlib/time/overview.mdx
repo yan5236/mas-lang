@@ -94,13 +94,13 @@ On a non-zero code the strict functions call the internal `mas_time_fail(code)`,
 
 | Target triple | Status |
 |---------------|--------|
-| `x86_64-pc-windows-msvc` | Refreshed for `0.2.0` / ABI 2 |
-| `x86_64-unknown-linux-gnu` | Pending refresh (still ABI 1, rejected before linking) |
-| `aarch64-unknown-linux-gnu` | Pending refresh |
-| `x86_64-apple-darwin` | Pending refresh |
-| `aarch64-apple-darwin` | Pending refresh |
+| `x86_64-pc-windows-msvc` | Refreshed for `0.2.0` / ABI 2 (built locally with the MSVC toolchain) |
+| `x86_64-unknown-linux-gnu` | Refreshed for `0.2.0` / ABI 2 (built by Actions `ubuntu-24.04`) |
+| `aarch64-unknown-linux-gnu` | Refreshed for `0.2.0` / ABI 2 (built by Actions `ubuntu-24.04-arm`) |
+| `x86_64-apple-darwin` | Refreshed for `0.2.0` / ABI 2 (built by Actions `macos-15-intel`) |
+| `aarch64-apple-darwin` | Refreshed for `0.2.0` / ABI 2 (built by Actions `macos-15`) |
 
-"Pending refresh" is the expected state: old and new call conventions are incompatible, so the compiler rejects them with a Chinese diagnostic before linking instead of mixing objects silently. The four non-Windows targets are produced by the `time-artifacts` workflow on their native runners; see `stdlib/time/README.md`.
+All five targets were rebuilt from the `0.2.0` sources. If the C sources, headers, or `native.abi` change again, rerun the `time-artifacts` workflow; otherwise the compiler rejects the stale artifacts with a Chinese diagnostic before linking instead of mixing old and new objects. See `stdlib/time/README.md` for details.
 
 ## Notes
 

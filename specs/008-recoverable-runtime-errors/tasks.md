@@ -36,6 +36,6 @@
 
 - [x] 4.1 Windows 预编译产物按 ABI 2 重建并回填 `stdlib/time/native/artifacts/x86_64-pc-windows-msvc/`
 - [x] 4.2 `.github/workflows/time-artifacts.yml` 四目标矩阵工作流（只上传 artifact，不写 git）
-- [ ] 4.3 通过 Actions 生成并回填 Linux/macOS 四份产物与清单（待 CI 运行与回填）
+- [x] 4.3 通过 Actions 生成并回填 Linux/macOS 四份产物与清单（run 42562795801，四个矩阵任务 success）
 - [x] 4.4 `cargo test --workspace --locked` 全绿
 - [x] 4.5 `IMPLEMENTATION.md` 交付说明（基线、差异、契约、验证、遗留）

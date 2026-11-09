@@ -94,13 +94,13 @@ func main():
 
 | 目标三元组 | 状态 |
 |-----------|------|
-| `x86_64-pc-windows-msvc` | 已按 `0.2.0` / ABI 2 刷新 |
-| `x86_64-unknown-linux-gnu` | 待刷新（仍是 ABI 1，链接前会被明确拒绝） |
-| `aarch64-unknown-linux-gnu` | 待刷新 |
-| `x86_64-apple-darwin` | 待刷新 |
-| `aarch64-apple-darwin` | 待刷新 |
+| `x86_64-pc-windows-msvc` | 已按 `0.2.0` / ABI 2 刷新（本机 MSVC 工具链生成） |
+| `x86_64-unknown-linux-gnu` | 已按 `0.2.0` / ABI 2 刷新（Actions `ubuntu-24.04` 生成） |
+| `aarch64-unknown-linux-gnu` | 已按 `0.2.0` / ABI 2 刷新（Actions `ubuntu-24.04-arm` 生成） |
+| `x86_64-apple-darwin` | 已按 `0.2.0` / ABI 2 刷新（Actions `macos-15-intel` 生成） |
+| `aarch64-apple-darwin` | 已按 `0.2.0` / ABI 2 刷新（Actions `macos-15` 生成） |
 
-“待刷新”是预期状态：新旧 ABI 的调用约定不兼容，编译器会在链接前用中文诊断拒绝，不会静默混用。四个非 Windows 目标由 `time-artifacts` 工作流在对应原生 runner 上生成后回填，详见 `stdlib/time/README.md`。
+五个目标的产物均已随 `0.2.0` 源码重建。后续如果 C 源码、头文件或 `native.abi` 再次变化，需要重新触发 `time-artifacts` 工作流，否则编译器会在链接前用中文诊断拒绝，不会静默混用新旧对象，详见 `stdlib/time/README.md`。
 
 ## 注意事项
 

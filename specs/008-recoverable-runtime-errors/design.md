@@ -84,3 +84,5 @@ pub(super) fn compile_try_print_call(/* ... */) -> Result<TypedValue<'ctx>, Comp
 - 风险：time `abi = 2` 使旧预编译产物失效；缓解：Windows 产物本机刷新，Linux/macOS 由 GitHub Actions 原生 runner 生成后回填，链接器对 ABI 不匹配明确拒绝。
 - 风险：`try_result<T>` 引用型载荷的 GC 保活依赖根登记偏移；缓解：用 LLVM struct GEP 计算字段 1 地址并配 GC 强制回收测试。
 - 风险：安全入口复用两次查找（`contains` + `get/remove`）带来额外开销；缓解：安全入口按“失败可恢复”定位，热路径继续使用严格接口。
+- 限制：固定数组是内联值，`grid[0].try_set(...)` 这类目标没有稳定可写地址，编译期直接拒绝并提示改用 `grid[0][1] = v`；变量与结构体字段链仍可直接写回。
+- 限制：Windows 的 `GetTickCount64` 不会失败，`code = 7` 只在 POSIX 上实际出现；Windows 等待内 QPC 失败统一归 `code = 6`。
