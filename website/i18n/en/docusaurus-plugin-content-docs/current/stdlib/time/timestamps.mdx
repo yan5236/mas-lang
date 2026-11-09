@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # Timestamps
 
-Get the current Unix timestamp.
+Get the current Unix timestamp. The strict and recoverable functions read the same host clock; they differ only in whether a failure aborts the process.
 
 ## unix_seconds — Current Unix Timestamp (Seconds)
 
@@ -13,7 +13,7 @@ var ts: int = unix_seconds()
 // example: 1717050800
 ```
 
-Returns the number of seconds since the Unix epoch (1970-01-01 00:00:00 UTC). Suitable for logging, time-window checks, and signatures.
+Returns the number of seconds since the Unix epoch (1970-01-01 00:00:00 UTC). Suitable for logging, time-window checks, and signatures. A host clock read failure prints a Chinese runtime error and exits with status code `1`.
 
 ## unix_millis — Current Unix Timestamp (Milliseconds)
 
@@ -23,3 +23,30 @@ var ts: int = unix_millis()
 ```
 
 Returns the number of milliseconds since the Unix epoch, with higher precision than `unix_seconds`. Suitable for scenarios requiring finer-grained timestamps.
+
+## try_unix_seconds — Safely Read Seconds
+
+```mas-lang
+import time { try_unix_seconds, TimeIntResult }
+
+func main():
+    var result: TimeIntResult = try_unix_seconds()
+    if result.ok:
+        print("unix seconds: " + string(result.value))
+    else:
+        print("read failed, code " + string(result.code))
+```
+
+Returns `TimeIntResult`. When `ok` is `true`, `value` is a valid timestamp; on failure `value` is `0` and `code` explains why (`1` host clock read failure, `2` host clock earlier than the Unix epoch).
+
+## try_unix_millis — Safely Read Milliseconds
+
+```mas-lang
+var result = try_unix_millis()
+print(result.ok)
+print(result.code)
+```
+
+Returns `TimeIntResult` with the same semantics as `try_unix_seconds`, where `value` is the millisecond timestamp.
+
+**Note**: when `ok` is `false`, `value` is the placeholder `0` and must not be treated as a real time. A negative timestamp is itself a legal value — only `ok` decides validity.

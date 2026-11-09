@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Time Formatting
 
-Format the current UTC time as standard strings.
+Format the current UTC time as standard strings. Strict functions abort on failure, while `try_*` functions report the failure through a result struct.
 
 ## now_utc — ISO 8601 Format
 
@@ -32,3 +32,26 @@ var s: string = now_http_date()
 ```
 
 Returns an RFC 7231 HTTP-date formatted UTC string with `GMT` timezone identifier. Suitable for HTTP headers such as `Date`, `Last-Modified`, and `Expires`.
+
+## try_now_utc / try_now_email_date / try_now_http_date
+
+The three recoverable functions return `TimeStringResult` and no longer abort on failure:
+
+```mas-lang
+import time { try_now_http_date }
+
+func main():
+    var result = try_now_http_date()
+    if result.ok:
+        print("Date: " + result.value)
+    else:
+        print("failed to build HTTP date, code " + string(result.code))
+```
+
+| Function | Output format | Success example |
+|----------|---------------|-----------------|
+| `try_now_utc()` | ISO 8601 / RFC 3339 | `2026-05-30T12:34:56+00:00` |
+| `try_now_email_date()` | RFC 2822 | `Sat, 30 May 2026 12:34:56 +0000` |
+| `try_now_http_date()` | HTTP-date | `Sat, 30 May 2026 12:34:56 GMT` |
+
+On failure `ok` is `false`, `value` is the fixed empty string, and `code` is `1` (host clock read failure), `2` (host clock earlier than the Unix epoch, Windows only), `3` (UTC decomposition failure), or `4` (formatting failure). The empty string is only a placeholder — it never means "the time formatted to empty text".

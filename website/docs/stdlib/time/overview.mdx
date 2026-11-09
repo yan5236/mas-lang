@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # time — 时间标准库
 
-`time` 模块提供墙钟时间获取与单调时钟计时功能，包含 7 个公开函数。
+`time` 模块提供墙钟时间获取、时间格式化与单调时钟计时功能。包版本 `0.2.0`，原生 ABI 版本 `2`。
 
 ## 安装
 
@@ -12,20 +12,22 @@ sidebar_position: 1
 
 ```toml
 [dependencies]
-time = { path = "../../../stdlib/time", version = "0.1.0" }
+time = { path = "../../../stdlib/time", version = "0.2.0" }
 ```
 
-然后执行 `fama install`（已安装到 `mod_module/time@0.1.0/` 后无需重复安装）。完整示例见 `examples/projects/time-api`。
+然后执行 `fama install`（已安装到 `mod_module/time@0.2.0/` 后无需重复安装）。完整示例见 `examples/projects/time-api`。
 
 ## 导入
 
 ```mas-lang
-import time { unix_seconds, now_utc, monotonic_millis, sleep }
+import time { unix_seconds, now_utc, monotonic_millis, sleep, try_sleep }
 ```
 
-按需导入所需函数。
+按需导入所需函数；结果结构 `TimeStatus`、`TimeIntResult`、`TimeStringResult` 也从此处导出。
 
 ## 函数一览
+
+严格接口保持原有名称与返回类型，失败时会输出中文运行时错误并以状态码 `1` 退出：
 
 | 函数 | 返回类型 | 说明 |
 |------|---------|------|
@@ -37,8 +39,72 @@ import time { unix_seconds, now_utc, monotonic_millis, sleep }
 | `monotonic_millis()` | `int` | 单调时钟毫秒计数 |
 | `sleep(ms)` | 无 | 线程休眠指定毫秒数 |
 
+可恢复接口不会终止进程，失败信息写在结果结构里：
+
+| 函数 | 返回类型 | 说明 |
+|------|---------|------|
+| `try_unix_seconds()` | `TimeIntResult` | 安全读取 Unix 秒级时间戳 |
+| `try_unix_millis()` | `TimeIntResult` | 安全读取 Unix 毫秒级时间戳 |
+| `try_monotonic_millis()` | `TimeIntResult` | 安全读取单调毫秒计数 |
+| `try_now_utc()` | `TimeStringResult` | 安全读取 ISO 8601 UTC 字符串 |
+| `try_now_email_date()` | `TimeStringResult` | 安全读取 RFC 2822 UTC 字符串 |
+| `try_now_http_date()` | `TimeStringResult` | 安全读取 HTTP-date UTC 字符串 |
+| `try_sleep(ms)` | `TimeStatus` | 安全休眠，负等待不再中断进程 |
+
+## 结果结构
+
+三个结构从 `index.ms` 导出，字段名与仓库统一的 `try_result` 约定一致：
+
+```mas-lang
+import time { try_sleep }
+
+func main():
+    var status = try_sleep(-1)
+    if not status.ok:
+        print("等待失败，错误码 " + string(status.code))
+    print("继续执行")
+```
+
+| 结构 | 字段 |
+|------|------|
+| `TimeStatus` | `ok: bool`、`code: int` |
+| `TimeIntResult` | `ok: bool`、`code: int`、`value: int` |
+| `TimeStringResult` | `ok: bool`、`code: int`、`value: string` |
+
+`ok` 为 `false` 时，`value` 固定是无害占位值（`0` 或空串），调用方必须先判断 `ok` 再读 `value`。
+
+## 错误码
+
+| 错误码 | 含义 | 出现位置 |
+|--------|------|---------|
+| `0` | 成功 | 全部 |
+| `1` | 宿主时钟读取失败 | 时间戳与格式化读取 |
+| `2` | 宿主时钟早于 Unix 纪元（仅 Windows） | 同上 |
+| `3` | UTC 时间拆解失败 | 格式化读取 |
+| `4` | 时间格式化失败 | 格式化读取 |
+| `5` | 负等待参数 | `try_sleep` |
+| `6` | 阻塞等待失败 | `try_sleep` |
+| `7` | 单调时钟读取失败 | `try_monotonic_millis` |
+
+严格接口在拿到非零错误码时调用内部的 `mas_time_fail(code)`：输出与 0.1.0 完全一致的中文 `运行时错误: ...` 并以状态码 `1` 退出。
+
+## 预编译原生 ABI
+
+`0.2.0` 把原生 ABI 提升到 `2`，原生层不再对可预期的宿主失败直接中止进程，而是填写结果结构并回填状态码。五个目标的预编译产物必须随源码重建：
+
+| 目标三元组 | 状态 |
+|-----------|------|
+| `x86_64-pc-windows-msvc` | 已按 `0.2.0` / ABI 2 刷新 |
+| `x86_64-unknown-linux-gnu` | 待刷新（仍是 ABI 1，链接前会被明确拒绝） |
+| `aarch64-unknown-linux-gnu` | 待刷新 |
+| `x86_64-apple-darwin` | 待刷新 |
+| `aarch64-apple-darwin` | 待刷新 |
+
+“待刷新”是预期状态：新旧 ABI 的调用约定不兼容，编译器会在链接前用中文诊断拒绝，不会静默混用。四个非 Windows 目标由 `time-artifacts` 工作流在对应原生 runner 上生成后回填，详见 `stdlib/time/README.md`。
+
 ## 注意事项
 
 - 所有墙钟时间函数均返回 **UTC 时间**，不提供本地时区转换
 - `monotonic_millis` 的起点是系统启动时间，不可与墙钟时间混用；Windows 上使用系统计数，分辨率约为 15.6 毫秒，测量很短的时间差时可能出现 0 或 16 毫秒的跳变
-- `sleep` 传入负数会导致运行时错误并以状态码 1 退出
+- Windows 上宿主时钟早于 1970-01-01 UTC 时返回 `ok = false, code = 2`；负时间戳本身是合法值，**不会**被当作失败哨兵
+- `sleep(ms)` 传入负数仍以状态码 `1` 退出；需要失败分支继续执行的场景应改用 `try_sleep(ms)`

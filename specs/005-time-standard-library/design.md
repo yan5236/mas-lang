@@ -1,5 +1,7 @@
 # 技术设计文档：time 标准库
 
+> 2026-11 更新：time 宿主层已从 ABI 1 升级到 ABI 2（可恢复的结果结构 + 错误码），`mas_time_now_*`/`mas_time_sleep` 等入口由 `mas_time_read_*` 取代；见 [specs/008-recoverable-runtime-errors](../008-recoverable-runtime-errors/requirements.md)。本文档保留 ABI 1 时期的历史设计，作为演进记录。
+
 ## 1. 概述
 
 - **问题陈述**：当前 `stdlib/time` 并不是独立标准库实现，而只是对 `__time_*` 内建函数的薄包装；这些符号被硬编码在 `maslang` 的语义分析、类型推导、LLVM 代码生成和 `runtime_bootstrap.rs` 中。这样做虽然能跑通当前功能，但每新增一个 time API 都必须修改编译器，违反“标准库演进不应反复改编译器业务分支”的边界。

@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # 时间戳
 
-获取当前 Unix 时间戳。
+获取当前 Unix 时间戳。严格接口与可恢复接口读取的是同一个宿主时钟，区别只在失败时是否中断进程。
 
 ## unix_seconds — 当前 Unix 时间戳（秒）
 
@@ -13,7 +13,7 @@ var ts: int = unix_seconds()
 // 示例：1717050800
 ```
 
-返回自 Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。适用于日志记录、时间窗口校验、签名等场景。
+返回自 Unix 纪元（1970-01-01 00:00:00 UTC）以来的秒数。适用于日志记录、时间窗口校验、签名等场景。宿主时钟读取失败时输出中文运行时错误并以状态码 `1` 退出。
 
 ## unix_millis — 当前 Unix 时间戳（毫秒）
 
@@ -23,3 +23,30 @@ var ts: int = unix_millis()
 ```
 
 返回自 Unix 纪元以来的毫秒数，精度高于 `unix_seconds`。适用于需要更高时间精度的场景。
+
+## try_unix_seconds — 安全读取秒级时间戳
+
+```mas-lang
+import time { try_unix_seconds, TimeIntResult }
+
+func main():
+    var result: TimeIntResult = try_unix_seconds()
+    if result.ok:
+        print("当前秒级时间戳：" + string(result.value))
+    else:
+        print("读取失败，错误码 " + string(result.code))
+```
+
+返回 `TimeIntResult`。`ok` 为 `true` 时 `value` 是合法时间戳；失败时 `value` 固定为 `0`，`code` 说明原因（`1` 宿主时钟读取失败，`2` 宿主时钟早于 Unix 纪元）。
+
+## try_unix_millis — 安全读取毫秒级时间戳
+
+```mas-lang
+var result = try_unix_millis()
+print(result.ok)
+print(result.code)
+```
+
+返回 `TimeIntResult`，语义与 `try_unix_seconds` 相同，`value` 为毫秒级时间戳。
+
+**注意**：`ok` 为 `false` 时 `value` 是占位值 `0`，不能当作有效时间使用。负时间戳本身是合法取值，是否合法只看 `ok`。

@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # time — Standard Library
 
-The `time` module provides wall-clock time retrieval and monotonic clock timing, with 7 public functions.
+The `time` module provides wall-clock time retrieval, time formatting, and monotonic clock timing. The package version is `0.2.0` with native ABI version `2`.
 
 ## Installation
 
@@ -12,20 +12,22 @@ The `time` module provides wall-clock time retrieval and monotonic clock timing,
 
 ```toml
 [dependencies]
-time = { path = "../../../stdlib/time", version = "0.1.0" }
+time = { path = "../../../stdlib/time", version = "0.2.0" }
 ```
 
-Then run `fama install` (no need to reinstall once it is present in `mod_module/time@0.1.0/`). See `examples/projects/time-api` for a complete example.
+Then run `fama install` (no need to reinstall once it is present in `mod_module/time@0.2.0/`). See `examples/projects/time-api` for a complete example.
 
 ## Import
 
 ```mas-lang
-import time { unix_seconds, now_utc, monotonic_millis, sleep }
+import time { unix_seconds, now_utc, monotonic_millis, sleep, try_sleep }
 ```
 
-Import only the functions you need.
+Import only what you need. The result structs `TimeStatus`, `TimeIntResult`, and `TimeStringResult` are exported from the same entry point.
 
 ## Function Overview
+
+Strict functions keep their original names and return types. On failure they print a Chinese runtime error and exit with status code `1`:
 
 | Function | Return Type | Description |
 |----------|-------------|-------------|
@@ -37,8 +39,72 @@ Import only the functions you need.
 | `monotonic_millis()` | `int` | Monotonic clock millisecond counter |
 | `sleep(ms)` | void | Sleep the thread for the given milliseconds |
 
+Recoverable functions never terminate the process; failures are reported through the result struct:
+
+| Function | Return Type | Description |
+|----------|-------------|-------------|
+| `try_unix_seconds()` | `TimeIntResult` | Safely read the Unix timestamp in seconds |
+| `try_unix_millis()` | `TimeIntResult` | Safely read the Unix timestamp in milliseconds |
+| `try_monotonic_millis()` | `TimeIntResult` | Safely read the monotonic millisecond counter |
+| `try_now_utc()` | `TimeStringResult` | Safely read the ISO 8601 UTC string |
+| `try_now_email_date()` | `TimeStringResult` | Safely read the RFC 2822 UTC string |
+| `try_now_http_date()` | `TimeStringResult` | Safely read the HTTP-date UTC string |
+| `try_sleep(ms)` | `TimeStatus` | Safe sleep; negative waits no longer abort the process |
+
+## Result Structs
+
+The three structs are re-exported from `index.ms`, and their field names follow the repository-wide `try_result` convention:
+
+```mas-lang
+import time { try_sleep }
+
+func main():
+    var status = try_sleep(-1)
+    if not status.ok:
+        print("wait failed, code " + string(status.code))
+    print("still running")
+```
+
+| Struct | Fields |
+|--------|--------|
+| `TimeStatus` | `ok: bool`, `code: int` |
+| `TimeIntResult` | `ok: bool`, `code: int`, `value: int` |
+| `TimeStringResult` | `ok: bool`, `code: int`, `value: string` |
+
+When `ok` is `false`, `value` holds a harmless placeholder (`0` or the empty string); always check `ok` before reading `value`.
+
+## Error Codes
+
+| Code | Meaning | Reported by |
+|------|---------|-------------|
+| `0` | Success | All |
+| `1` | Host clock read failure | Timestamp and formatting readers |
+| `2` | Host clock is earlier than the Unix epoch (Windows only) | Same as above |
+| `3` | UTC decomposition failure | Formatting readers |
+| `4` | Time formatting failure | Formatting readers |
+| `5` | Negative wait argument | `try_sleep` |
+| `6` | Blocking wait failure | `try_sleep` |
+| `7` | Monotonic clock read failure | `try_monotonic_millis` |
+
+On a non-zero code the strict functions call the internal `mas_time_fail(code)`, which prints the same Chinese `运行时错误: ...` message as version 0.1.0 and exits with status code `1`.
+
+## Prebuilt Native ABI
+
+`0.2.0` bumps the native ABI to `2`: the native layer no longer aborts on predictable host failures, it fills in result structs and reports status codes instead. Prebuilt objects for all five targets must be rebuilt from the new sources:
+
+| Target triple | Status |
+|---------------|--------|
+| `x86_64-pc-windows-msvc` | Refreshed for `0.2.0` / ABI 2 |
+| `x86_64-unknown-linux-gnu` | Pending refresh (still ABI 1, rejected before linking) |
+| `aarch64-unknown-linux-gnu` | Pending refresh |
+| `x86_64-apple-darwin` | Pending refresh |
+| `aarch64-apple-darwin` | Pending refresh |
+
+"Pending refresh" is the expected state: old and new call conventions are incompatible, so the compiler rejects them with a Chinese diagnostic before linking instead of mixing objects silently. The four non-Windows targets are produced by the `time-artifacts` workflow on their native runners; see `stdlib/time/README.md`.
+
 ## Notes
 
 - All wall-clock functions return **UTC time**; local timezone conversion is not provided
 - `monotonic_millis` starts at system boot, not the Unix epoch — do not mix with wall-clock time. On Windows it uses the system tick counter with a resolution of about 15.6 ms, so measuring very short intervals can jump by 0 or 16 ms
-- `sleep` with a negative value causes a runtime error and exits with status code 1
+- On Windows a host clock earlier than 1970-01-01 UTC yields `ok = false, code = 2`; negative timestamps are legal values and are **never** used as a failure sentinel
+- `sleep(ms)` with a negative value still exits with status code `1`; use `try_sleep(ms)` when the failure branch must keep running

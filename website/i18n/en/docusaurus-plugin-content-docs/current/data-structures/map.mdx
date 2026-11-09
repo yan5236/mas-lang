@@ -45,6 +45,8 @@ func main():
         print("no city field")
 ```
 
+You can also use `try_get(key)`, described below, to turn a missing key into a value you can test.
+
 ## Adding and Updating
 
 ```mas-lang
@@ -68,11 +70,49 @@ len(map)                  // number of entries
 |--------|---------|-------|
 | `remove(k)` | nothing | Removes key `k`; reports a runtime error if the key is absent |
 | `contains(k)` | `bool` | Whether the key exists |
+| `try_get(k)` | `try_result<V>` | Returns `.ok == false` for a missing key instead of a runtime error |
+| `try_remove(k)` | `bool` | Removes only when the key exists and returns `true`; a missing key returns `false` and leaves the map unchanged |
 | `keys()` | `list<K>` | A snapshot list of keys in insertion order |
 | `values()` | `list<V>` | Values in insertion order; struct, list, and dictionary values are still shared references |
 | `len(map)` | `int` | Number of entries |
 
 `keys()` and `values()` return new snapshot lists — later additions or removals on the map do not change a list you already obtained; removing a key and inserting it again appends it to the end.
+
+## Recoverable Reads and Removals
+
+When you would rather not "check with `contains` and then access", `try_get` and `try_remove` hand the failure back to the caller, and neither one reports a runtime error:
+
+```mas-lang
+var scores = {"alice": 90}
+
+func main():
+    var hit = scores.try_get("alice")
+    if hit.ok:
+        print(hit.value)                 // 90
+    var miss = scores.try_get("bob")
+    print(miss.ok)                       // false
+    print(miss.value)                    // 0: placeholder, do not rely on it
+
+    print(scores.try_remove("bob"))      // false: missing key, map unchanged
+    print(scores.try_remove("alice"))    // true
+    print(len(scores))                   // 0
+```
+
+`try_get` returns `try_result<V>`, the same result shape as the safe conversions such as `try_int`, with the read-only properties `.ok` and `.value`. For a missing key `.ok` is `false` and `.value` is a harmless placeholder (`0`, `0.0`, `false`, an empty string, or a `null` reference), so **check `.ok` first**. Key comparison matches `contains` exactly: struct keys by object identity, string keys by byte content, integer keys by value.
+
+For nullable values, `try_get` still tells the two cases apart — a missing key versus a key whose value is `null`:
+
+```mas-lang
+var cached: map<string,int?> = {"today": null}
+func main():
+    var today = cached.try_get("today")
+    print(today.ok)             // true: the key exists
+    print(today.value == null)  // true: the value is null
+    var tomorrow = cached.try_get("tomorrow")
+    print(tomorrow.ok)          // false: the key is missing
+```
+
+So: use `contains(k)` when you only need to know whether a key exists, `try_get(k)` when you want "value or missing" in one step, and `try_remove(k)` when you want "removed or was not there" in one step. A failed `try_remove` changes neither the length, the content, nor the reference relationships of the map, and execution continues afterwards.
 
 ## Iteration
 

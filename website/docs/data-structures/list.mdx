@@ -67,7 +67,51 @@ len(list)                   // 长度
 | `contains(v)` | `bool` | 是否包含元素 |
 | `len(list)` | `int` | 元素个数 |
 
-`sort()` 只支持元素全部为 `int`、`float`、`bool` 或 `string` 的列表：`bool` 按 `false < true`，`string` 按 UTF-8 字节序（区分大小写），`float` 含 NaN 时顺序未定义。结构体列表和可空元素列表不支持 `sort()`，但支持 `reverse()`。
+`sort()` 只支持元素全部为 `int`、`float`、`bool` 或 `string` 的列表：`bool` 按 `false < true`，`string` 按 UTF-8 字节序（区分大小写），`float` 按数值升序（`-0.0` 与 `0.0` 相等）。浮点列表含 NaN 时顺序仍然是确定的：所有 NaN 排在全部数值之后，NaN 之间按位模式升序。结构体列表和可空元素列表不支持 `sort()`，但支持 `reverse()`。
+
+## 可恢复访问与修改
+
+下标读写、`index`、`remove`、`pop` 和切片失败时会报错并以状态码 1 退出。需要自己处理失败时用下面这组 `try_*` 方法：失败不会终止程序，也不会改动列表。
+
+```mas-lang
+func main():
+    var nums = [10, 20, 30]
+
+    var hit = nums.try_get(1)        // ok = true，value = 20
+    var miss = nums.try_get(5)       // ok = false
+    print(hit.value)                 // 20
+
+    print(nums.try_set(1, 99))       // true，nums 变为 [10, 99, 30]
+    print(nums.try_set(5, 99))       // false，nums 保持 [10, 99, 30]
+
+    print(nums.try_index(99).ok)     // true
+    print(nums.try_index(7).ok)      // false
+
+    print(nums.try_remove(7))        // false，nums 保持 [10, 99, 30]
+    print(nums.try_remove(99))       // true，nums 变为 [10, 30]
+
+    var empty: list<int> = []
+    print(empty.try_pop().ok)        // false，不删除元素
+    print(nums.try_pop(9).ok)        // false，nums 保持 [10, 30]
+    print(nums.try_pop().value)      // 30，nums 变为 [10]
+
+    var part = nums.try_slice(0, 1)  // ok = true，value 为 [10]
+    print(nums.try_slice(2, 1).ok)   // false，倒序范围不合法
+```
+
+| 方法 | 返回 | 说明 |
+|------|------|------|
+| `try_get(i)` | `try_result<T>` | `0 <= i < len` 才成功，否则 `ok = false` |
+| `try_set(i, v)` | `bool` | 下标合法才写入；失败返回 `false` 且保持原值 |
+| `try_pop()` | `try_result<T>` | 空列表返回 `ok = false`，不删除元素 |
+| `try_pop(i)` | `try_result<T>` | 越界返回 `ok = false`，不删除元素 |
+| `try_index(v)` | `try_result<int>` | 未命中返回 `ok = false`，不报错 |
+| `try_remove(v)` | `bool` | 未命中返回 `false`；命中删除第一个匹配元素 |
+| `try_slice(a, b)` | `try_result<list<T>>` | `0 <= a <= b <= len` 才成功，返回新列表 |
+
+结果先用 `.ok` 判断是否成功，成功后再读 `.value`。失败时 `.value` 只是占位值（`0`、`0.0`、`false`、空串或 `null`），不能当作有效结果使用。所有 `try_*` 失败都保持列表的长度、元素和引用关系不变，后面的代码继续执行。`try_slice` 和切片一样复制元素槽位，结构体、列表和字典元素仍共享原对象引用。
+
+元素本身可为 `null` 时，`.ok` 区分两种情况：`try_get` 得到 `ok = true` 且 `.value == null` 表示该位置存在一个 `null` 元素，`ok = false` 表示下标无效。`try_index`、`try_remove` 也能匹配 `null` 元素。
 
 ## 遍历
 

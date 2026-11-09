@@ -22,6 +22,18 @@ func main():
 
 Floats print in shortest round-trip form: `print(3.0)` outputs `3`, `print(3.5)` outputs `3.5`, `print(1.0 / 0.0)` outputs `inf`.
 
+## try_print — Recoverable Printing
+
+```mas-lang
+func main():
+    if not try_print("log line"):
+        print("standard output is unavailable, take another path")
+```
+
+`try_print` accepts the same primitive types and argument count as `print` and returns `bool`: `true` when the write succeeded, `false` when standard output is not writable (for example, the read end of a pipe is closed). The caller can keep running. Like `print`, it can only be called inside a function body.
+
+When the write fails, `print` reports a runtime error with a Chinese message and exits with status code 1; it never panics. Use `try_print` when execution must continue.
+
 ## len — Get Length
 
 ```mas-lang
@@ -102,3 +114,33 @@ float("xyz")   // runtime error: cannot convert string to float
 ```
 
 These string parse errors exit with status code 1 and carry no source location. For safe conversions that avoid runtime errors, see [Safe Conversion](./safe-conversion).
+
+## Checked Integer Arithmetic
+
+`+`, `-`, `*`, `%/%`, `%`, and unary `-` report the source location and exit with status code 1 on overflow or division by zero. To decide what happens after such a failure yourself, use the built-ins below: they never abort the program and instead return `try_result<int>`.
+
+```mas-lang
+func main():
+    var sum = try_add(9223372036854775807, 1)
+    print(sum.ok)     // false
+    print(sum.value)  // 0: the placeholder value on failure
+
+    var quotient = try_div(10, 0)
+    print(quotient.ok)  // false
+```
+
+| Built-in | Strict operator | Condition for `ok=false` |
+| --- | --- | --- |
+| `try_add(a, b)` | `a + b` | Signed addition overflows |
+| `try_sub(a, b)` | `a - b` | Signed subtraction overflows |
+| `try_mul(a, b)` | `a * b` | Signed multiplication overflows |
+| `try_div(a, b)` | `a %/% b` | `b == 0`, or `a` is the minimum `int` and `b` is `-1` |
+| `try_mod(a, b)` | `a % b` | Same as `try_div` |
+| `try_neg(a)` | `-a` | `a` is the minimum `int` |
+
+- Arguments must be `int`; the result is `try_result<int>`, where `.ok` reports success and `.value` is meaningful only when `.ok` is `true`
+- On failure `.value` is the placeholder `0`; check `.ok` first and never rely on `.value`
+- The result structure matches `try_int` and the other functions on the [Safe Conversion](./safe-conversion) page
+- Division and remainder truncate toward zero like the strict operators: `try_div(-7, 3)` is `-2` and `try_mod(-7, 3)` is `-1`
+- Valid boundaries still succeed: `try_add(9223372036854775806, 1)` is `9223372036854775807`
+- Strict operators and compound assignment (`+=`, `-=`, `*=`, `%=`) are unchanged: overflow or division by zero still reports an error and exits

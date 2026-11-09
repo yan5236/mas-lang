@@ -45,6 +45,8 @@ if result.ok:
 
 失败时 `.value` 是一个无害占位值：`try_int` 为 `0`、`try_float` 为 `0.0`、`try_bool` 为 `false`。请先判断 `.ok`，不要依赖失败时的内容。
 
+原生模块可以构造任意字节的字符串。`try_int`、`try_float`、`try_bool` 遇到非法 UTF-8 字节时返回 `ok=false`，不会终止进程；`int()`、`float()` 等严格转换遇到非法 UTF-8 仍报告“字符串不是合法的 UTF-8 文本”并以状态码 1 退出。
+
 `try_string()` 不存在，因为字符串转换几乎不会失败。
 
 ## 输入类型与规则

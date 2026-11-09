@@ -45,6 +45,8 @@ Safe conversion functions return an internal result value (shown as `try_result<
 
 On failure `.value` is a harmless placeholder: `0` for `try_int`, `0.0` for `try_float`, `false` for `try_bool`. Check `.ok` first and never rely on the failed content.
 
+Native modules can build strings from arbitrary bytes. `try_int`, `try_float`, and `try_bool` return `ok=false` when the bytes are not valid UTF-8 and never terminate the process; strict conversions such as `int()` and `float()` still report "the string is not valid UTF-8 text" and exit with status code 1.
+
 `try_string()` does not exist because string conversion almost never fails.
 
 ## Input Types and Rules

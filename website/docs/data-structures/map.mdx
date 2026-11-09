@@ -45,6 +45,8 @@ func main():
         print("没有 city 字段")
 ```
 
+也可以直接用下面介绍的 `try_get(key)`，把“缺键”变成可判断的返回值。
+
 ## 添加和更新
 
 ```mas-lang
@@ -68,11 +70,49 @@ len(map)                  // 元素个数
 |------|------|------|
 | `remove(k)` | 无 | 删除键 `k`；键不存在时报运行时错误 |
 | `contains(k)` | `bool` | 键是否存在 |
+| `try_get(k)` | `try_result<V>` | 缺键返回 `.ok == false`，不报运行时错误 |
+| `try_remove(k)` | `bool` | 只在键存在时删除并返回 `true`；缺键返回 `false` 且字典不变 |
 | `keys()` | `list<K>` | 按插入顺序返回键的快照列表 |
 | `values()` | `list<V>` | 按插入顺序返回值；结构体、列表、字典值仍是共享引用 |
 | `len(map)` | `int` | 元素个数 |
 
 `keys()`、`values()` 返回的是取快照时的新列表，之后对字典的增删不会改变已经取到的列表；删除后再插入同一个键会追加到末尾。
+
+## 可恢复读取与删除
+
+不想“先 `contains` 再访问”时，`try_get` 和 `try_remove` 把失败交给调用方处理，两者都不会触发运行时错误：
+
+```mas-lang
+var scores = {"alice": 90}
+
+func main():
+    var hit = scores.try_get("alice")
+    if hit.ok:
+        print(hit.value)                 // 90
+    var miss = scores.try_get("bob")
+    print(miss.ok)                       // false
+    print(miss.value)                    // 0：占位值，不要依赖
+
+    print(scores.try_remove("bob"))      // false：缺键，字典不变
+    print(scores.try_remove("alice"))    // true
+    print(len(scores))                   // 0
+```
+
+`try_get` 返回 `try_result<V>`，与 `try_int` 等安全转换返回的结果结构一致，含只读属性 `.ok` 和 `.value`。缺键时 `.ok` 为 `false`，`.value` 是无害占位值（`0`、`0.0`、`false`、空串或 `null` 引用），所以**必须先判断 `.ok`**。键的比较规则与 `contains` 完全相同：结构体键按对象身份、字符串键按字节内容、整型键按数值。
+
+值可空时，`try_get` 仍然区分两种情况——缺键与“键存在但值为 `null`”：
+
+```mas-lang
+var cached: map<string,int?> = {"today": null}
+func main():
+    var today = cached.try_get("today")
+    print(today.ok)             // true：键存在
+    print(today.value == null)  // true：值为 null
+    var tomorrow = cached.try_get("tomorrow")
+    print(tomorrow.ok)          // false：缺键
+```
+
+因此：只想知道键在不在，用 `contains(k)`；想一步拿到“值或缺失”，用 `try_get(k)`；想一步得到“删掉了或本来就没有”，用 `try_remove(k)`。`try_remove` 判断缺失时不会改动字典的长度、内容与引用关系，失败后代码继续执行。
 
 ## 遍历
 

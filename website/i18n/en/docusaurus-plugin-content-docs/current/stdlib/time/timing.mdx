@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Timing and Sleep
 
-Monotonic clock timing and thread sleep.
+Monotonic clock timing and thread sleep. Strict functions abort on failure, while `try_*` functions report the failure through a result struct.
 
 ## monotonic_millis — Monotonic Clock Milliseconds
 
@@ -22,6 +22,21 @@ Returns the number of milliseconds since system boot, guaranteed to be monotonic
 
 **Note**: `monotonic_millis` starts at system boot, not the Unix epoch — **do not** use it as a wall-clock time source.
 
+## try_monotonic_millis — Safely Read the Monotonic Clock
+
+```mas-lang
+import time { try_monotonic_millis }
+
+func main():
+    var result = try_monotonic_millis()
+    if result.ok:
+        print("monotonic ms: " + string(result.value))
+    else:
+        print("read failed, code " + string(result.code))
+```
+
+Returns `TimeIntResult`. On failure `ok` is `false`, `value` is `0`, and `code` is `7`. The Windows host layer uses a system counter that cannot fail, so this error code currently only occurs on POSIX.
+
 ## sleep — Thread Sleep
 
 Blocks the current thread for at least the specified number of milliseconds.
@@ -31,4 +46,27 @@ sleep(1000)   // sleep for at least 1000 ms (1 second)
 sleep(500)    // sleep for at least 500 ms
 ```
 
-**Note**: Passing a negative value causes a runtime error. Actual sleep duration may slightly exceed the specified value depending on OS scheduling precision.
+**Note**: Passing a negative value still prints a Chinese runtime error and exits with status code `1`. Actual sleep duration may slightly exceed the specified value depending on OS scheduling precision.
+
+## try_sleep — Safe Sleep
+
+```mas-lang
+import time { try_sleep }
+
+func main():
+    var status = try_sleep(-1)
+    print("ok=" + string(status.ok))
+    print("code=" + string(status.code))
+    print("this line still runs")
+```
+
+Returns `TimeStatus` (`ok` / `code`) and keeps the program running after a failure:
+
+| Case | `ok` | `code` | Behavior |
+|------|------|--------|----------|
+| `try_sleep(0)` | `true` | `0` | Returns immediately, no blocking |
+| `try_sleep(20)` | `true` | `0` | Blocks for at least 20 ms |
+| `try_sleep(-1)` | `false` | `5` | No blocking, reports a negative wait argument |
+| Blocking wait failure | `false` | `6` | POSIX `nanosleep` returned an error other than `EINTR` |
+
+On POSIX, a `nanosleep` interrupted by a signal (`EINTR`) keeps waiting for the remaining time and is not treated as a failure.

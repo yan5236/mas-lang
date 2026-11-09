@@ -1,5 +1,7 @@
 # 技术设计文档：time 预编译原生产物分发
 
+> 2026-11 更新：time 包已升级到 `0.2.0` / `native.abi = 2`（可恢复的结果结构），四个非 Windows 目标的产物改由 `.github/workflows/time-artifacts.yml` 在对应原生 runner 上刷新；见 [specs/008-recoverable-runtime-errors](../008-recoverable-runtime-errors/requirements.md)。本文档保留 ABI 1 时期的历史设计。
+
 ## 1. 概述
 
 - **问题陈述**：当前 `stdlib/time` 已经从 time 专项编译器内建迁移为“MS 包装层 + 原生绑定 + C 宿主层”，但消费侧仍然依赖构建时现编 C 源文件。只要调用方机器缺少本机 C 工具链，`time` 作为普通依赖就可能无法通过构建，这与“标准库依赖应当尽量像普通包一样被直接消费”的目标冲突。

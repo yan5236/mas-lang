@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # 时间格式化
 
-将当前 UTC 时间格式化为标准字符串。
+将当前 UTC 时间格式化为标准字符串。严格接口出错会中断进程，`try_*` 接口把失败写进结果结构。
 
 ## now_utc — ISO 8601 格式
 
@@ -32,3 +32,26 @@ var s: string = now_http_date()
 ```
 
 返回 RFC 7231 定义的 HTTP-date 格式 UTC 时间字符串，时区标识为 `GMT`。适用于 HTTP 头部如 `Date`、`Last-Modified`、`Expires`。
+
+## try_now_utc / try_now_email_date / try_now_http_date
+
+三个可恢复接口返回 `TimeStringResult`，失败不再中断进程：
+
+```mas-lang
+import time { try_now_http_date }
+
+func main():
+    var result = try_now_http_date()
+    if result.ok:
+        print("Date: " + result.value)
+    else:
+        print("生成 HTTP 日期失败，错误码 " + string(result.code))
+```
+
+| 接口 | 输出格式 | 成功示例 |
+|------|---------|---------|
+| `try_now_utc()` | ISO 8601 / RFC 3339 | `2026-05-30T12:34:56+00:00` |
+| `try_now_email_date()` | RFC 2822 | `Sat, 30 May 2026 12:34:56 +0000` |
+| `try_now_http_date()` | HTTP-date | `Sat, 30 May 2026 12:34:56 GMT` |
+
+失败时 `ok` 为 `false`、`value` 为固定空串，`code` 可能为 `1`（宿主时钟读取失败）、`2`（宿主时钟早于 Unix 纪元，仅 Windows）、`3`（UTC 时间拆解失败）或 `4`（格式化失败）。空串同样只是一个占位值，不能当作“时间格式化为空”的正常结果。

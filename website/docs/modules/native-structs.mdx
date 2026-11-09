@@ -146,4 +146,4 @@ objects = [
 
 普通调用方链接时使用包内的预编译对象；缺少当前目标的产物、清单不一致或 ABI 版本不匹配都会在链接前报错，且不会自动回退到源码编译。维护者可运行 `maslang build src/main.ms --allow-native-source-build`（或 `fama build --allow-native-source-build`）刷新产物，发布前再把 `native/artifacts/<target>/` 复制回标准库包。
 
-`stdlib/time` 的预编译对象覆盖 `x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、`x86_64-apple-darwin` 和 `aarch64-apple-darwin` 五个目标。仓库 CI 在 Linux x86_64/aarch64 与 macOS x86_64/arm64 上运行测试和 `time` 示例，暂不包含 Windows 任务；Windows 产物随包分发，可用本地 MSVC 工具链消费。此接口采用显式指针与薄封装，不自动适配任意 C 结构体的按值调用约定。
+`stdlib/time` 的预编译对象覆盖 `x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、`x86_64-apple-darwin` 和 `aarch64-apple-darwin` 五个目标，当前包版本 `0.2.0`、`native.abi = 2`（可恢复的结果结构）。仓库 CI 在 Linux x86_64/aarch64 与 macOS x86_64/arm64 上运行测试和 `time` 示例，暂不包含 Windows 任务；Windows 产物随包分发，可用本地 MSVC 工具链消费。需要刷新非 Windows 目标时，手动触发 `Time native artifacts` 工作流（`.github/workflows/time-artifacts.yml`），下载四个 artifact 后回填到 `stdlib/time/native/artifacts/<target>/`。此接口采用显式指针与薄封装，不自动适配任意 C 结构体的按值调用约定。

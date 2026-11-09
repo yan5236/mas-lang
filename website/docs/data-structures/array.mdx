@@ -31,6 +31,30 @@ arr[2]   // 3
 
 有效下标范围为 `0 <= index < N`。负数和超出范围的下标（读取或写入）会报告带源码位置的运行时错误并以状态码 1 退出，不会返回任意内存值。
 
+## 可恢复的下标读写
+
+需要自己处理失败时用 `try_get`/`try_set`：失败不会终止程序，也不会改动元素。
+
+```mas-lang
+func main():
+    var arr = array<int, 3>(10, 20, 30)
+
+    var hit = arr.try_get(1)      // ok = true，value = 20
+    var miss = arr.try_get(3)     // ok = false
+    print(arr.try_get(-1).ok)     // false
+
+    print(arr.try_set(1, 99))     // true，arr 变为 (10, 99, 30)
+    print(arr.try_set(3, 99))     // false，arr 保持 (10, 99, 30)
+    print(arr[1])                 // 99
+```
+
+| 方法 | 返回 | 说明 |
+|------|------|------|
+| `try_get(i)` | `try_result<T>` | `0 <= i < N` 才成功，否则 `ok = false` |
+| `try_set(i, v)` | `bool` | 下标合法才写入；失败返回 `false` 且保持原值 |
+
+和列表一样，先用 `.ok` 判断，成功后再读 `.value`；失败时 `.value` 只是占位值。`try_set` 只能作用于有固定存储位置的数组（变量或结构体字段里的数组）。数组元素本身是一份拷贝，例如 `grid[0]`、函数返回的数组都没有可写地址，对它们调用 `try_set` 会在编译期被拒绝；这种场景改用下标赋值 `grid[0][1] = v`。
+
 ## 与列表的区别
 
 | 特性 | list | array |

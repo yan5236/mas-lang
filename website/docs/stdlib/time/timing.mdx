@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # 计时与休眠
 
-单调时钟计时与线程休眠。
+单调时钟计时与线程休眠。严格接口出错会中断进程，`try_*` 接口把失败写进结果结构。
 
 ## monotonic_millis — 单调时钟毫秒计数
 
@@ -22,6 +22,21 @@ var elapsed: int = monotonic_millis() - start
 
 **注意**：`monotonic_millis` 的起点是系统启动时间，不是 Unix 纪元，**不可**用作墙钟时间。
 
+## try_monotonic_millis — 安全读取单调时钟
+
+```mas-lang
+import time { try_monotonic_millis }
+
+func main():
+    var result = try_monotonic_millis()
+    if result.ok:
+        print("单调毫秒：" + string(result.value))
+    else:
+        print("读取失败，错误码 " + string(result.code))
+```
+
+返回 `TimeIntResult`。读取失败时 `ok` 为 `false`、`value` 为 `0`、`code` 为 `7`。Windows 宿主层的系统计数不会失败，因此该错误码目前只在 POSIX 上实际出现。
+
 ## sleep — 线程休眠
 
 阻塞当前线程至少指定的毫秒数。
@@ -31,4 +46,27 @@ sleep(1000)   // 休眠至少 1000 毫秒（1 秒）
 sleep(500)    // 休眠至少 500 毫秒
 ```
 
-**注意**：传入负数会导致运行时错误。实际休眠时间可能略长于指定值，具体取决于操作系统调度精度。
+**注意**：传入负数仍会输出中文运行时错误并以状态码 `1` 退出。实际休眠时间可能略长于指定值，具体取决于操作系统调度精度。
+
+## try_sleep — 安全休眠
+
+```mas-lang
+import time { try_sleep }
+
+func main():
+    var status = try_sleep(-1)
+    print("ok=" + string(status.ok))
+    print("code=" + string(status.code))
+    print("这一行仍会输出")
+```
+
+返回 `TimeStatus`（`ok` / `code`），失败分支之后程序继续执行：
+
+| 场景 | `ok` | `code` | 行为 |
+|------|------|--------|------|
+| `try_sleep(0)` | `true` | `0` | 立即返回，不做任何阻塞 |
+| `try_sleep(20)` | `true` | `0` | 至少阻塞 20 毫秒 |
+| `try_sleep(-1)` | `false` | `5` | 不阻塞，报告负等待参数 |
+| 阻塞等待失败 | `false` | `6` | POSIX 上 `nanosleep` 返回非 `EINTR` 错误时 |
+
+POSIX 上 `nanosleep` 被信号打断（`EINTR`）时会继续等待剩余时间，不视为失败。
