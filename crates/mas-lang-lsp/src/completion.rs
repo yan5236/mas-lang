@@ -80,10 +80,21 @@ fn type_items() -> Vec<CompletionItem> {
 fn builtin_items() -> Vec<CompletionItem> {
     [
         ("print", "print(${1})"),
+        ("try_print", "try_print(${1})"),
+        ("len", "len(${1})"),
         ("string", "string(${1})"),
         ("int", "int(${1})"),
         ("float", "float(${1})"),
         ("bool", "bool(${1})"),
+        ("try_int", "try_int(${1})"),
+        ("try_float", "try_float(${1})"),
+        ("try_bool", "try_bool(${1})"),
+        ("try_add", "try_add(${1}, ${2})"),
+        ("try_sub", "try_sub(${1}, ${2})"),
+        ("try_mul", "try_mul(${1}, ${2})"),
+        ("try_div", "try_div(${1}, ${2})"),
+        ("try_mod", "try_mod(${1}, ${2})"),
+        ("try_neg", "try_neg(${1})"),
     ]
     .into_iter()
     .map(|(label, insert_text)| CompletionItem {
