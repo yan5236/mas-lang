@@ -1,5 +1,6 @@
 use maslang::settings::{CompilerSettings, UiLanguage};
 use maslang::source::SourceFile;
+use maslang::temp_directory::TemporaryDirectory;
 use maslang::{CompileOptions, analyze_source, compile_to_executable};
 use std::process::{Command, Output};
 
@@ -17,13 +18,10 @@ fn mixed_order_comparison_preserves_integer_precision() {
 }
 
 /// 使用当前编译器生成并运行 EXE；清理本用例目录后返回输出，编译错误保留完整诊断。
+/// 目录通过 `TemporaryDirectory` 原子创建（PID + 计数器），避免并发用例共用目录导致链接中间文件互相覆盖。
 fn execute(text: &str) -> Output {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("mascript-numeric-{unique}"));
-    std::fs::create_dir_all(&root).unwrap();
+    let workspace = TemporaryDirectory::create("mascript-numeric").unwrap();
+    let root = workspace.path();
     let source = SourceFile::new(root.join("main.ms").display().to_string(), text.to_string());
     let settings = CompilerSettings::new(UiLanguage::ZhCn);
     let binary = compile_to_executable(
@@ -33,7 +31,6 @@ fn execute(text: &str) -> Output {
     )
     .unwrap_or_else(|e| panic!("{}", e.render(settings.language, Some(&source))));
     let output = Command::new(binary).output().unwrap();
-    std::fs::remove_dir_all(root).unwrap();
     output
 }
 
