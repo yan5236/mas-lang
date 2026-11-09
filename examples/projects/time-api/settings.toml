@@ -8,4 +8,4 @@ output = "build"
 opt-level = 2
 
 [dependencies]
-"time" = { path = "../../../stdlib/time", version = "0.1.0" }
+"time" = { path = "../../../stdlib/time", version = "0.2.0" }

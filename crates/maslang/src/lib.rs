@@ -120,8 +120,9 @@ mod tests {
     }
 
     /// 从 workspace 的标准库目录复制 `time` 到临时项目的 `mod_module`，保留预编译对象文件以模拟本地依赖安装。
+    /// 直接复制包内真实产物，因此清单里的 `source_hash` / `header_hash` 与当前 C 源码天然一致。
     fn install_time_dependency(root: &Path) {
-        let package_root = root.join("mod_module").join("time@0.1.0");
+        let package_root = root.join("mod_module").join("time@0.2.0");
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/time");
         copy_directory_recursive(&source_root, &package_root);
         fs::create_dir_all(root.join("mod_module/time@0.0.1/src")).unwrap();
@@ -131,12 +132,12 @@ mod tests {
     fn write_time_dependency_manifest(root: &Path) {
         fs::write(
             root.join("settings.toml"),
-            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[dependencies]\ntime = { path = \"../time\", version = \"0.1.0\" }\n",
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[dependencies]\ntime = { path = \"../time\", version = \"0.2.0\" }\n",
         )
         .unwrap();
         fs::write(
             root.join("mod-lock.yml"),
-            "dependencies:\n  time:\n    version: 0.1.0\n    source:\n      type: path\n      path: ../time\n    store_path: mod_module/time@0.1.0\n",
+            "dependencies:\n  time:\n    version: 0.2.0\n    source:\n      type: path\n      path: ../time\n    store_path: mod_module/time@0.2.0\n",
         )
         .unwrap();
     }
@@ -511,7 +512,7 @@ func main():
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
 
-    /// 校验 `sleep(-1)` 会沿着依赖导入链路返回明确的中文运行时错误，而不是静默忽略。
+    /// 校验严格接口 `sleep(-1)` 仍沿依赖导入链路给出中文运行时错误，并以退出码 1 结束进程。
     #[test]
     fn should_report_negative_sleep_from_time_dependency() {
         let root = create_temp_project("time-sleep-error");
@@ -530,8 +531,38 @@ func main():
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();
         assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(1));
         let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("运行时错误"));
         assert!(stderr.contains("sleep(ms) 只接受大于等于 0 的毫秒整数"));
+
+        fs::remove_dir_all(Path::new(&root)).unwrap();
+    }
+
+    /// 校验可恢复的 `try_sleep(-1)` 只写回 `ok=false` / `code=5`，后续语句照常执行。
+    /// 同一用例顺带覆盖零等待立即成功，证明失败不会再被当作进程级错误。
+    #[test]
+    fn should_report_recoverable_negative_sleep_from_time_dependency() {
+        let root = create_temp_project("time-try-sleep");
+        install_time_dependency(&root);
+        write_time_dependency_manifest(&root);
+        let source = write_time_app_source(
+            &root,
+            "import time { try_sleep }\n\nfunc main():\n    var negative = try_sleep(-1)\n    print(\"ok=\" + string(negative.ok))\n    print(\"code=\" + string(negative.code))\n    var zero = try_sleep(0)\n    print(\"zero_ok=\" + string(zero.ok))\n    print(\"done\")\n",
+        );
+        let output_path = root.join("build").join("demo.exe");
+        let binary = compile_to_executable(
+            &source,
+            &zh_settings(),
+            &CompileOptions::new(Some(output_path)),
+        )
+        .unwrap();
+        let output = std::process::Command::new(binary).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "ok=false\ncode=5\nzero_ok=true\ndone\n"
+        );
 
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
@@ -543,7 +574,7 @@ func main():
         install_time_dependency(&root);
         let artifact_root = root
             .join("mod_module")
-            .join("time@0.1.0")
+            .join("time@0.2.0")
             .join("native")
             .join("artifacts")
             .join("x86_64-pc-windows-msvc");
@@ -561,7 +592,7 @@ func main():
         let root = create_temp_project("time-missing-matrix");
         install_time_dependency(&root);
         write_time_dependency_manifest(&root);
-        let package_root = root.join("mod_module").join("time@0.1.0");
+        let package_root = root.join("mod_module").join("time@0.2.0");
         let settings_path = package_root.join("settings.toml");
         let settings = fs::read_to_string(&settings_path).unwrap();
         fs::write(
@@ -599,7 +630,7 @@ func main():
         let root = create_temp_project("time-missing-object");
         install_time_dependency(&root);
         write_time_dependency_manifest(&root);
-        let package_root = root.join("mod_module").join("time@0.1.0");
+        let package_root = root.join("mod_module").join("time@0.2.0");
         fs::remove_file(
             package_root
                 .join("native")
@@ -636,13 +667,13 @@ func main():
         write_time_dependency_manifest(&root);
         let manifest_path = root
             .join("mod_module")
-            .join("time@0.1.0")
+            .join("time@0.2.0")
             .join("native")
             .join("artifacts")
             .join("x86_64-pc-windows-msvc")
             .join("manifest.toml");
         let manifest = fs::read_to_string(&manifest_path).unwrap();
-        fs::write(&manifest_path, manifest.replace("abi = 1", "abi = 999")).unwrap();
+        fs::write(&manifest_path, manifest.replace("abi = 2", "abi = 999")).unwrap();
 
         let source = write_time_app_source(
             &root,
@@ -671,7 +702,7 @@ func main():
         write_time_dependency_manifest(&root);
         let artifact_root = root
             .join("mod_module")
-            .join("time@0.1.0")
+            .join("time@0.2.0")
             .join("native")
             .join("artifacts")
             .join("x86_64-pc-windows-msvc");

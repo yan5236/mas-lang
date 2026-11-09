@@ -1,9 +1,9 @@
 [project]
 name = "time"
-version = "0.1.0"
+version = "0.2.0"
 
 [native]
-abi = 1
+abi = 2
 source_fallback = "explicit"
 include = ["native/include"]
 

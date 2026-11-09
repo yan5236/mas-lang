@@ -1,24 +1,80 @@
 # time 标准库原生产物说明
 
-通过 `src/index.ms` 导入公开函数：
+当前包版本 `0.2.0`，原生 ABI 版本 `2`。通过 `src/index.ms` 导入公开 API。
+
+## 公开 API
+
+严格接口保持 0.1.0 的名称、返回类型和失败语义，内部改为调用新的 `mas_time_read_*` 入口：
 
 - `unix_seconds()`、`unix_millis()` 返回当前 Unix 时间戳。
 - `now_utc()`、`now_email_date()`、`now_http_date()` 返回 UTC 日期时间、邮件日期和 HTTP 日期字符串。
 - `monotonic_millis()` 用于计算耗时，`sleep(ms)` 按毫秒暂停执行。
+- 以上接口在宿主失败时仍调用 `mas_time_fail(code)`：输出中文 `运行时错误: ...` 并以状态码 `1` 退出。
+
+可恢复接口把失败写进结果结构，调用方可以继续执行：
+
+| 接口 | 返回 | 失败含义 |
+| --- | --- | --- |
+| `try_unix_seconds()` | `TimeIntResult` | 宿主时钟读取失败（`code = 1`）或早于 Unix 纪元（`code = 2`） |
+| `try_unix_millis()` | `TimeIntResult` | 同上 |
+| `try_monotonic_millis()` | `TimeIntResult` | 单调时钟读取失败（`code = 7`） |
+| `try_now_utc()` | `TimeStringResult` | 时钟读取、UTC 拆解或格式化失败 |
+| `try_now_email_date()` | `TimeStringResult` | 同上 |
+| `try_now_http_date()` | `TimeStringResult` | 同上 |
+| `try_sleep(ms)` | `TimeStatus` | 负等待（`code = 5`）或阻塞等待失败（`code = 6`） |
+
+三个结果结构从 `index.ms` 一起导出，字段名与仓库统一的 `try_result` 约定一致：
+
+```mas-lang
+import time { try_sleep, TimeStatus }
+
+func main():
+    var status = try_sleep(-1)
+    if not status.ok:
+        print("等待失败，错误码 " + string(status.code))
+```
+
+- `TimeStatus`：`ok: bool`、`code: int`
+- `TimeIntResult`：`ok: bool`、`code: int`、`value: int`
+- `TimeStringResult`：`ok: bool`、`code: int`、`value: string`
+
+失败时 `.value` 固定是无害占位值（`0` 或空串），调用方必须先判断 `.ok`。
+
+## 错误码
+
+| 错误码 | 含义 | 可能出现的入口 |
+| --- | --- | --- |
+| `0` | 成功 | 全部 |
+| `1` | 宿主时钟读取失败 | `try_unix_seconds`、`try_unix_millis`、`try_now_*` |
+| `2` | 宿主时钟早于 Unix 纪元（仅 Windows） | 同上 |
+| `3` | UTC 时间拆解失败 | `try_now_*` |
+| `4` | 时间格式化失败 | `try_now_*` |
+| `5` | 负等待参数 | `try_sleep` |
+| `6` | 阻塞等待失败 | `try_sleep` |
+| `7` | 单调时钟读取失败 | `try_monotonic_millis` |
+
+契约要点：
+
+- Windows 上“宿主时钟早于 1970-01-01 UTC”必须返回 `ok = false, code = 2`，**不能**把负时间戳当作失败哨兵：负时间戳本身仍是合法取值。
+- POSIX 保留 `nanosleep` 被 `EINTR` 中断后继续等待剩余时间的语义，`try_sleep` 只有在遇到其他 `errno` 时才报 `code = 6`。
+- 零等待（`sleep(0)` / `try_sleep(0)`）立即成功，不做任何阻塞。
+- Windows 宿主层的 `GetTickCount64` 不会失败，因此 `code = 7` 目前只在 POSIX 上实际出现。
 
 ## 支持矩阵
 
-当前 `time` 包默认提供以下预编译原生产物：
+`settings.toml` 声明五个预编译目标。**0.2.0 把原生 ABI 提升到 2，五个目标的产物必须随源码重建**：
 
-| 目标三元组 | 产物目录 | 状态 |
+| 目标三元组 | 产物目录 | 当前状态 |
 | --- | --- | --- |
-| `x86_64-pc-windows-msvc` | `native/artifacts/x86_64-pc-windows-msvc/` | 已支持 |
-| `x86_64-unknown-linux-gnu` | `native/artifacts/x86_64-unknown-linux-gnu/` | 已支持 |
-| `aarch64-unknown-linux-gnu` | `native/artifacts/aarch64-unknown-linux-gnu/` | 已支持 |
-| `x86_64-apple-darwin` | `native/artifacts/x86_64-apple-darwin/` | 已支持 |
-| `aarch64-apple-darwin` | `native/artifacts/aarch64-apple-darwin/` | 已支持 |
+| `x86_64-pc-windows-msvc` | `native/artifacts/x86_64-pc-windows-msvc/` | 已按 0.2.0 / ABI 2 刷新 |
+| `x86_64-unknown-linux-gnu` | `native/artifacts/x86_64-unknown-linux-gnu/` | **待刷新**：仍是 0.1.0 / ABI 1，链接前会被明确拒绝 |
+| `aarch64-unknown-linux-gnu` | `native/artifacts/aarch64-unknown-linux-gnu/` | **待刷新**：同上 |
+| `x86_64-apple-darwin` | `native/artifacts/x86_64-apple-darwin/` | **待刷新**：同上 |
+| `aarch64-apple-darwin` | `native/artifacts/aarch64-apple-darwin/` | **待刷新**：同上 |
 
-普通调用方构建 `import time { ... }` 时，编译器会读取 `settings.toml` 中对应的 `native.prebuilt.<target>` 条目，并使用本机链接工具链链接该目录下的对象文件。使用 `time` 无需从 C 源码重新构建这些对象。
+“待刷新”是预期状态：旧对象的调用约定与新 ABI 不兼容，链接器会在消费前用中文诊断拒绝，而不是把新旧对象混着链接。四个非 Windows 目标由 `.github/workflows/time-artifacts.yml` 在对应原生 runner 上重新生成后回填，不手工伪造。
+
+普通调用方构建 `import time { ... }` 时，编译器读取 `settings.toml` 中对应的 `native.prebuilt.<target>` 条目，直接链接该目录下的对象文件，不需要本机 C 编译器。
 
 ## 目录协议
 
@@ -33,17 +89,44 @@ native/
         └── time_windows.obj
 ```
 
-其中 `manifest.toml` 至少记录以下信息：
+其中 `manifest.toml` 至少记录包名、包版本、目标三元组、ABI 版本、源码与头文件指纹、对象文件清单。0.2.0 的目标值：
 
-- 包名与包版本
-- 目标三元组
-- ABI 版本
-- 源码与头文件指纹
-- 对象文件清单
+```toml
+package = "time"
+package_version = "0.2.0"
+target = "x86_64-pc-windows-msvc"
+abi = 2
+```
 
-`fama install` 会保留 `native/artifacts/` 目录，因此本地路径依赖安装到 `mod_module/time@0.1.0/` 后仍然可以直接被消费。
+`fama install` 会保留 `native/artifacts/`，因此本地路径依赖安装到 `mod_module/time@0.2.0/` 后仍然可以直接消费。Linux 和 macOS 目录采用相同结构，对象文件名为 `time_common.o` 和 `time_posix.o`。
 
-Linux 和 macOS 目录采用相同结构，对象文件名为 `time_common.o` 和 `time_posix.o`。从仓库根目录运行 `cargo run --locked -p fama -- run examples/projects/time-api` 即可测试。
+## 刷新流程
+
+### Windows（本机，维护者链路）
+
+```powershell
+cd E:\xiangmu\mas-lang\examples\projects\time-api
+Remove-Item -Recurse -Force mod_module
+cargo run --locked -p fama -- install .
+cargo run --locked -p fama -- build . --allow-native-source-build
+```
+
+刷新结果写在 `mod_module/time@0.2.0/native/artifacts/x86_64-pc-windows-msvc/`，把它下面的 `manifest.toml`、`time_common.obj`、`time_windows.obj` 复制回 `stdlib/time/native/artifacts/x86_64-pc-windows-msvc/` 才算发布完成。
+
+注意：如果 `~/.fama/setting.toml` 里配置了不存在的 `[compiler] binary`，`fama` 会改用外部编译器并失败；把 `FAMA_HOME` 指向空目录可以强制使用内置编译器。
+
+### 四个非 Windows 目标
+
+在 GitHub Actions 上手动触发 `time-artifacts` 工作流（`workflow_dispatch`），矩阵覆盖：
+
+| runner | 产物目标 |
+| --- | --- |
+| `ubuntu-24.04` | `x86_64-unknown-linux-gnu` |
+| `ubuntu-24.04-arm` | `aarch64-unknown-linux-gnu` |
+| `macos-15` | `aarch64-apple-darwin` |
+| `macos-15-intel` | `x86_64-apple-darwin` |
+
+工作流执行同样的 `install` + `build --allow-native-source-build`，按目标三元组命名上传 artifact；维护者下载后覆盖对应的 `native/artifacts/<triple>/` 目录。
 
 ## 角色分流
 
@@ -51,17 +134,17 @@ Linux 和 macOS 目录采用相同结构，对象文件名为 `time_common.o` �
 
 - 直接执行 `fama build` 或 `fama run`
 - 命中支持矩阵时会链接包内预编译对象
-- 缺少产物、ABI 不匹配或目标不受支持时会收到中文诊断
+- 缺少产物、ABI 不匹配或目标不受支持时会收到中文诊断，且不会自动回退到源码编译
 
 维护者：
 
 - 在 `examples/projects/time-api` 中执行 `fama build --allow-native-source-build` 刷新已安装的 time 包
 - 编译器会在校验失败或产物缺失时，使用 `native.sources` 的 C 源文件重新生成对象文件和 `manifest.toml`
-- 刷新后的产物会写到依赖缓存的 `native/artifacts/<target>/`，发布前需复制回标准库包
+- 刷新后的产物先写到依赖缓存的 `native/artifacts/<target>/`，发布前需复制回标准库包
 
 ## 发布检查
 
-当以下任一内容变更时，必须先刷新预编译产物，再发布新版本：
+当以下任一内容变更时，必须先刷新全部支持目标的预编译产物，再发布新版本：
 
 - `native/common/*.c`
 - `native/platform/**/*.c`
