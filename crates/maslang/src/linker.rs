@@ -115,6 +115,9 @@ fn link_executable(
         .arg(DEFAULT_TARGET_TRIPLE)
         .arg("-C")
         .arg(format!("opt-level={}", opt_level.as_str()))
+        // 引导运行时是单文件 crate；固定单 codegen unit，避免私有 `#[cold]` 辅助函数被
+        // 内部化成带 `.llvm.` 后缀的符号后被其它 CGU 引用，导致 macOS/ELF 链接偶发缺符号。
+        .args(["-C", "codegen-units=1"])
         .arg(bootstrap_path)
         .arg("-o")
         .arg(output_path)

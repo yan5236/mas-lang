@@ -28,6 +28,8 @@ fn main() {
                 "--crate-type=rlib",
                 "--cfg=mas_runtime_library",
                 "-C",
+                "codegen-units=1",
+                "-C",
             ])
             .arg(format!("opt-level={level}"))
             .arg(&source)
