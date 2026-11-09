@@ -142,10 +142,17 @@ impl<'a> Parser<'a> {
                 | "map"
                 | "array"
                 | "print"
+                | "try_print"
                 | "len"
                 | "try_int"
                 | "try_float"
                 | "try_bool"
+                | "try_add"
+                | "try_sub"
+                | "try_mul"
+                | "try_div"
+                | "try_mod"
+                | "try_neg"
                 | "main"
         ) {
             return Err(CompilerError::syntax_message(

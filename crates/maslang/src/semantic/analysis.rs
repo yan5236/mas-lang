@@ -56,6 +56,7 @@ impl<'a> SemanticAnalyzer<'a> {
             if matches!(
                 name.as_str(),
                 "print"
+                    | "try_print"
                     | "len"
                     | "int"
                     | "float"
@@ -64,6 +65,12 @@ impl<'a> SemanticAnalyzer<'a> {
                     | "try_int"
                     | "try_float"
                     | "try_bool"
+                    | "try_add"
+                    | "try_sub"
+                    | "try_mul"
+                    | "try_div"
+                    | "try_mod"
+                    | "try_neg"
             ) {
                 return Err(CompilerError::semantic_message(
                     format!("用户函数不能覆盖内建函数 `{name}`"),
