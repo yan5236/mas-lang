@@ -330,7 +330,7 @@ pub struct MapEntry {
     pub span: Span,
 }
 
-/// 表示字符串、列表与字典对象当前阶段支持的方法名称。
+/// 表示字符串、列表、数组与字典对象当前阶段支持的方法名称。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MethodName {
     Append,
@@ -346,6 +346,18 @@ pub enum MethodName {
     StartsWith,
     EndsWith,
     Replace,
+    /// 可恢复读取：越界或未命中时返回 `ok=false`，不触发运行时错误。
+    TryGet,
+    /// 可恢复写入：下标非法时返回 `false`，保持原值不变。
+    TrySet,
+    /// 可恢复弹出：空列表或越界时返回 `ok=false`，不删除元素。
+    TryPop,
+    /// 可恢复查找：元素不存在时返回 `ok=false`。
+    TryIndex,
+    /// 可恢复删除：元素或键不存在时返回 `false`。
+    TryRemove,
+    /// 可恢复切片：范围非法时返回 `ok=false`。
+    TrySlice,
 }
 
 impl MethodName {
@@ -365,6 +377,12 @@ impl MethodName {
             "starts_with" => Some(Self::StartsWith),
             "ends_with" => Some(Self::EndsWith),
             "replace" => Some(Self::Replace),
+            "try_get" => Some(Self::TryGet),
+            "try_set" => Some(Self::TrySet),
+            "try_pop" => Some(Self::TryPop),
+            "try_index" => Some(Self::TryIndex),
+            "try_remove" => Some(Self::TryRemove),
+            "try_slice" => Some(Self::TrySlice),
             _ => None,
         }
     }
@@ -374,6 +392,19 @@ impl MethodName {
         matches!(
             self,
             Self::Trim | Self::Contains | Self::StartsWith | Self::EndsWith | Self::Replace
+        )
+    }
+
+    /// 返回该方法是否属于“失败可恢复”的安全入口；这类方法不允许抛出运行时错误。
+    pub fn is_recoverable(self) -> bool {
+        matches!(
+            self,
+            Self::TryGet
+                | Self::TrySet
+                | Self::TryPop
+                | Self::TryIndex
+                | Self::TryRemove
+                | Self::TrySlice
         )
     }
 
@@ -393,6 +424,12 @@ impl MethodName {
             Self::StartsWith => "starts_with",
             Self::EndsWith => "ends_with",
             Self::Replace => "replace",
+            Self::TryGet => "try_get",
+            Self::TrySet => "try_set",
+            Self::TryPop => "try_pop",
+            Self::TryIndex => "try_index",
+            Self::TryRemove => "try_remove",
+            Self::TrySlice => "try_slice",
         }
     }
 }

@@ -220,11 +220,21 @@ pub extern "C" fn list_sort_float(list: *mut MsList) {
             let mut values = (0..list.len as usize)
                 .map(|index| read_value::<f64>(buffer, index))
                 .collect::<Vec<_>>();
-            values.sort_by(|left, right| {
-                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
-            });
+            values.sort_by(|left, right| cmp_sort_floats(*left, *right));
             write_values(buffer, &values);
         });
+    }
+}
+
+/// 浮点排序比较器：普通数值保持升序，`-0.0` 与 `0.0` 视为相等；
+/// 所有 NaN 排在全部数值之后，NaN 之间按位模式升序，构成全序且不会 panic。
+fn cmp_sort_floats(left: f64, right: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (left.is_nan(), right.is_nan()) {
+        (true, true) => left.to_bits().cmp(&right.to_bits()),
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (false, false) => left.partial_cmp(&right).unwrap_or(Ordering::Equal),
     }
 }
 

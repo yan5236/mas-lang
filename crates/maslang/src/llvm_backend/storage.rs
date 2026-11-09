@@ -80,7 +80,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         name: &str,
     ) -> Result<PointerValue<'ctx>, CompilerError> {
         let pointer = self.allocate_entry_slot(self.basic_type_for(value_type)?, name)?;
-        if Self::gc_layout(value_type).is_some() {
+        if Self::managed_root_layout(value_type).is_some() {
             self.gc_roots
                 .borrow_mut()
                 .push((value_type.clone(), pointer));
@@ -254,7 +254,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         if let Some(scope) = self.scopes.pop() {
             if !self.current_block_has_terminator() {
                 for variable in scope.values() {
-                    if Self::gc_layout(&variable.value_type).is_some() {
+                    if Self::managed_root_layout(&variable.value_type).is_some() {
                         self.map_builder(self.builder.build_store(
                             variable.pointer,
                             self.basic_type_for(&variable.value_type)?.const_zero(),

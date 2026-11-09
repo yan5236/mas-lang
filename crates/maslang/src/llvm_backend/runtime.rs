@@ -20,22 +20,22 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let runtime = RuntimeFunctions {
             print_int: module.add_function(
                 "print_int",
-                void_type.fn_type(&[i64_type.into()], false),
+                i8_type.fn_type(&[i64_type.into()], false),
                 None,
             ),
             print_float: module.add_function(
                 "print_float",
-                void_type.fn_type(&[f64_type.into()], false),
+                i8_type.fn_type(&[f64_type.into()], false),
                 None,
             ),
             print_bool: module.add_function(
                 "print_bool",
-                void_type.fn_type(&[i8_type.into()], false),
+                i8_type.fn_type(&[i8_type.into()], false),
                 None,
             ),
             print_string: module.add_function(
                 "print_string",
-                void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+                i8_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
                 None,
             ),
             string_to_int: module.add_function(

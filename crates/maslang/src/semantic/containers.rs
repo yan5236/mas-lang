@@ -196,7 +196,7 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
-    /// 推导对象方法调用的返回值类型，并根据目标类型分派到字符串、列表或字典规则。
+    /// 推导对象方法调用的返回值类型，并根据目标类型分派到字符串、列表、数组或字典规则。
     pub(super) fn infer_method_type(
         &mut self,
         target: &Expr,
@@ -210,6 +210,9 @@ impl<'a> SemanticAnalyzer<'a> {
             ValueType::List(element_type) => {
                 self.infer_list_method_type(element_type, method, arguments, span)
             }
+            ValueType::Array(element_type, size) => {
+                self.infer_array_method_type(element_type, size, method, arguments, span)
+            }
             ValueType::Map(key_type, value_type) => {
                 self.infer_map_method_type(key_type, value_type, method, arguments, span)
             }
@@ -222,7 +225,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 span,
             )),
             _ => Err(CompilerError::semantic_message(
-                "当前方法只能用于字符串、列表或字典类型",
+                "当前方法只能用于字符串、列表、数组或字典类型",
                 span,
             )),
         }
@@ -290,7 +293,13 @@ impl<'a> SemanticAnalyzer<'a> {
             | MethodName::Reverse
             | MethodName::Index
             | MethodName::Keys
-            | MethodName::Values => Err(CompilerError::semantic_message(
+            | MethodName::Values
+            | MethodName::TryGet
+            | MethodName::TrySet
+            | MethodName::TryPop
+            | MethodName::TryIndex
+            | MethodName::TryRemove
+            | MethodName::TrySlice => Err(CompilerError::semantic_message(
                 format!("字符串类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -364,6 +373,79 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
                 Ok(ValueType::Unit)
             }
+            MethodName::TryGet => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        "列表方法 `try_get` 需要且只接受一个整数下标",
+                        span,
+                    ));
+                }
+                self.require_int_argument(&arguments[0], method)?;
+                Ok(ValueType::SafeConvertResult(element_type))
+            }
+            MethodName::TrySet => {
+                if arguments.len() != 2 {
+                    return Err(CompilerError::semantic_message(
+                        "列表方法 `try_set` 需要整数下标和元素值两个参数",
+                        span,
+                    ));
+                }
+                self.require_int_argument(&arguments[0], method)?;
+                let value_type = self
+                    .infer_expression_type_with_hint(&arguments[1], Some(element_type.as_ref()))?;
+                if value_type != *element_type {
+                    return Err(CompilerError::semantic_message(
+                        "列表方法 `try_set` 的元素类型不匹配",
+                        arguments[1].span(),
+                    ));
+                }
+                Ok(ValueType::Bool)
+            }
+            MethodName::TryPop => match arguments.len() {
+                0 => Ok(ValueType::SafeConvertResult(element_type)),
+                1 => {
+                    self.require_int_argument(&arguments[0], method)?;
+                    Ok(ValueType::SafeConvertResult(element_type))
+                }
+                _ => Err(CompilerError::semantic_message(
+                    "列表方法 `try_pop` 最多接受一个整数下标",
+                    span,
+                )),
+            },
+            MethodName::TryIndex | MethodName::TryRemove => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        format!("列表方法 `{}` 需要且只接受一个元素参数", method.display_name()),
+                        span,
+                    ));
+                }
+                let argument_type = self
+                    .infer_expression_type_with_hint(&arguments[0], Some(element_type.as_ref()))?;
+                if argument_type != *element_type {
+                    return Err(CompilerError::semantic_message(
+                        format!("列表方法 `{}` 的参数类型不匹配", method.display_name()),
+                        arguments[0].span(),
+                    ));
+                }
+                Ok(match method {
+                    MethodName::TryIndex => ValueType::SafeConvertResult(Box::new(ValueType::Int)),
+                    MethodName::TryRemove => ValueType::Bool,
+                    _ => unreachable!(),
+                })
+            }
+            MethodName::TrySlice => {
+                if arguments.len() != 2 {
+                    return Err(CompilerError::semantic_message(
+                        "列表方法 `try_slice` 需要起始和结束两个整数下标",
+                        span,
+                    ));
+                }
+                self.require_int_argument(&arguments[0], method)?;
+                self.require_int_argument(&arguments[1], method)?;
+                Ok(ValueType::SafeConvertResult(Box::new(
+                    ValueType::List(element_type),
+                )))
+            }
             MethodName::Keys
             | MethodName::Values
             | MethodName::Trim
@@ -374,6 +456,78 @@ impl<'a> SemanticAnalyzer<'a> {
                 span,
             )),
         }
+    }
+
+    /// 推导固定数组安全方法的返回值类型；数组只提供可恢复的下标读写。
+    fn infer_array_method_type(
+        &mut self,
+        element_type: Box<ValueType>,
+        size: usize,
+        method: MethodName,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        match method {
+            MethodName::TryGet => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        "数组方法 `try_get` 需要且只接受一个整数下标",
+                        span,
+                    ));
+                }
+                self.require_int_argument(&arguments[0], method)?;
+                Ok(ValueType::SafeConvertResult(element_type))
+            }
+            MethodName::TrySet => {
+                if arguments.len() != 2 {
+                    return Err(CompilerError::semantic_message(
+                        "数组方法 `try_set` 需要整数下标和元素值两个参数",
+                        span,
+                    ));
+                }
+                self.require_int_argument(&arguments[0], method)?;
+                let value_type = self
+                    .infer_expression_type_with_hint(&arguments[1], Some(element_type.as_ref()))?;
+                if value_type != *element_type {
+                    return Err(CompilerError::semantic_message(
+                        "数组方法 `try_set` 的元素类型不匹配",
+                        arguments[1].span(),
+                    ));
+                }
+                Ok(ValueType::Bool)
+            }
+            _ if method.supports_string_target() => Err(CompilerError::semantic_message(
+                format!(
+                    "字符串方法 `{}` 只能用于 `string` 类型，当前目标类型为 `array<{},{}>`",
+                    method.display_name(),
+                    element_type.display_name(),
+                    size
+                ),
+                span,
+            )),
+            _ => Err(CompilerError::semantic_message(
+                format!(
+                    "固定数组（长度 {size}）不支持方法 `{}`；只能使用下标读写或 `try_get`/`try_set`",
+                    method.display_name()
+                ),
+                span,
+            )),
+        }
+    }
+
+    /// 校验安全方法的整数参数，失败时给出方法名和源码位置。
+    fn require_int_argument(
+        &mut self,
+        argument: &Expr,
+        method: MethodName,
+    ) -> Result<(), CompilerError> {
+        if self.infer_expression_type(argument)? != ValueType::Int {
+            return Err(CompilerError::semantic_message(
+                format!("方法 `{}` 的下标参数必须是整数", method.display_name()),
+                argument.span(),
+            ));
+        }
+        Ok(())
     }
 
     /// 推导字典方法调用的返回值类型，并校验方法参数规则。
@@ -425,11 +579,36 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
                 Ok(ValueType::List(Box::new((*value_type).clone())))
             }
+            MethodName::TryGet | MethodName::TryRemove => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        format!("字典方法 `{}` 需要且只接受一个键参数", method.display_name()),
+                        span,
+                    ));
+                }
+                let argument_type =
+                    self.infer_expression_type_with_hint(&arguments[0], Some(key_type.as_ref()))?;
+                if argument_type != *key_type {
+                    return Err(CompilerError::semantic_message(
+                        format!("字典方法 `{}` 的参数类型不匹配", method.display_name()),
+                        arguments[0].span(),
+                    ));
+                }
+                Ok(match method {
+                    MethodName::TryGet => ValueType::SafeConvertResult(value_type),
+                    MethodName::TryRemove => ValueType::Bool,
+                    _ => unreachable!(),
+                })
+            }
             MethodName::Append
             | MethodName::Pop
             | MethodName::Sort
             | MethodName::Reverse
             | MethodName::Index
+            | MethodName::TrySet
+            | MethodName::TryPop
+            | MethodName::TryIndex
+            | MethodName::TrySlice
             | MethodName::Trim
             | MethodName::StartsWith
             | MethodName::EndsWith

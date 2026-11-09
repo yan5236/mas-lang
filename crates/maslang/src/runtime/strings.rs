@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char};
+use std::io::Write;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -57,26 +58,49 @@ const KIND_BOOL: u8 = 3;
 const KIND_STRING: u8 = 4;
 const KIND_RECORD: u8 = 5;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn print_int(value: i64) {
-    println!("{}", value);
+/// 把一行 UTF-8 文本写入标准输出并返回状态：`1` 成功，`0` 表示写入或刷新失败。
+/// 统一使用返回 `io::Result` 的写入路径，不调用会 panic 的 `println!` 宏。
+fn write_stdout_line(bytes: &[u8]) -> u8 {
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    let written = handle
+        .write_all(bytes)
+        .and_then(|()| handle.write_all(b"\n"))
+        .and_then(|()| handle.flush());
+    u8::from(written.is_ok())
 }
 
+/// 打印整数并返回写入状态；失败由调用方决定是继续还是报告语言错误。
 #[unsafe(no_mangle)]
-pub extern "C" fn print_float(value: f64) {
-    println!("{}", value);
+pub extern "C" fn print_int(value: i64) -> u8 {
+    write_stdout_line(value.to_string().as_bytes())
 }
 
+/// 打印浮点数并返回写入状态，文本格式与原有 `Display` 输出保持一致。
 #[unsafe(no_mangle)]
-pub extern "C" fn print_bool(value: u8) {
-    println!("{}", value != 0);
+pub extern "C" fn print_float(value: f64) -> u8 {
+    write_stdout_line(value.to_string().as_bytes())
 }
 
+/// 打印布尔值并返回写入状态，输出固定为 `true` 或 `false`。
 #[unsafe(no_mangle)]
-pub extern "C" fn print_string(ptr: *const u8, len: u64) {
+pub extern "C" fn print_bool(value: u8) -> u8 {
+    write_stdout_line((value != 0).to_string().as_bytes())
+}
+
+/// 打印字符串并返回写入状态；非法 UTF-8 沿用原有占位文本，不在这里终止进程。
+#[unsafe(no_mangle)]
+pub extern "C" fn print_string(ptr: *const u8, len: u64) -> u8 {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
     let text = std::str::from_utf8(bytes).unwrap_or("<invalid utf8>");
-    println!("{}", text);
+    write_stdout_line(text.as_bytes())
+}
+
+/// 严格 `print` 的失败分支：标准输出不可写时按统一中文运行时错误退出。
+/// 需要继续执行的调用方应改用 `try_print` 获取布尔状态。
+#[unsafe(no_mangle)]
+pub extern "C" fn mas_output_error() -> ! {
+    abort_runtime("无法写入标准输出：输出流已关闭或不可用")
 }
 
 /// 拼接两个有效 UTF-8 字节区间，返回 GC 托管的稳定地址并写出结果长度。
@@ -216,13 +240,16 @@ pub extern "C" fn string_to_float(ptr: *const u8, len: u64) -> f64 {
         .unwrap_or_else(|_| abort_runtime("字符串无法转换为 float"))
 }
 
-/// 尝试把字符串解析为 `int`，成功时写入输出参数，失败时仅返回 `false`。
+/// 尝试把字符串解析为 `int`，成功时写入输出参数；非法 UTF-8 或解析失败都只返回 `false`。
+/// 原生模块可以构造任意字节，因此安全入口不得经由会终止进程的文本解析路径。
 #[unsafe(no_mangle)]
 pub extern "C" fn try_string_to_int(ptr: *const u8, len: u64, out_value: *mut i64) -> u8 {
     if out_value.is_null() {
         abort_runtime("安全整数转换的输出指针不能为空");
     }
-    let text = parse_runtime_text(ptr, len);
+    let Some(text) = runtime_text_checked(ptr, len) else {
+        return 0;
+    };
     match text.parse::<i64>() {
         Ok(value) => {
             unsafe {
@@ -234,13 +261,15 @@ pub extern "C" fn try_string_to_int(ptr: *const u8, len: u64, out_value: *mut i6
     }
 }
 
-/// 尝试把字符串解析为 `float`，成功时写入输出参数，失败时仅返回 `false`。
+/// 尝试把字符串解析为 `float`，成功时写入输出参数；非法 UTF-8 或解析失败都只返回 `false`。
 #[unsafe(no_mangle)]
 pub extern "C" fn try_string_to_float(ptr: *const u8, len: u64, out_value: *mut f64) -> u8 {
     if out_value.is_null() {
         abort_runtime("安全浮点转换的输出指针不能为空");
     }
-    let text = parse_runtime_text(ptr, len);
+    let Some(text) = runtime_text_checked(ptr, len) else {
+        return 0;
+    };
     match text.parse::<f64>() {
         Ok(value) => {
             unsafe {
@@ -252,13 +281,16 @@ pub extern "C" fn try_string_to_float(ptr: *const u8, len: u64, out_value: *mut 
     }
 }
 
-/// 尝试把字符串解析为 `bool`，仅 `true/false` 两种文本视为成功。
+/// 尝试把字符串解析为 `bool`，仅 `true/false` 两种文本视为成功；
+/// 非法 UTF-8 与不匹配文本一样返回 `false`。
 #[unsafe(no_mangle)]
 pub extern "C" fn try_string_to_bool(ptr: *const u8, len: u64, out_value: *mut u8) -> u8 {
     if out_value.is_null() {
         abort_runtime("安全布尔转换的输出指针不能为空");
     }
-    let text = parse_runtime_text(ptr, len);
+    let Some(text) = runtime_text_checked(ptr, len) else {
+        return 0;
+    };
     let parsed = match text {
         "true" => Some(1),
         "false" => Some(0),
@@ -272,6 +304,19 @@ pub extern "C" fn try_string_to_bool(ptr: *const u8, len: u64, out_value: *mut u
     } else {
         0
     }
+}
+
+/// 把运行时字符串解析为 UTF-8 文本；空长度容忍空指针，非法 UTF-8 返回 `None` 而不终止进程。
+fn runtime_text_checked<'a>(ptr: *const u8, len: u64) -> Option<&'a str> {
+    let bytes = if len == 0 {
+        &[][..]
+    } else {
+        if ptr.is_null() {
+            return None;
+        }
+        unsafe { std::slice::from_raw_parts(ptr, len as usize) }
+    };
+    std::str::from_utf8(bytes).ok()
 }
 
 /// 在足够容纳 i64（含负号）的栈缓冲区中按标准 Display 格式化，再一次分配精确长度的托管字节。

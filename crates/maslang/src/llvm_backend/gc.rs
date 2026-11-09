@@ -18,6 +18,29 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
+    /// 返回作为 GC 根时的扫描布局：`try_result<T>` 委托载荷类型，其余类型直接复用 `gc_layout`。
+    /// 该布局只用于栈槽登记；结构体字段偏移表仍使用 `gc_layout`，避免把 `{ ok, T }` 当成从偏移 0 开始的托管槽。
+    pub(super) fn managed_root_layout(value_type: &ValueType) -> Option<(u8, u64)> {
+        match value_type {
+            ValueType::SafeConvertResult(inner) => Self::gc_layout(inner),
+            other => Self::gc_layout(other),
+        }
+    }
+
+    /// 计算托管根的登记地址：`try_result<T>` 的载荷位于字段 1，其他类型直接使用槽位地址。
+    fn managed_root_pointer(
+        &self,
+        builder: &Builder<'ctx>,
+        value_type: &ValueType,
+        slot: PointerValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, CompilerError> {
+        let ValueType::SafeConvertResult(inner) = value_type else {
+            return Ok(slot);
+        };
+        let result_type = self.safe_convert_result_type(inner)?;
+        self.map_builder(builder.build_struct_gep(result_type, slot, 1, "root.payload"))
+    }
+
     /// 在函数入口创建固定大小栈槽，循环只复用槽位，不按迭代次数消耗栈。
     pub(super) fn allocate_entry_slot(
         &self,
@@ -40,7 +63,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
     /// 为托管表达式保留根以跨越嵌套调用；已证明借用的栈字符串无需堆根，实际入图复制由字典写入负责。
     pub(super) fn protect_gc_value(&self, value: &TypedValue<'ctx>) -> Result<(), CompilerError> {
-        if Self::gc_layout(&value.value_type).is_some()
+        if Self::managed_root_layout(&value.value_type).is_some()
             && !self.borrowed_values.contains(&value.value)
         {
             let slot = self.allocate_local(&value.value_type, "gc.temp")?;
@@ -129,16 +152,19 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             all_roots.extend(
                 self.globals
                     .values()
-                    .filter(|value| Self::gc_layout(&value.value_type).is_some())
+                    .filter(|value| Self::managed_root_layout(&value.value_type).is_some())
                     .map(|value| (value.value_type.clone(), value.pointer)),
             );
         }
         for (value_type, pointer) in all_roots {
-            let (kind, count) = Self::gc_layout(&value_type).expect("managed root");
+            let Some((kind, count)) = Self::managed_root_layout(&value_type) else {
+                continue;
+            };
+            let base = self.managed_root_pointer(&builder, &value_type, pointer)?;
             self.map_builder(builder.build_call(
                 root_function,
                 &[
-                    pointer.into(),
+                    base.into(),
                     self.context.i8_type().const_int(kind as u64, false).into(),
                     self.context.i64_type().const_int(count, false).into(),
                 ],

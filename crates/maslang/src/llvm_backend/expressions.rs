@@ -188,43 +188,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         };
 
         if name == "print" {
-            let compiled = self.compile_expr(&arguments[0])?;
-            let argument = self.expect_value(compiled)?;
-            let (function, args): (FunctionValue<'ctx>, Vec<BasicMetadataValueEnum<'ctx>>) =
-                match argument.value_type.clone() {
-                    ValueType::Int => (self.runtime.print_int, vec![argument.value.into()]),
-                    ValueType::Float => (self.runtime.print_float, vec![argument.value.into()]),
-                    ValueType::Bool => {
-                        let bool_value = self.map_builder(self.builder.build_int_z_extend(
-                            argument.value.into_int_value(),
-                            self.context.i8_type(),
-                            "bool.cast",
-                        ))?;
-                        (self.runtime.print_bool, vec![bool_value.into()])
-                    }
-                    ValueType::String => {
-                        let string_value = argument.value.into_struct_value();
-                        let ptr = self.extract_string_part(string_value, 0, "print.ptr")?;
-                        let len = self.extract_string_part(string_value, 1, "print.len")?;
-                        (self.runtime.print_string, vec![ptr.into(), len.into()])
-                    }
-                    ValueType::Struct(_)
-                    | ValueType::Nullable(_)
-                    | ValueType::Null
-                    | ValueType::Unit
-                    | ValueType::SafeConvertResult(_)
-                    | ValueType::List(_)
-                    | ValueType::Map(_, _)
-                    | ValueType::Array(_, _) => {
-                        return Err(CompilerError::build_message(
-                            "print 不能打印当前值类型",
-                            span,
-                        ));
-                    }
-                };
+            return self.compile_print_call(arguments, span);
+        }
 
-            self.map_builder(self.builder.build_call(function, &args, "call.print"))?;
-            return Ok(CodegenValue::Unit);
+        if name == "try_print" {
+            let value = self.compile_try_print_call(arguments, span)?;
+            return Ok(CodegenValue::Value(value));
         }
 
         if name == "len" {
@@ -306,6 +275,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             return self.compile_constructor(name, arguments, span);
         }
         if let Some(value) = self.compile_builtin_convert_call(name, arguments, span)? {
+            return Ok(CodegenValue::Value(value));
+        }
+        if let Some(value) = self.compile_checked_int_intrinsic(name, arguments, span)? {
             return Ok(CodegenValue::Value(value));
         }
 
@@ -856,7 +828,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 把一个“必定成功”的基础类型转换结果组装成 `{ ok, value }` 结构值。
-    fn build_safe_convert_success(
+    pub(super) fn build_safe_convert_success(
         &self,
         value_type: ValueType,
         value: BasicValueEnum<'ctx>,
@@ -869,7 +841,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 把成功标记与目标值组装成安全转换结果，供 `try_*` 内建函数统一复用。
-    fn build_safe_convert_result(
+    pub(super) fn build_safe_convert_result(
         &self,
         value_type: ValueType,
         ok: inkwell::values::IntValue<'ctx>,
@@ -1106,7 +1078,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }))
     }
 
-    /// 编译对象方法调用，并根据目标类型分派到字符串、列表或字典实现。
+    /// 编译对象方法调用；安全方法走可恢复实现，严格方法保持原有运行时错误语义。
     pub(super) fn compile_method_call(
         &mut self,
         target: &Expr,
@@ -1118,12 +1090,48 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let target_value = self.expect_value(compiled_target)?;
         match target_value.value_type.clone() {
             ValueType::String => {
+                if method.is_recoverable() {
+                    return Err(CompilerError::build_message(
+                        format!("字符串类型不支持方法 `{}`", method.display_name()),
+                        span,
+                    ));
+                }
                 self.compile_string_method_call(target_value, method, arguments, span)
             }
             ValueType::List(_) => {
+                if method.is_recoverable() {
+                    return self.compile_list_safe_method(target_value, method, arguments, span);
+                }
                 self.compile_list_method_call(target_value, method, arguments, span)
             }
+            ValueType::Array(_, _) => {
+                if matches!(method, MethodName::TryGet | MethodName::TrySet) {
+                    return self.compile_array_safe_method(
+                        target,
+                        target_value,
+                        method,
+                        arguments,
+                        span,
+                    );
+                }
+                Err(CompilerError::build_message(
+                    format!(
+                        "固定数组不支持方法 `{}`；只能使用下标读写或 `try_get`/`try_set`",
+                        method.display_name()
+                    ),
+                    span,
+                ))
+            }
             ValueType::Map(_, _) => {
+                if matches!(method, MethodName::TryGet | MethodName::TryRemove) {
+                    return self.compile_map_safe_method(target_value, method, arguments, span);
+                }
+                if method.is_recoverable() {
+                    return Err(CompilerError::build_message(
+                        format!("字典类型不支持方法 `{}`", method.display_name()),
+                        span,
+                    ));
+                }
                 self.compile_map_method_call(target_value, method, arguments, span)
             }
             _ if method.supports_string_target() => Err(CompilerError::build_message(
@@ -1134,7 +1142,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
             )),
             _ => Err(CompilerError::build_message(
-                "当前方法只能用于字符串、列表或字典类型",
+                "当前方法只能用于字符串、列表、数组或字典类型",
                 span,
             )),
         }
@@ -1210,7 +1218,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::Reverse
             | MethodName::Index
             | MethodName::Keys
-            | MethodName::Values => Err(CompilerError::build_message(
+            | MethodName::Values
+            | MethodName::TryGet
+            | MethodName::TrySet
+            | MethodName::TryPop
+            | MethodName::TryIndex
+            | MethodName::TryRemove
+            | MethodName::TrySlice => Err(CompilerError::build_message(
                 format!("字符串类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -1316,7 +1330,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::Trim
             | MethodName::StartsWith
             | MethodName::EndsWith
-            | MethodName::Replace => Err(CompilerError::build_message(
+            | MethodName::Replace
+            | MethodName::TryGet
+            | MethodName::TrySet
+            | MethodName::TryPop
+            | MethodName::TryIndex
+            | MethodName::TryRemove
+            | MethodName::TrySlice => Err(CompilerError::build_message(
                 format!("列表类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -1393,6 +1413,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::Sort
             | MethodName::Reverse
             | MethodName::Index
+            | MethodName::TryGet
+            | MethodName::TryRemove
+            | MethodName::TrySet
+            | MethodName::TryPop
+            | MethodName::TryIndex
+            | MethodName::TrySlice
             | MethodName::Trim
             | MethodName::StartsWith
             | MethodName::EndsWith

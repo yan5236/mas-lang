@@ -225,6 +225,43 @@ impl<'a> SemanticAnalyzer<'a> {
             return Ok(ValueType::Unit);
         }
 
+        if name == "try_print" {
+            if self.current_return_type.is_none() {
+                return Err(CompilerError::semantic_message(
+                    "`try_print` 只能在函数体内调用，请将输出放入 `main` 或其他函数",
+                    span,
+                ));
+            }
+            if arguments.len() != 1 {
+                return Err(CompilerError::semantic_message(
+                    "内建函数 `try_print` 需要且只接受一个参数",
+                    span,
+                ));
+            }
+            let argument_type = self.infer_expression_type(&arguments[0])?;
+            if matches!(
+                argument_type,
+                ValueType::Unit
+                    | ValueType::Struct(_)
+                    | ValueType::Nullable(_)
+                    | ValueType::Null
+                    | ValueType::SafeConvertResult(_)
+                    | ValueType::List(_)
+                    | ValueType::Map(_, _)
+                    | ValueType::Array(_, _)
+            ) {
+                return Err(CompilerError::semantic_message(
+                    "`try_print` 只支持打印基础类型",
+                    arguments[0].span(),
+                ));
+            }
+            return Ok(ValueType::Bool);
+        }
+
+        if let Some(value_type) = self.infer_checked_int_intrinsic_type(name, arguments, span)? {
+            return Ok(value_type);
+        }
+
         if name == "len" {
             if arguments.len() != 1 {
                 return Err(CompilerError::semantic_message(
@@ -283,6 +320,40 @@ impl<'a> SemanticAnalyzer<'a> {
         }
 
         Ok(signature.return_type)
+    }
+
+    /// 推导受检整数内建的返回类型；只接受整数实参，失败由调用方通过 `ok` 判断。
+    fn infer_checked_int_intrinsic_type(
+        &mut self,
+        name: &str,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<Option<ValueType>, CompilerError> {
+        let expected_arity = match name {
+            "try_add" | "try_sub" | "try_mul" | "try_div" | "try_mod" => 2,
+            "try_neg" => 1,
+            _ => return Ok(None),
+        };
+        if arguments.len() != expected_arity {
+            return Err(CompilerError::semantic_message(
+                format!(
+                    "内建函数 `{name}` 需要 {expected_arity} 个整数参数，但实际传入 {} 个",
+                    arguments.len()
+                ),
+                span,
+            ));
+        }
+        for argument in arguments {
+            if self.infer_expression_type(argument)? != ValueType::Int {
+                return Err(CompilerError::semantic_message(
+                    format!("内建函数 `{name}` 的参数必须是整数"),
+                    argument.span(),
+                ));
+            }
+        }
+        Ok(Some(ValueType::SafeConvertResult(Box::new(
+            ValueType::Int,
+        ))))
     }
 
     /// 推导基础类型转换内建函数的返回类型，并阻止容器或空值参与当前阶段的转换。
