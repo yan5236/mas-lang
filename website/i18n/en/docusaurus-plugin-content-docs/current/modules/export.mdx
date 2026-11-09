@@ -15,6 +15,12 @@ pub func add(a: int, b: int) -> int:
 pub const VERSION = "1.0"
 
 pub var debug_mode = false
+
+pub struct Point:
+    x: int
+    y: int
+
+pub extern func host_now() -> int
 ```
 
 Private declarations are only usable within the current module:
@@ -24,6 +30,8 @@ const INTERNAL_KEY = "secret"    // not importable by other modules
 func helper():                    // not importable by other modules
     print("internal helper")
 ```
+
+Once a `pub extern func` is exported, importers call it by its native symbol name. Struct fields do not need individual `pub` markers — anyone who can use the type can access its fields.
 
 ## export import — Re-export
 
@@ -39,6 +47,17 @@ Consumers can then import directly:
 ```mas-lang
 import utils { add, trim }
 ```
+
+Re-exports also support line breaks, trailing commas, and member aliases:
+
+```mas-lang
+export import utils.math {
+    add as plus,
+    sub,
+}
+```
+
+A re-export cannot alias the module: `export import utils.math as m { add }` is rejected by the parser; an alias may only be attached to a member (`add as plus`).
 
 ## Circular Dependencies
 

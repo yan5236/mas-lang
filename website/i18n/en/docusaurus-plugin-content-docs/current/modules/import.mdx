@@ -4,6 +4,10 @@ sidebar_position: 1
 
 # Import
 
+## Prerequisites
+
+`import` and `export import` require a project context: a `settings.toml` that can be found by walking up from the entry file. Running a single `.ms` file (for example `maslang run hello.ms` in a directory without `settings.toml`) cannot resolve imports and reports that module imports must be expanded before semantic analysis. Create a project with `fama new`, or provide the project configuration manually.
+
 ## Import Syntax
 
 Use `import` to bring symbols from other modules into scope:
@@ -12,20 +16,45 @@ Use `import` to bring symbols from other modules into scope:
 // Named import
 import utils.math { add, sub }
 
-// Aliased import
-import utils.math { add as plus }
+// Rename an imported function; a trailing comma is allowed
+import time {
+    sleep as time_sleep,
+    unix_seconds,
+}
 
+// Give the module an alias; only the listed members are reached through t
+import time as t {
+    sleep,
+    unix_millis as millis,
+}
+
+func main():
+    time_sleep(10)
+    t.sleep(10)
+    print(t.millis())
+```
+
+Members of an aliased module import are reachable only through the alias (here `t.sleep` and `t.millis`); `sleep` is not introduced into the current file directly. A member alias (`unix_millis as millis`) is likewise written `t.millis` inside the aliased module.
+
+```mas-lang
 // Wildcard import
 import utils.math.*
 
-// Standard library
+// Import an installed dependency package (declare it in settings.toml, then run fama install)
 import time { unix_seconds }
 ```
+
+Named lists may be written on one line or across lines, and allow a trailing comma. Module aliases within one file of a project must be unique, and must not collide with top-level declarations or directly imported names.
+
+Named imports, wildcard imports, and re-exports share the import namespace of the current file. If two different symbols claim the same name, the compiler reports an error; use a member alias or a module alias to tell them apart. Importing the same symbol again under the same name is allowed.
+
+A named import's visible name also cannot be the same as a top-level declaration (`func`, `struct`, `var`, `const`) in this file, otherwise it reports a clash between the import name and a top-level declaration of the current module.
 
 ## Module Paths
 
 - Paths are dot-separated: `utils.math` maps to `src/utils/math.ms`
 - `index.ms` is the directory entry file; `utils` maps to `src/utils/index.ms`
+- Paths **always resolve from the package root's `src/`**, regardless of the directory of the file containing the import. For example, to reference the sibling `math.ms` from `src/utils/index.ms`, you must write `utils.math`, not `math`
 
 ## The local Prefix
 
@@ -39,3 +68,5 @@ import local.time { format }
 
 1. Names declared in `settings.toml` under `[dependencies]` resolve to the installed package at its declared version.
 2. Other names resolve to local modules under `src/`.
+
+A dependency must first be declared with `fama add` and then installed with `fama install` into `mod_module/<name>@<version>/`; when it is missing, the compiler reports that the dependency is not installed and that `fama install` should be run first.

@@ -4,6 +4,10 @@ sidebar_position: 1
 
 # 导入
 
+## 前置条件
+
+`import` 和 `export import` 需要项目上下文：入口文件向上能找到 `settings.toml`。只用一个 `.ms` 文件运行（例如 `maslang run hello.ms`，目录里没有 `settings.toml`）时无法解析导入，会报“模块导入应在语义分析前完成展开”。用 `fama new` 建工程，或手动提供项目配置。
+
 ## 导入语法
 
 使用 `import` 导入其他模块中的公开符号：
@@ -30,22 +34,27 @@ func main():
     print(t.millis())
 ```
 
+模块别名导入的成员只能通过别名访问（上例是 `t.sleep`、`t.millis`），不会把 `sleep` 直接引入当前文件。成员别名（`unix_millis as millis`）在别名模块内同样写作 `t.millis`。
+
 ```mas-lang
 // 通配导入
 import utils.math.*
 
-// 导入已安装的标准库包
+// 导入已安装的依赖包（需在 settings.toml 声明并执行 fama install）
 import time { unix_seconds }
 ```
 
-具名列表可以写在一行，也可以换行。项目内同一个文件的模块别名必须唯一，并且不能和顶层声明或直接导入的名字重复。重导出支持列表换行、尾逗号和成员别名。
+具名列表可以写在一行，也可以换行，并允许尾逗号。项目内同一个文件的模块别名必须唯一，并且不能和顶层声明或直接导入的名字重复。
 
-具名导入、通配导入和重导出共用当前文件的导入名称。若两个不同的符号占用同一个名称，编译器会报错。可用成员别名或模块别名区分它们。重复导入同一个符号并使用同一个名称是允许的。
+具名导入、通配导入和重导出共用当前文件的导入名称。若两个不同的符号占用同一个名称，编译器会报错；可用成员别名或模块别名区分。重复导入同一个符号并使用同一个名称是允许的。
+
+具名导入的可见名也不能与本文件中同名的顶层声明（`func`、`struct`、`var`、`const`）重名，否则会报“导入名 … 与当前模块顶层声明重名”。
 
 ## 模块路径
 
 - 路径使用点分隔：`utils.math` 对应 `src/utils/math.ms`
 - `index.ms` 是目录入口文件，路径 `utils` 对应 `src/utils/index.ms`
+- 路径**始终从包根目录的 `src/` 开始解析**，与书写导入语句的文件所在目录无关。例如在 `src/utils/index.ms` 里引用同目录的 `math.ms`，必须写 `utils.math`，不能写 `math`
 
 ## local 前缀
 
@@ -59,3 +68,5 @@ import local.time { format }
 
 1. 顶层名称匹配 `settings.toml` 中的 `[dependencies]` 时，按声明版本查找已安装的包。
 2. 其他名称解析到 `src/` 下的本地模块。
+
+依赖包必须先用 `fama add` 声明、再用 `fama install` 安装到 `mod_module/<name>@<version>/`；缺失时会提示“未安装依赖 …，请先执行 fama install”。

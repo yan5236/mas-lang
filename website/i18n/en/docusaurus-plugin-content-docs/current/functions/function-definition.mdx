@@ -53,9 +53,35 @@ var result = add(3, 5)   // result = 8
 greet("Mas lang")
 ```
 
+A function may be called before it is defined, and it may call itself recursively:
+
+```mas-lang
+func main():
+    print(factorial(5))   // 120
+
+func factorial(n: int) -> int:
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+```
+
 ## Rules
 
 - Parameters must have type annotations
-- Functions with a declared return type must have a `return` statement
-- Functions without a return type annotation return `unit` (no `return` needed)
+- A function with a declared return type must "necessarily return": either its body ends with a `return`, or it has a complete `if/elif/else` where every branch necessarily returns. A `return` inside `while true:` alone does not count — the compiler does not analyze a loop condition as always true
+- Functions without a return type annotation return `unit` (no `return` needed, though a bare `return` is allowed)
 - Function overloading (same name, different parameters) is not supported
+
+## The main Function
+
+An executable program must define a parameterless `func main()`:
+
+```mas-lang
+func main():
+    print("Hello")
+```
+
+- `main` cannot declare parameters; doing so fails to compile
+- The return type may be omitted; writing `-> int` and the like also compiles, but the return value is ignored and does not become the process exit code
+- `main` can be called by other functions like any ordinary function
+- Top-level statements run before `main` — see [variables and constants](../basics/variables#top-level-statements-and-the-program-entry-point)

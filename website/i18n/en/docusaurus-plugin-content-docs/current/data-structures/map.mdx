@@ -6,35 +6,50 @@ sidebar_position: 3
 
 ## Type and Literals
 
-`map<K,V>` is a key-value dictionary:
+`map<K,V>` is a key-value dictionary; all keys in a given map must share one type, and all values must share one type:
 
 ```mas-lang
-var user = {"name": "Alice", "age": 18}   // map<string, int>
+var user = {"name": "Alice", "city": "Shanghai"}   // map<string,string>
 var scores: map<string, int> = {}
 ```
+
+An empty dictionary `{}` has no key or value type to infer, so it needs an explicit annotation. A literal that mixes key types or value types fails to compile.
 
 Multi-line format:
 
 ```mas-lang
 var config = {
     "host": "localhost",
-    "port": 8080,
-    "debug": true,
+    "port": "8080",
+    "debug": "true",
 }
 ```
+
+A multi-line literal allows a trailing comma.
 
 ## Key Access
 
 ```mas-lang
-var user = {"name": "Alice", "age": 18}
+var user = {"name": "Alice", "city": "Shanghai"}
 user["name"]   // "Alice"
+```
+
+Reading a missing key does not return a default: it reports a runtime error **with a source location** and exits with status code 1. Test with `contains(key)` first:
+
+```mas-lang
+func main():
+    var user = {"name": "Alice"}
+    if user.contains("city"):
+        print(user["city"])
+    else:
+        print("no city field")
 ```
 
 ## Adding and Updating
 
 ```mas-lang
 user["email"] = "alice@example.com"   // add new key
-user["age"] = 19                       // update existing key
+user["city"] = "Beijing"               // update existing key
 ```
 
 ## Map Methods
@@ -49,9 +64,56 @@ map.values()              // [1, 3] (list of values)
 len(map)                  // number of entries
 ```
 
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `remove(k)` | nothing | Removes key `k`; reports a runtime error if the key is absent |
+| `contains(k)` | `bool` | Whether the key exists |
+| `keys()` | `list<K>` | A snapshot list of keys in insertion order |
+| `values()` | `list<V>` | Values in insertion order; struct, list, and dictionary values are still shared references |
+| `len(map)` | `int` | Number of entries |
+
+`keys()` and `values()` return new snapshot lists — later additions or removals on the map do not change a list you already obtained; removing a key and inserting it again appends it to the end.
+
 ## Iteration
+
+Iterating a map requires both a key and a value variable:
 
 ```mas-lang
 for key, value in map:
     print("${key}: ${value}")
+```
+
+When you only need the keys, iterate over `keys()`:
+
+```mas-lang
+for key in map.keys():
+    print(key)
+```
+
+## Struct Keys and Composite Values
+
+```mas-lang
+struct Person:
+    name: string
+
+var alice = Person("Alice")
+var people: map<string,Person?> = {"leader": alice, "helper": null}
+var scores: map<Person,int> = {alice: 90}
+func main():
+    alice.name = "Alice Chen"
+    print(scores[alice]) // 90: changing a field does not change object identity
+    print(scores.contains(Person("Alice Chen"))) // false: this is another object
+```
+
+Keys support primitives (`int`, `float`, `bool`, `string`) or struct references; nullable keys and container keys are not accepted. Struct keys match by object identity, not by field comparison, and changing a field does not change the identity.
+
+Values may be primitives, structs, nullable values, lists, or dictionaries; `keys()` and `values()` keep the corresponding element type and shared references. A fixed array cannot be a map value or key — use a list for that shape.
+
+When a dictionary's values are nullable, distinguish "the key is absent" from "the key maps to `null`": index access on the former reports an error, while the latter reads back as `null`:
+
+```mas-lang
+var cached: map<string,int?> = {"today": null}
+func main():
+    print(cached.contains("today")) // true
+    print(cached["today"] == null)  // true
 ```

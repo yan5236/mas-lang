@@ -53,9 +53,35 @@ var result = add(3, 5)   // result = 8
 greet("Mas lang")
 ```
 
+函数可以先调用后定义，也可以递归调用自己：
+
+```mas-lang
+func main():
+    print(factorial(5))   // 120
+
+func factorial(n: int) -> int:
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+```
+
 ## 规则
 
 - 参数必须有类型标注
-- 标注了返回类型的函数必须有 `return` 语句返回值
-- 没有标注返回类型时，等价于返回 `unit`（无需 return）
+- 标注了返回类型的函数，函数体必须“必然返回”：要么以 `return` 结束，要么 `if/elif/else` 齐全且每个分支都必然返回。仅靠 `while true:` 里的 `return` 不算，编译器不会分析循环条件恒真
+- 没有标注返回类型时，等价于返回 `unit`（无需 return；也可以写裸 `return`）
 - 不支持函数重载（同名不同参函数）
+
+## main 函数
+
+可执行程序必须定义无参数的 `func main()`：
+
+```mas-lang
+func main():
+    print("Hello")
+```
+
+- `main` 不能声明参数，否则编译失败
+- 可以省略返回类型；写上 `-> int` 等也能编译，但返回值会被忽略，不会成为进程退出码
+- `main` 可以像普通函数一样被其他函数调用
+- 顶层语句会在 `main` 之前执行，详见[变量与常量](../basics/variables#顶层语句与程序入口)

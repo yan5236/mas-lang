@@ -17,7 +17,13 @@ From lowest to highest:
 | 7 | `-` `not` | Unary negation, logical NOT |
 | 8 (highest) | `()` `[]` `.` `[:]` | Call, index, member access, slice |
 
-All binary operators are left-associative. Use parentheses `()` to override precedence:
+All binary operators are left-associative, so chained comparison cannot be written: `1 < 2 < 3` parses as `(1 < 2) < 3` and is a type error — write `1 < 2 and 2 < 3` instead.
+
+`not` sits at the same level as unary minus, above comparison: `not a == b` parses as `(not a) == b`. Write `not (a == b)` to mean "a is not equal to b".
+
+`..` is not an ordinary expression operator; it is only used for `for` ranges, e.g. `for i in 0..len(items)`. Each endpoint is a complete expression, so `0..2 + 1` is equivalent to `0..(2 + 1)`.
+
+Use parentheses `()` to override precedence:
 
 ```mas-lang
 var result = (2 + 3) * 4   // 20

@@ -6,12 +6,14 @@ sidebar_position: 3
 
 ## 类型与字面量
 
-`map<K,V>` 是键值对字典：
+`map<K,V>` 是键值对字典，同一个字典的键类型必须一致，值类型也必须一致：
 
 ```mas-lang
 var user = {"name": "张三", "city": "上海"}   // map<string,string>
 var scores: map<string, int> = {}
 ```
+
+空字典 `{}` 没有可推断的键值类型，必须提供显式标注。键类型和值类型混合的字面量会编译失败。
 
 多行书写：
 
@@ -23,6 +25,8 @@ var config = {
 }
 ```
 
+多行字面量允许尾逗号。
+
 ## 键访问
 
 ```mas-lang
@@ -30,11 +34,22 @@ var user = {"name": "张三", "city": "上海"}
 user["name"]   // "张三"
 ```
 
+读取不存在的键不会返回默认值，而是报告**带源码位置**的运行时错误并以状态码 1 退出；先用 `contains(key)` 判断：
+
+```mas-lang
+func main():
+    var user = {"name": "张三"}
+    if user.contains("city"):
+        print(user["city"])
+    else:
+        print("没有 city 字段")
+```
+
 ## 添加和更新
 
 ```mas-lang
 user["email"] = "zhang@example.com"   // 添加新键
-user["city"] = "北京"                       // 更新已有键
+user["city"] = "北京"                  // 更新已有键
 ```
 
 ## 字典方法
@@ -49,11 +64,30 @@ map.values()              // [1, 3]（值的列表）
 len(map)                  // 元素个数
 ```
 
+| 方法 | 返回 | 说明 |
+|------|------|------|
+| `remove(k)` | 无 | 删除键 `k`；键不存在时报运行时错误 |
+| `contains(k)` | `bool` | 键是否存在 |
+| `keys()` | `list<K>` | 按插入顺序返回键的快照列表 |
+| `values()` | `list<V>` | 按插入顺序返回值；结构体、列表、字典值仍是共享引用 |
+| `len(map)` | `int` | 元素个数 |
+
+`keys()`、`values()` 返回的是取快照时的新列表，之后对字典的增删不会改变已经取到的列表；删除后再插入同一个键会追加到末尾。
+
 ## 遍历
+
+遍历字典时必须同时声明键和值两个变量：
 
 ```mas-lang
 for key, value in map:
     print("${key}: ${value}")
+```
+
+只需要键时，遍历 `keys()`：
+
+```mas-lang
+for key in map.keys():
+    print(key)
 ```
 
 ## 结构体键与复合值
@@ -71,4 +105,15 @@ func main():
     print(scores.contains(Person("Alice Chen"))) // false：这是另一个对象
 ```
 
-每个字典的键类型一致，值类型也一致。值可为基础值、结构体、可空值、列表或字典；`keys()` 和 `values()` 保留相应元素类型及共享引用。键支持基础类型或结构体引用，目前不接受可空键、容器键。固定数组值请改用列表。
+键支持基础类型（`int`、`float`、`bool`、`string`）或结构体引用，目前不接受可空键和容器键。结构体键按对象身份匹配，不按字段比较；修改字段不会改变身份。
+
+值可为基础值、结构体、可空值、列表或字典；`keys()` 和 `values()` 保留相应元素类型及共享引用。固定数组不能作为字典的值或键，这类场景请改用列表。
+
+字典值可空时，要区分“键不存在”和“键对应的值为 `null`”：前者下标访问会报错，后者读取后得到 `null`：
+
+```mas-lang
+var cached: map<string,int?> = {"today": null}
+func main():
+    print(cached.contains("today")) // true
+    print(cached["today"] == null)  // true
+```

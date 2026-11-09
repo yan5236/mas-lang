@@ -15,6 +15,8 @@ Mas lang is statically typed — every value has a definite type.
 | `bool` | Boolean | `true`, `false` |
 | `string` | UTF-8 string | `"hello"` |
 
+`int` covers `-9223372036854775808` through `9223372036854775807`, and both ends can be written directly as literals. Integer arithmetic that leaves this range reports a runtime error instead of wrapping around; integer literals outside the range are rejected at compile time.
+
 ## Composite Types
 
 | Type | Description | Example |
@@ -22,6 +24,8 @@ Mas lang is statically typed — every value has a definite type.
 | `list<T>` | Dynamic array | `[1, 2, 3]` |
 | `map<K,V>` | Key-value dictionary | `{"a": 1}` |
 | `array<T,N>` | Fixed-length array | `array<int,3>(1,2,3)` |
+
+Use [`struct`](../data-structures/struct) to define your own composite types, and [`T?`](./nullable) to say that a value may also be `null`. For example `Person` is a person, while `Person?` is a person or nobody.
 
 ## Type Annotations
 
@@ -36,6 +40,8 @@ var user: map<string, int> = {"age": 18}
 var fixed: array<int, 3>
 ```
 
+Fixed-length arrays are the only type annotation that may omit the initial value; when it is omitted, every slot holds the zero value.
+
 ## Type Inference
 
 When an initial value is provided, the type annotation can be omitted:
@@ -47,9 +53,13 @@ var name = "Mas lang"  // inferred as string
 var items = [1, 2, 3]  // inferred as list<int>
 ```
 
+Empty lists and empty dictionaries have no element type to infer from, so they need an explicit annotation, for example `var items: list<int> = []` or `var table: map<string,int> = {}`.
+
 ## unit Type
 
-Functions without a return value have type `unit` (similar to void):
+A function without a `->` return annotation has return type `unit` (similar to void).
+
+`unit` exists only inside the type system and **cannot be written as a type annotation**: `func f() -> unit:` reports that `unit` is an unknown type. Simply omit `-> type`:
 
 ```mas-lang
 func greet(name: string):
@@ -59,5 +69,10 @@ func greet(name: string):
 
 ## Type Constraints
 
-- Container elements can only be primitive types (int, float, bool, string); nested containers are not supported
-- When mixing `int` and `float` in arithmetic, `int` is automatically promoted to `float`
+- Dynamic containers (`list` elements and `map` values) may hold primitives, structs, nullable values, lists, or dictionaries — **nesting is supported**, e.g. `list<list<int>>`, `map<string,list<int>>`
+- Dynamic containers cannot hold fixed-length arrays (`list<array<int,3>>` fails to compile); use nested lists when you need that shape
+- Fixed-array elements may be primitives, structs, nullable values, lists, dictionaries, or nested arrays, e.g. `array<array<int,2>,2>`
+- `map` keys support primitives or struct references only — no nullable keys and no container keys
+- When mixing `int` and `float` in arithmetic, `int` is promoted to `float`; a `float` is never truncated back into an `int`, so `var x: int = 1 + 2.5` is a type error
+- `<`, `<=`, `>`, and `>=` accept mixed `int` and `float` and keep full integer precision (`9223372036854775807 < 9223372036854775808.0` is `true`). If either side is NaN, all four comparisons return `false`
+- `==` and `!=` require both sides to have exactly the same type, and cannot be used on lists, dictionaries, fixed arrays, structs, or nullable values; a nullable value may only be compared with `null`. An `int` and a `float` cannot be compared directly with `==` — convert explicitly first

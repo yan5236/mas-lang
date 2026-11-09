@@ -19,7 +19,7 @@ Returns an RFC 3339 / ISO 8601 formatted UTC string with a fixed `+00:00` offset
 
 ```mas-lang
 var s: string = now_email_date()
-// example: "Fri, 30 May 2026 12:34:56 +0000"
+// example: "Sat, 30 May 2026 12:34:56 +0000"
 ```
 
 Returns an RFC 2822 formatted UTC string using English weekday and month abbreviations. Suitable for email and other legacy protocols.
@@ -28,7 +28,7 @@ Returns an RFC 2822 formatted UTC string using English weekday and month abbrevi
 
 ```mas-lang
 var s: string = now_http_date()
-// example: "Fri, 30 May 2026 12:34:56 GMT"
+// example: "Sat, 30 May 2026 12:34:56 GMT"
 ```
 
 Returns an RFC 7231 HTTP-date formatted UTC string with `GMT` timezone identifier. Suitable for HTTP headers such as `Date`, `Last-Modified`, and `Expires`.

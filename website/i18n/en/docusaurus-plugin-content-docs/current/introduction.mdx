@@ -25,7 +25,7 @@ fama run
 - **Type inference**: Type annotations can be omitted when the type can be inferred
 - **Python-like syntax**: Indentation-based blocks, no braces or semicolons
 - **Native compilation**: Compiles to machine code via LLVM, no runtime required
-- **Rich data structures**: list, map, array container types
+- **Rich data structures**: list, map, array, struct container types
 - **Module system**: File-based module organization with import/export
 
 ## Quick Start
@@ -38,4 +38,68 @@ cd hello
 fama run
 ```
 
-`src/main.ms` is the entry point. Write your code there and run `fama run` to see the output.
+`src/main.ms` is the entry point. Write your code there and run `fama run` to see the output. You can also run a single file directly with the compiler: `maslang run src/main.ms`.
+
+## Project Structure
+
+`fama new` generates this layout:
+
+```
+hello/
+├── settings.toml      # project configuration
+├── mod-lock.yml       # dependency lock file
+├── mod_module/        # installed dependency cache
+├── build/             # build artifacts
+└── src/
+    └── main.ms        # entry point
+```
+
+The key settings in `settings.toml`:
+
+```toml
+[project]
+name = "hello"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"   # entry file, relative to the project root
+output = "build"        # output directory; the artifact is named <name>.exe
+opt-level = 2           # optional, defaults to 2, only 0/1/2/3 are accepted
+```
+
+## Dependencies
+
+Add a local path dependency:
+
+```
+fama add ../mathlib
+fama install
+```
+
+`fama add` reads the dependency package's own `[project]` name and version and writes:
+
+```toml
+[dependencies]
+mathlib = { path = "../mathlib", version = "0.1.0" }
+```
+
+`fama install` installs the dependency into `mod_module/<name>@<version>/` and records it in `mod-lock.yml`. After that you can `import mathlib { ... }`. The `time` standard library ships as a package in the same form — see the [time standard library](./stdlib/time/overview).
+
+## Global Configuration
+
+`fama` reads `~/.fama/setting.toml` (or `setting.toml` in the directory pointed to by `FAMA_HOME`). If it contains:
+
+```toml
+[compiler]
+binary = "C:/tools/maslang.exe"
+```
+
+`fama` uses that external compiler instead of the built-in one. Without this setting the built-in compiler is used; if the configured path does not exist, `fama run` reports a missing required file right away.
+
+## Conventions for Code Snippets
+
+To keep the syntax in focus, the documentation often omits the `func main()` wrapper. In a real program:
+
+- Executable statements such as `print` must live inside a function body; top-level statements cannot call `print`
+- Top-level `var` and `const` declarations are globals; top-level assignments, `if`, `for`, and the like run in order before `main()`
+- An executable program must define a parameterless `func main()`

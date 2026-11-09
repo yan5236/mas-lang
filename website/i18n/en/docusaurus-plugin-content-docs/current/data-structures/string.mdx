@@ -26,6 +26,8 @@ func main():
     print("She said: \"Hello!\"\n")
 ```
 
+Only the four escapes above are supported; any other escape sequence (such as `\r` or `\0`) is a lexical error.
+
 ## Template Strings
 
 Use `${}` to interpolate expressions within strings:
@@ -38,12 +40,18 @@ func main():
     // output: Mas lang v1
 ```
 
-`${}` can contain arbitrary expressions:
+`${}` accepts arithmetic, comparisons, function calls, indexing, and method calls:
 
 ```mas-lang
 func main():
     print("result: ${1 + 2 * 3}")
 ```
+
+There are a few restrictions:
+
+- The interpolated value must convert to a primitive type (`int`, `float`, `bool`, `string`); lists, dictionaries, fixed arrays, structs, and nullable values cannot be interpolated directly — convert them yourself first
+- A double quote inside the interpolation must be written as `\"`, because the outer string is unescaped first, e.g. `print("${ \"a\" + \"b\" }")`
+- `${}` cannot be empty and cannot span lines
 
 ## String Methods
 
@@ -57,6 +65,16 @@ s.ends_with("d  ")    // true
 s.replace("World", "Mas lang")  // "  Hello Mas lang  "
 ```
 
+| Method | Parameters | Returns | Notes |
+|--------|------------|---------|-------|
+| `trim()` | none | `string` | Strips every Unicode whitespace character (space, tab, newline, ideographic space, etc.) from both ends; zero-width space is not stripped |
+| `contains(s)` | one `string` | `bool` | Whether the substring occurs; the empty string returns `true` |
+| `starts_with(s)` | one `string` | `bool` | Whether the string starts with the substring |
+| `ends_with(s)` | one `string` | `bool` | Whether the string ends with the substring |
+| `replace(from, to)` | two `string`s | `string` | Replaces **all** non-overlapping matches; an empty `from` returns the string unchanged |
+
+String methods also work directly on literals, e.g. `"  hi  ".trim()`.
+
 ## String Concatenation
 
 Use `+` for concatenation:
@@ -64,3 +82,7 @@ Use `+` for concatenation:
 ```mas-lang
 "Hello, " + "world"   // "Hello, world"
 ```
+
+## Indexing, Slicing, and Length
+
+Strings do not support index access or slicing — `s[0]` and `s[0:2]` both fail to compile. Use `len(s)` for the length; for substrings, test with `contains`, `starts_with`, or `ends_with`, or transform with `replace`.

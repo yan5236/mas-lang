@@ -59,7 +59,7 @@ if result != null:
     print(result.value.seconds)
 ```
 
-C 新建并返回对象时，使用编译器提供的 `native/include/mas_runtime.h`：
+C 新建并返回对象时，需要 `mas_runtime.h`。该头文件位于编译器源码树的 `crates/maslang/native/include/mas_runtime.h`，不会随编译器二进制自动安装；请把它复制到你的包内（例如 `native/include/`），并在 `[native] include` 中声明该目录：
 
 ```c
 #include "mas_runtime.h"
@@ -80,6 +80,8 @@ Time *native_time_find(uint8_t found) {
 ```
 
 这个 `Time` 只含数值，没有需要 GC 继续追踪的子引用，所以偏移表为空。C 也可以直接返回此前借入的托管对象，保留同一个对象的身份。不能返回局部变量地址、静态结构体地址或普通 `malloc` 分配的地址来充当 Mas lang 对象；返回边界会拒绝非托管对象，避免把不受管理的地址留在语言堆中。
+
+头文件还提供 `mas_runtime_abort(const char *message)`：C 侧遇到无法恢复的错误时调用它，会按运行时统一格式输出中文错误并以状态码 1 退出。
 
 ## 布局与所有权约定
 
@@ -119,16 +121,29 @@ NamedTime *native_named_time(void) {
 
 ## 接入工程
 
-把 C 源与 `mas_runtime.h` 放入包中，在 `settings.toml` 中配置现有原生源码链路：
+把 C 源与 `mas_runtime.h` 放入包中，在 `settings.toml` 中配置原生源码链路：
 
 ```toml
 [native]
 abi = 1
 include = ["native/include"]
-source_fallback = "explicit"
+source_fallback = "explicit"      # 只接受 explicit | never
 
 [native.sources]
-common = ["native/time.c"]
+common  = ["native/common/time_common.c"]
+windows = ["native/platform/windows/time_windows.c"]
+posix   = ["native/platform/posix/time_posix.c"]
+
+[native.prebuilt.x86_64-pc-windows-msvc]
+manifest = "native/artifacts/x86_64-pc-windows-msvc/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-pc-windows-msvc/time_common.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/time_windows.obj",
+]
 ```
 
-维护者可运行 `maslang build src/main.ms --allow-native-source-build`，由现有工具链编译 C 源并链接；分发仍沿用包的预编译产物流程。当前验证平台为 Windows x86_64 MSVC。此接口采用显式指针与薄封装，不自动适配任意 C 结构体的按值调用约定。
+`[native.sources]` 的 `common` 总会参与构建；目标为 Windows 时取 `windows`，否则取 `posix`。`[native.prebuilt.<target>]` 只需 `manifest` 与 `objects`，其中的清单必须记录包名、包版本、目标三元组、ABI 版本、源码与头文件指纹、对象文件列表；`stdlib/time/settings.toml` 是完整样例。
+
+普通调用方链接时使用包内的预编译对象；缺少当前目标的产物、清单不一致或 ABI 版本不匹配都会在链接前报错，且不会自动回退到源码编译。维护者可运行 `maslang build src/main.ms --allow-native-source-build`（或 `fama build --allow-native-source-build`）刷新产物，发布前再把 `native/artifacts/<target>/` 复制回标准库包。
+
+`stdlib/time` 的预编译对象覆盖 `x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、`x86_64-apple-darwin` 和 `aarch64-apple-darwin` 五个目标。仓库 CI 在 Linux x86_64/aarch64 与 macOS x86_64/arm64 上运行测试和 `time` 示例，暂不包含 Windows 任务；Windows 产物随包分发，可用本地 MSVC 工具链消费。此接口采用显式指针与薄封装，不自动适配任意 C 结构体的按值调用约定。

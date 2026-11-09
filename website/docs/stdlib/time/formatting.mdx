@@ -19,7 +19,7 @@ var s: string = now_utc()
 
 ```mas-lang
 var s: string = now_email_date()
-// 示例："Fri, 30 May 2026 12:34:56 +0000"
+// 示例："Sat, 30 May 2026 12:34:56 +0000"
 ```
 
 返回 RFC 2822 格式的 UTC 时间字符串，使用英文星期和月份缩写。适用于电子邮件等传统协议。
@@ -28,7 +28,7 @@ var s: string = now_email_date()
 
 ```mas-lang
 var s: string = now_http_date()
-// 示例："Fri, 30 May 2026 12:34:56 GMT"
+// 示例："Sat, 30 May 2026 12:34:56 GMT"
 ```
 
 返回 RFC 7231 定义的 HTTP-date 格式 UTC 时间字符串，时区标识为 `GMT`。适用于 HTTP 头部如 `Date`、`Last-Modified`、`Expires`。

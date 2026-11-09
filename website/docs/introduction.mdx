@@ -25,7 +25,7 @@ fama run
 - **类型推断**：变量声明时可省略类型标注，编译器自动推断
 - **Python 式语法**：缩进定义代码块，无需括号和分号
 - **原生编译**：基于 LLVM 编译为机器码，直接运行无需运行时环境
-- **丰富的数据结构**：list、map、array 等容器类型
+- **丰富的数据结构**：list、map、array、struct 等容器类型
 - **模块系统**：支持文件级模块组织、导入导出
 
 ## 快速上手
@@ -38,4 +38,68 @@ cd hello
 fama run
 ```
 
-`src/main.ms` 是程序入口，在此编写代码后执行 `fama run` 即可查看结果。
+`src/main.ms` 是程序入口，在此编写代码后执行 `fama run` 即可查看结果。也可以直接用编译器运行单个文件：`maslang run src/main.ms`。
+
+## 项目结构
+
+`fama new` 生成以下结构：
+
+```
+hello/
+├── settings.toml      # 项目配置
+├── mod-lock.yml       # 依赖锁定文件
+├── mod_module/        # 已安装的依赖缓存
+├── build/             # 构建产物
+└── src/
+    └── main.ms        # 程序入口
+```
+
+`settings.toml` 的关键配置：
+
+```toml
+[project]
+name = "hello"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"   # 入口文件，相对项目根
+output = "build"        # 输出目录，产物名为 <name>.exe
+opt-level = 2           # 可选，缺省 2，只接受 0/1/2/3
+```
+
+## 依赖
+
+添加本地路径依赖：
+
+```
+fama add ../mathlib
+fama install
+```
+
+`fama add` 会读取依赖包自己的 `[project]` 名称和版本，写入：
+
+```toml
+[dependencies]
+mathlib = { path = "../mathlib", version = "0.1.0" }
+```
+
+`fama install` 把依赖安装到 `mod_module/<name>@<version>/` 并写入 `mod-lock.yml`。之后就能 `import mathlib { ... }`。标准库 `time` 也以同样的包形式提供，详见 [time 标准库](./stdlib/time/overview)。
+
+## 全局配置
+
+`fama` 会读取 `~/.fama/setting.toml`（或 `FAMA_HOME` 指向目录下的 `setting.toml`）。如果配置了：
+
+```toml
+[compiler]
+binary = "C:/tools/maslang.exe"
+```
+
+`fama` 会改用这个外部编译器，而不是内置编译器。没有该配置时使用内置编译器；如果配置路径不存在，`fama run` 会直接报“缺少必需文件”。
+
+## 代码片段约定
+
+文档为了突出语法，常省略 `func main()` 包装。实际程序中：
+
+- `print` 等可执行语句必须写在函数体内，顶层语句不能调用 `print`
+- 顶层的 `var`、`const` 是全局变量；顶层赋值、`if`、`for` 等会在 `main()` 之前按顺序执行
+- 可执行程序必须定义无参数的 `func main()`

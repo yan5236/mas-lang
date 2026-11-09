@@ -6,13 +6,24 @@ sidebar_position: 1
 
 `time` 模块提供墙钟时间获取与单调时钟计时功能，包含 7 个公开函数。
 
+## 安装
+
+`time` 以包的形式随仓库提供（`stdlib/time`），不是编译器内置模块。需要在项目的 `settings.toml` 中声明依赖并安装：
+
+```toml
+[dependencies]
+time = { path = "../../../stdlib/time", version = "0.1.0" }
+```
+
+然后执行 `fama install`（已安装到 `mod_module/time@0.1.0/` 后无需重复安装）。完整示例见 `examples/projects/time-api`。
+
 ## 导入
 
 ```mas-lang
 import time { unix_seconds, now_utc, monotonic_millis, sleep }
 ```
 
-按需导入所需函数。`time` 为标准库模块，无需额外依赖。
+按需导入所需函数。
 
 ## 函数一览
 
@@ -29,5 +40,5 @@ import time { unix_seconds, now_utc, monotonic_millis, sleep }
 ## 注意事项
 
 - 所有墙钟时间函数均返回 **UTC 时间**，不提供本地时区转换
-- `monotonic_millis` 的起点是系统启动时间，不可与墙钟时间混用
-- `sleep` 传入负数会导致运行时错误
+- `monotonic_millis` 的起点是系统启动时间，不可与墙钟时间混用；Windows 上使用系统计数，分辨率约为 15.6 毫秒，测量很短的时间差时可能出现 0 或 16 毫秒的跳变
+- `sleep` 传入负数会导致运行时错误并以状态码 1 退出

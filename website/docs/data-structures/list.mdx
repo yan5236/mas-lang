@@ -14,6 +14,8 @@ var names: list<string> = ["a", "b"]
 var empty: list<int> = []
 ```
 
+空列表 `[]` 没有可推断的元素类型，必须放在显式 `list<T>` 标注或参数类型上下文中。列表也支持嵌套，例如 `var rows: list<list<int>> = [[], [1, 2]]`；动态列表里不能放固定数组（`list<array<int,3>>` 会编译失败）。
+
 ## 索引访问
 
 索引从 0 开始：
@@ -24,6 +26,8 @@ list[0]   // 10
 list[2]   // 30
 ```
 
+负数和超出范围的下标会报告运行时错误并以状态码 1 退出。
+
 ## 切片
 
 ```mas-lang
@@ -33,7 +37,7 @@ list[:3]    // [1, 2, 3]
 list[2:]    // [3, 4, 5]
 ```
 
-切片范围左闭右开。
+切片范围左闭右开；负数或越界范围会报告运行时错误，不支持步长。切片会复制元素槽位（得到新的列表），但结构体、列表和字典元素仍共享原对象引用。
 
 ## 列表方法
 
@@ -41,25 +45,47 @@ list[2:]    // [3, 4, 5]
 var list = [1, 2, 3]
 
 list.append(4)              // [1, 2, 3, 4]
-list.remove(2)              // [1, 3, 4]
+list.remove(2)              // 删除第一个 2，list 变为 [1, 3, 4]
 list.pop()                  // 返回 4，list 变为 [1, 3]
 list.pop(0)                 // 返回 1，list 变为 [3]
-list.sort()                 // 排序
-list.reverse()              // 反转
-list.index(3)               // 返回元素索引（不存在时报错）
+list.sort()                 // 原地排序
+list.reverse()              // 原地反转
+list.index(3)               // 返回元素下标
 list.contains(3)            // true
 len(list)                   // 长度
 ```
 
+| 方法 | 返回 | 说明 |
+|------|------|------|
+| `append(v)` | 无 | 追加到末尾 |
+| `remove(v)` | 无 | 删除第一个等于 `v` 的元素；不存在时报运行时错误 |
+| `pop()` | 元素类型 | 删除并返回最后一个元素；空列表报运行时错误 |
+| `pop(i)` | 元素类型 | 删除并返回下标 `i` 的元素；越界报运行时错误 |
+| `sort()` | 无 | 原地升序排序，见下文规则 |
+| `reverse()` | 无 | 原地反转，不要求元素可比较 |
+| `index(v)` | `int` | 返回第一个匹配元素的下标；不存在时报运行时错误 |
+| `contains(v)` | `bool` | 是否包含元素 |
+| `len(list)` | `int` | 元素个数 |
+
+`sort()` 只支持元素全部为 `int`、`float`、`bool` 或 `string` 的列表：`bool` 按 `false < true`，`string` 按 UTF-8 字节序（区分大小写），`float` 含 NaN 时顺序未定义。结构体列表和可空元素列表不支持 `sort()`，但支持 `reverse()`。
+
 ## 遍历
 
 ```mas-lang
-for item in list:
+var items = ["苹果", "香蕉", "橙子"]
+for item in items:
     print(item)
+```
+
+遍历列表只能声明一个循环变量；第二个变量会报错。只要下标时用范围循环：
+
+```mas-lang
+for i in 0..len(items):
+    print(items[i])
 ```
 
 ## 结构体元素
 
 可以用 `list<Person>` 存储已经定义的 `Person` 结构体，也可以用 `[Person(...)]` 推断类型。支持追加、下标读写、遍历、切片、弹出和反转；元素共享对象引用。`contains/index/remove` 按对象引用匹配，`sort()` 不支持结构体元素。完整示例见[结构体列表](./struct#用列表管理多个结构体)。
 
-可空基础元素的 `contains/index/remove` 按内容匹配（两个 `null` 相同），结构体和容器按对象引用匹配。`sort()` 仅支持非可空基础元素。嵌套空列表需要上下文，例如 `var rows: list<list<int>> = [[], [1, 2]]`。固定数组是内联值，目前不能直接作为动态列表元素；这类场景使用嵌套列表。
+可空基础元素的 `contains/index/remove` 按内容匹配（两个 `null` 相同），结构体和容器按对象引用匹配。`sort()` 仅支持非可空基础元素。固定数组是内联值，不能直接作为动态列表元素；这类场景使用嵌套列表。

@@ -13,9 +13,13 @@ sidebar_position: 3
 | `*` | Multiplication | `3 * 2` → `6` |
 | `/` | Division (returns float) | `6 / 2` → `3.0` |
 | `%` | Modulo (int only) | `7 % 3` → `1` |
-| `%/%` | Integer division | `7 %/% 2` → `3` |
+| `%/%` | Integer division (int only) | `7 %/% 2` → `3` |
 
-`/` always returns `float`. `%` and `%/%` only work with `int` operands.
+`/` always returns `float`, even when both operands are integers. `%` and `%/%` only work with `int` operands.
+
+Integer addition, subtraction, multiplication, and negation are overflow-checked, including compound assignment. Divisions by zero in `%/%` and `%`, or operands of the minimum integer and `-1`, report a runtime error with a source location and exit with status code 1. Integer division truncates toward zero and the remainder takes the sign of the dividend, e.g. `-7 %/% 3` is `-2` and `-7 % 3` is `-1`.
+
+`/` keeps floating-point semantics: dividing by zero can produce infinity or NaN.
 
 ## Comparison Operators
 
@@ -28,7 +32,13 @@ sidebar_position: 3
 | `>` | Greater than |
 | `>=` | Greater or equal |
 
-Comparisons return `bool`. `<`, `<=`, `>`, `>=` are for numeric types only (int, float).
+Comparisons return `bool`.
+
+- `<`, `<=`, `>`, `>=` are for numeric types only (`int`, `float`), accept a mix of the two, and keep full integer precision
+- `==` and `!=` require exactly the same type on both sides and support `int`, `float`, `bool`, `string`; lists, dictionaries, fixed arrays, structs, and nullable values cannot be compared with `==` directly (a nullable value may only be compared with `null`), and `int` cannot be compared with `float` using `==`
+- Comparisons are left-associative and chained comparison is not supported: `1 < 2 < 3` parses as `(1 < 2) < 3` and is a type error
+
+NaN compares `false` for `==` against any float value (including itself) and `true` for `!=`; `<`, `<=`, `>`, `>=` all return `false` when either side is NaN. Positive and negative zero compare equal.
 
 ## Logical Operators
 
@@ -38,12 +48,14 @@ true or false    // true
 not true         // false
 ```
 
-`and` and `or` support short-circuit evaluation:
+`and` and `or` accept only `bool` operands and support short-circuit evaluation:
 
 ```mas-lang
 if x != 0 and y / x > 1 :  // y / x is not evaluated when x == 0
     print("ok")
 ```
+
+`not` binds tighter than comparison, so `not a == b` parses as `(not a) == b`; write `not (a == b)` to mean "a is not equal to b".
 
 ## String Concatenation
 
@@ -52,6 +64,8 @@ if x != 0 and y / x > 1 :  // y / x is not evaluated when x == 0
 ```mas-lang
 "Hello, " + "world"   // "Hello, world"
 ```
+
+Both sides of `+` must be `string`; a string and a number cannot be added directly — convert with `string()` first.
 
 ## Operator Precedence
 
@@ -66,4 +80,4 @@ From lowest to highest:
 7. unary `-`, `not`
 8. call `()`, index `[]`, member `.`, slice `[:]`
 
-Use parentheses `()` to change evaluation order.
+Use parentheses `()` to change evaluation order. `..` is only used for `for` ranges and takes no part in expression precedence — see [operator precedence](../appendix/operator-precedence) for details.

@@ -32,19 +32,43 @@ if result.ok:
     print(result.value)   // true
 ```
 
+`try_bool(string)` accepts only the exact lowercase strings `"true"` and `"false"`; forms such as `"TRUE"` yield `ok=false`.
+
 ## Return Type
 
-Safe conversion functions return `SafeConvertResult<T>`, which has two fields:
+Safe conversion functions return an internal result value (shown as `try_result<T>` in diagnostics) with two read-only properties:
 
-| Field | Type | Description |
-|-------|------|-------------|
+| Property | Type | Description |
+|----------|------|-------------|
 | `.ok` | bool | Whether the conversion succeeded |
 | `.value` | T | The converted value (only valid when ok is true) |
 
+On failure `.value` is a harmless placeholder: `0` for `try_int`, `0.0` for `try_float`, `false` for `try_bool`. Check `.ok` first and never rely on the failed content.
+
 `try_string()` does not exist because string conversion almost never fails.
 
-Conversions from non-string types (e.g., `try_int(true)`) always succeed:
+## Input Types and Rules
+
+`try_int`, `try_float`, and `try_bool` all accept primitive types (`int`, `float`, `bool`, `string`) and reject containers, structs, and nullable values.
+
+- `try_int` accepts integers, booleans, strings, and floats. Integer and boolean conversions always succeed; a string must be a pure decimal integer with no whitespace trimming: `try_int(" 12")` has `ok` `false`
+- `try_float` string parsing accepts decimal and exponent notation, and `"inf"` and `"nan"` count as valid floats (`ok=true`)
+- `try_int(float)` checks the range first and then truncates the fractional part toward zero. NaN, positive and negative infinity, and values below `-9223372036854775808.0` or at or above `9223372036854775808.0` return `ok=false` with `value` `0`
+
+`int(float)` uses the same range check and, on failure, reports a runtime error with a source location and exits with status code 1; a failed `int(string)` parse carries no source location.
+
+For example:
 
 ```mas-lang
 var result = try_int(true)   // result.ok == true, result.value == 1
 ```
+
+```mas-lang
+var huge = try_int(float("1e20"))
+func main():
+    print(huge.ok)      // false
+    var small = try_int(-3.9)
+    print(small.value)  // -3
+```
+
+Float-to-integer conversion checks the value after it has already been rounded to a 64-bit float, so the usable range is `[-2^63, 2^63)`. For instance `-9223372036854776000.0` and `-9223372036854775809.0` both round to exactly `-2^63` first and therefore convert successfully, while the genuinely smaller neighbouring value `-9223372036854777856.0` fails. `9223372036854775807.0` rounds to `2^63` and therefore fails. When you need the exact decimal integer, use an integer literal or `try_int("...")` rather than going through `float`.

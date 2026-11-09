@@ -6,13 +6,15 @@ sidebar_position: 2
 
 ## Type and Literals
 
-`list<T>` is a dynamic array storing elements of the same type:
+`list<T>` is a dynamic array; it stores same-typed primitives, structs, nullable values, lists, or dictionaries:
 
 ```mas-lang
 var list = [1, 2, 3, 4]           // list<int>
 var names: list<string> = ["a", "b"]
 var empty: list<int> = []
 ```
+
+An empty list `[]` has no element type to infer, so it must appear in an explicit `list<T>` annotation or a parameter type context. Lists can also be nested, e.g. `var rows: list<list<int>> = [[], [1, 2]]`; a dynamic list cannot hold fixed arrays (`list<array<int,3>>` fails to compile).
 
 ## Indexing
 
@@ -24,6 +26,8 @@ list[0]   // 10
 list[2]   // 30
 ```
 
+A negative or out-of-range index reports a runtime error and exits with status code 1.
+
 ## Slicing
 
 ```mas-lang
@@ -33,7 +37,7 @@ list[:3]    // [1, 2, 3]
 list[2:]    // [3, 4, 5]
 ```
 
-Slice ranges are half-open (start inclusive, end exclusive).
+Slice ranges are half-open (start inclusive, end exclusive); a negative or out-of-range range reports a runtime error, and a step is not supported. Slicing copies the element slots into a new list, but struct, list, and dictionary elements still share the original object references.
 
 ## List Methods
 
@@ -41,19 +45,47 @@ Slice ranges are half-open (start inclusive, end exclusive).
 var list = [1, 2, 3]
 
 list.append(4)              // [1, 2, 3, 4]
-list.remove(2)              // [1, 3, 4]
+list.remove(2)              // removes the first 2, list is [1, 3, 4]
 list.pop()                  // returns 4, list is [1, 3]
 list.pop(0)                 // returns 1, list is [3]
 list.sort()                 // sort in place
 list.reverse()              // reverse in place
-list.index(3)               // returns index (error if not found)
+list.index(3)               // returns the element index
 list.contains(3)            // true
 len(list)                   // length
 ```
 
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `append(v)` | nothing | Appends to the end |
+| `remove(v)` | nothing | Removes the first element equal to `v`; reports a runtime error if absent |
+| `pop()` | element type | Removes and returns the last element; an empty list reports a runtime error |
+| `pop(i)` | element type | Removes and returns the element at index `i`; out of range reports a runtime error |
+| `sort()` | nothing | Sorts ascending in place, following the rules below |
+| `reverse()` | nothing | Reverses in place; elements need not be comparable |
+| `index(v)` | `int` | Returns the index of the first match; reports a runtime error if absent |
+| `contains(v)` | `bool` | Whether the element is present |
+| `len(list)` | `int` | Element count |
+
+`sort()` only supports lists whose elements are all `int`, `float`, `bool`, or `string`: `bool` sorts `false < true`, `string` sorts by UTF-8 byte order (case-sensitive), and the order is undefined for `float` values that include NaN. Lists of structs and lists of nullable elements do not support `sort()`, but they do support `reverse()`.
+
 ## Iteration
 
 ```mas-lang
-for item in list:
+var items = ["apple", "banana", "orange"]
+for item in items:
     print(item)
 ```
+
+List iteration takes exactly one loop variable; a second variable is an error. Use a range loop when you only need the indices:
+
+```mas-lang
+for i in 0..len(items):
+    print(items[i])
+```
+
+## Struct Elements
+
+`list<Person>` can store a `Person` struct you already defined, and `[Person(...)]` infers the type. Lists support appending, index reads and writes, iteration, slicing, popping, and reversing; elements share object references. `contains/index/remove` match by object reference, and `sort()` does not support struct elements. See [structs](./struct) for a complete example.
+
+`contains/index/remove` match nullable primitive elements by content (two `null` values are the same), while structs and containers match by object reference. `sort()` only supports non-nullable primitive elements. Fixed arrays are inline values and cannot currently be list elements; use nested lists for that shape.

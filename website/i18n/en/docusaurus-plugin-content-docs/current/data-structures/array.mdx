@@ -12,11 +12,15 @@ sidebar_position: 4
 var arr: array<int, 3>
 ```
 
+When the initializer is omitted, every slot holds the zero value (numeric `0`, `false` for `bool`, empty for references and strings).
+
 ## Initialization
 
 ```mas-lang
 var arr = array<int, 3>(1, 2, 3)
 ```
+
+The initializer must supply exactly N elements, each matching the declared element type.
 
 ## Index Access
 
@@ -25,19 +29,52 @@ arr[0]   // 1
 arr[2]   // 3
 ```
 
+Valid indices are `0 <= index < N`. A negative or out-of-range index (for either read or write) reports a runtime error with a source location and exits with status code 1 — it never returns arbitrary memory.
+
 ## Difference from List
 
 | Feature | list | array |
 |---------|------|-------|
-| Length | Dynamic | Fixed at compile time |
+| Length | Grows dynamically | Fixed at compile time |
 | Methods | append, remove, pop, etc. | No add/remove methods |
-| Storage | Heap | Stack |
-| Iteration | Supported | Supported |
+| Storage | Heap-allocated, shared handle | Inline value; local arrays live in the stack frame |
+| Iteration | `for-in` supported | No `for-in`; use an index range loop |
+| Slicing | Supported | Not supported |
 
 ```mas-lang
 var arr = array<int, 3>(1, 2, 3)
 len(arr)          // 3
 
-for item in arr:
-    print(item)
+for i in 0..len(arr):
+    print(arr[i])
 ```
+
+`0..len(arr)` is a half-open range that covers every index exactly. `for i in 0..3:` works as well.
+
+## Structs and Nullable Elements
+
+```mas-lang
+struct Person:
+    name: string
+
+var people = array<Person?,2>(Person("Alice"), null)
+func main():
+    people[1] = Person("Bob")
+    print(people[1].value.name)
+```
+
+Array elements may be primitives, structs, nullable values, lists, dictionaries, or nested arrays, e.g. `array<list<int>,2>`, `array<array<int,2>,2>`. When initializing nested arrays, spell out the inner arrays:
+
+```mas-lang
+var grid = array<array<int, 2>, 2>(array<int, 2>(1, 2), array<int, 2>(3, 4))
+```
+
+Array assignment copies the array slots; struct, list, and dictionary elements still share object references. A nested index assignment writes back into the original array position:
+
+```mas-lang
+var grid = array<array<int, 2>, 2>(array<int, 2>(1, 2), array<int, 2>(3, 4))
+grid[0][1] = 9
+print(grid[0][1]) // 9
+```
+
+A fixed array is an inline value and cannot be placed directly inside a list or as a map value; use a list when you need a dynamic container.

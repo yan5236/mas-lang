@@ -29,6 +29,18 @@ const MAX_SIZE: int = 100
 
 Constants must be initialized at declaration.
 
+`const` only prevents rebinding the name — it does not freeze the object the name points to. Fields and elements of reference types such as structs, lists, and dictionaries stay mutable:
+
+```mas-lang
+struct Person:
+    name: string
+    age: int
+
+const user = Person("Alice", 18)
+user.age = 19      // allowed: this changes a field of the object
+// user = Person("Bob", 20)  // error: a constant cannot be rebound
+```
+
 ## Compound Assignment
 
 ```mas-lang
@@ -36,13 +48,24 @@ var a = 10
 a += 5    // a = 15
 a -= 3    // a = 12
 a *= 2    // a = 24
-a /= 4    // a = 6
-a %= 3    // a = 0
+a %= 5    // a = 4
+```
+
+Integer compound assignment is overflow-checked as well; on failure it reports a runtime error with a source location.
+
+`/` always returns `float`, so `/=` only applies to `float` variables:
+
+```mas-lang
+var ratio = 10.0
+ratio /= 4     // ratio = 2.5
+
+// var count = 10
+// count /= 4  // error: the result 2.5 is a float and cannot be assigned back to an int variable
 ```
 
 ## Index Assignment
 
-Assign values to elements in lists and maps:
+Assign values to elements of lists, fixed arrays, and dictionaries:
 
 ```mas-lang
 var list = [1, 2, 3]
@@ -50,6 +73,29 @@ list[0] = 10       // list becomes [10, 2, 3]
 
 var map = {"name": "Alice"}
 map["name"] = "Bob"
+
+var fixed = array<int, 3>(1, 2, 3)
+fixed[1] = 20
 ```
 
 Index assignment does not support compound operators (e.g., `list[0] += 1` is invalid).
+
+## Top-Level Statements and the Program Entry Point
+
+An executable program must define a parameterless `func main()`. Statements written outside functions and `if` blocks are top-level statements:
+
+- A top-level `var` or `const` is a global; it can be read anywhere, and a `var` can also be assigned inside functions
+- Top-level assignments, `if`, `while`, `for`, and function calls run before `main()`, in source order
+- Top-level statements cannot call `print`: `print` is only available inside a function body
+
+```mas-lang
+var total = 0
+
+for i in 0..3:
+    total += i      // runs before main
+
+func main():
+    print(total)    // 3
+```
+
+Code snippets throughout this documentation often omit the `func main()` wrapper; wrapping the executable statements in a function gives you a complete program.

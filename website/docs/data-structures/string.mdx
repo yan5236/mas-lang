@@ -26,6 +26,8 @@ func main():
     print("她说：\"你好！\"\n")
 ```
 
+仅支持上表四种转义；其他转义序列（如 `\r`、`\0`）会触发词法错误。
+
 ## 模板字符串
 
 使用 `${}` 在字符串中插值表达式：
@@ -38,12 +40,18 @@ func main():
     // 输出：Mas lang v1
 ```
 
-`${}` 中可以包含任意表达式：
+`${}` 里可以写算术、比较、函数调用、下标、方法调用等表达式：
 
 ```mas-lang
 func main():
     print("结果：${1 + 2 * 3}")
 ```
+
+但有几点限制：
+
+- 插值结果必须先能转成基础类型（`int`、`float`、`bool`、`string`）；列表、字典、固定数组、结构体和可空值不能直接插值，需要先自行转换
+- 插值里如果出现双引号，必须写成 `\"`，因为外层字符串会先完成转义，例如 `print("${ \"a\" + \"b\" }")`
+- `${}` 不能为空，也不能跨行
 
 ## 字符串方法
 
@@ -57,6 +65,16 @@ s.ends_with("d  ")    // true
 s.replace("World", "Mas lang")  // "  Hello Mas lang  "
 ```
 
+| 方法 | 参数 | 返回 | 说明 |
+|------|------|------|------|
+| `trim()` | 无 | `string` | 去除两端所有 Unicode 空白字符（空格、制表、换行、全角空格等），不去除零宽空格 |
+| `contains(s)` | 一个 `string` | `bool` | 是否包含子串；空串返回 `true` |
+| `starts_with(s)` | 一个 `string` | `bool` | 是否以子串开头 |
+| `ends_with(s)` | 一个 `string` | `bool` | 是否以子串结尾 |
+| `replace(from, to)` | 两个 `string` | `string` | 替换**全部**非重叠匹配；`from` 为空串时原样返回 |
+
+字符串方法也可以直接用在字面量上，例如 `"  hi  ".trim()`。
+
 ## 字符串拼接
 
 使用 `+` 拼接字符串：
@@ -64,3 +82,7 @@ s.replace("World", "Mas lang")  // "  Hello Mas lang  "
 ```mas-lang
 "Hello, " + "world"   // "Hello, world"
 ```
+
+## 索引、切片与长度
+
+字符串不支持下标访问和切片，`s[0]`、`s[0:2]` 都会编译失败。取长度使用 `len(s)`；需要子串时可用 `contains`、`starts_with`、`ends_with` 判断，或用 `replace` 做替换。

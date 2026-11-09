@@ -6,13 +6,24 @@ sidebar_position: 1
 
 The `time` module provides wall-clock time retrieval and monotonic clock timing, with 7 public functions.
 
+## Installation
+
+`time` ships with the repository as a package (`stdlib/time`); it is not a compiler built-in module. Declare the dependency in your project's `settings.toml` and install it:
+
+```toml
+[dependencies]
+time = { path = "../../../stdlib/time", version = "0.1.0" }
+```
+
+Then run `fama install` (no need to reinstall once it is present in `mod_module/time@0.1.0/`). See `examples/projects/time-api` for a complete example.
+
 ## Import
 
 ```mas-lang
 import time { unix_seconds, now_utc, monotonic_millis, sleep }
 ```
 
-Import only the functions you need. `time` is a standard library module with no additional dependencies.
+Import only the functions you need.
 
 ## Function Overview
 
@@ -29,5 +40,5 @@ Import only the functions you need. `time` is a standard library module with no 
 ## Notes
 
 - All wall-clock functions return **UTC time**; local timezone conversion is not provided
-- `monotonic_millis` starts at system boot, not the Unix epoch — do not mix with wall-clock time
-- `sleep` with a negative value causes a runtime error
+- `monotonic_millis` starts at system boot, not the Unix epoch — do not mix with wall-clock time. On Windows it uses the system tick counter with a resolution of about 15.6 ms, so measuring very short intervals can jump by 0 or 16 ms
+- `sleep` with a negative value causes a runtime error and exits with status code 1

@@ -29,6 +29,18 @@ const MAX_SIZE: int = 100
 
 常量声明时必须提供初始值。
 
+`const` 只禁止重新绑定这个名字，不冻结它指向的对象。结构体、列表、字典等引用类型的字段或元素仍可修改：
+
+```mas-lang
+struct Person:
+    name: string
+    age: int
+
+const user = Person("小明", 18)
+user.age = 19      // 允许：修改的是对象字段
+// user = Person("小红", 20)  // 错误：不能重新绑定常量
+```
+
 ## 复合赋值运算符
 
 支持以下复合赋值操作：
@@ -38,13 +50,24 @@ var a = 10
 a += 5    // a = 15
 a -= 3    // a = 12
 a *= 2    // a = 24
-a /= 4    // a = 6
-a %= 3    // a = 0
+a %= 5    // a = 4
+```
+
+整数复合赋值同样做溢出检查，失败时报告带源码位置的运行时错误。
+
+`/` 总是返回 `float`，所以 `/=` 只能用于 `float` 变量：
+
+```mas-lang
+var ratio = 10.0
+ratio /= 4     // ratio = 2.5
+
+// var count = 10
+// count /= 4  // 错误：结果 2.5 是 float，不能赋回 int 变量
 ```
 
 ## 索引赋值
 
-对列表和字典的元素进行赋值：
+对列表、固定数组和字典的元素进行赋值：
 
 ```mas-lang
 var list = [1, 2, 3]
@@ -52,6 +75,29 @@ list[0] = 10       // list 变为 [10, 2, 3]
 
 var map = {"name": "张三"}
 map["name"] = "李四"
+
+var fixed = array<int, 3>(1, 2, 3)
+fixed[1] = 20
 ```
 
 索引赋值不支持复合运算符（如 `list[0] += 1` 是错误的）。
+
+## 顶层语句与程序入口
+
+可执行程序必须定义无参数的 `func main()`。写在函数和 `if` 之外的语句是顶层语句：
+
+- 顶层 `var`、`const` 是全局变量，函数内外都可以读取；`var` 还可以在函数内赋值
+- 顶层的赋值、`if`、`while`、`for` 和函数调用会在 `main()` 之前按源码顺序执行
+- 顶层语句不能调用 `print`：`print` 只能在函数体内使用
+
+```mas-lang
+var total = 0
+
+for i in 0..3:
+    total += i      // 在 main 之前执行
+
+func main():
+    print(total)    // 3
+```
+
+文档中的代码片段常省略 `func main()` 包装；把可执行语句放进函数里才是完整的程序。

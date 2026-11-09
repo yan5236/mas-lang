@@ -15,6 +15,12 @@ pub func add(a: int, b: int) -> int:
 pub const VERSION = "1.0"
 
 pub var debug_mode = false
+
+pub struct Point:
+    x: int
+    y: int
+
+pub extern func host_now() -> int
 ```
 
 私有声明只能在当前模块中使用：
@@ -24,6 +30,8 @@ const INTERNAL_KEY = "secret"    // 不可被其他模块导入
 func helper():                    // 不可被其他模块导入
     print("内部辅助函数")
 ```
+
+`pub extern func` 导出后，导入方按原生符号名调用；结构体字段不需要单独加 `pub`，能够使用这个类型就能访问其字段。
 
 ## export import — 重新导出
 
@@ -39,6 +47,17 @@ export import utils.string { trim }
 ```mas-lang
 import utils { add, trim }
 ```
+
+重导出同样支持换行、尾逗号和成员别名：
+
+```mas-lang
+export import utils.math {
+    add as plus,
+    sub,
+}
+```
+
+重导出不能给模块起别名：`export import utils.math as m { add }` 会被语法拒绝；别名只能加在成员上（`add as plus`）。
 
 ## 循环依赖
 
