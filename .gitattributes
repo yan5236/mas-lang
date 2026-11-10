@@ -1,3 +1,5 @@
 # 原生分发清单按源码字节校验，固定换行以保持检出的指纹一致。
 /stdlib/time/native/**/*.c text eol=lf
 /stdlib/time/native/**/*.h text eol=lf
+
+*.ms linguist-language=mas
