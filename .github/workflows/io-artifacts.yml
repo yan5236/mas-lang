@@ -56,6 +56,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/llvm"
           tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP/llvm" --strip-components=1
           echo "LLVM_SYS_191_PREFIX=$RUNNER_TEMP/llvm" >> "$GITHUB_ENV"
+          # 官方 tarball 的 LLVM 静态库引用 libc++abi 的符号，Rust 链接器不会自动带。
+          echo "RUSTFLAGS=-C link-arg=-lc++ -C link-arg=-lc++abi" >> "$GITHUB_ENV"
       - name: Reinstall the io dependency
         run: |
           rm -rf examples/projects/io-api/mod_module
