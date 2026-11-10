@@ -48,17 +48,16 @@ jobs:
       - name: Install LLVM on Intel macOS
         if: runner.os == 'macOS' && runner.arch == 'X64'
         run: |
-          # Homebrew 不再为 Intel macOS 提供 llvm@19 bottle，MacPorts 的二进制镜像
-          # 曾出现缺包（libffi 404）。这里直接使用 LLVM 官方发布的 X64 产物。
+          # Intel macOS 没有 Homebrew 的 llvm@19 bottle；MacPorts 二进制镜像当前缺少
+          # 新版 libffi（archive 404），先源码编译 libffi，再装 llvm-19 的二进制包。
+          pkg="$RUNNER_TEMP/macports.pkg"
           curl --fail --silent --show-error --location --retry 3 \
-            https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-macOS-X64.tar.xz \
-            -o "$RUNNER_TEMP/llvm.tar.xz"
-          mkdir -p "$RUNNER_TEMP/llvm"
-          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP/llvm" --strip-components=1
-          echo "LLVM_SYS_191_PREFIX=$RUNNER_TEMP/llvm" >> "$GITHUB_ENV"
-          # 官方 tarball 的 LLVM 静态库引用 libc++abi 的符号，Rust 链接器不会自动带；
-          # 这些 dylib 用 @rpath 安装名，需要把 tarball 的 lib 目录写进 rpath。
-          echo "RUSTFLAGS=-C link-arg=-lc++ -C link-arg=-lc++abi -C link-arg=-Wl,-rpath,$RUNNER_TEMP/llvm/lib" >> "$GITHUB_ENV"
+            https://distfiles.macports.org/MacPorts/MacPorts-2.12.7-15-Sequoia.pkg \
+            -o "$pkg"
+          sudo installer -pkg "$pkg" -target /
+          sudo /opt/local/bin/port -N -s install libffi
+          sudo /opt/local/bin/port -N -b install llvm-19
+          echo "LLVM_SYS_191_PREFIX=/opt/local/libexec/llvm-19" >> "$GITHUB_ENV"
       - name: Reinstall the io dependency
         run: |
           rm -rf examples/projects/io-api/mod_module
