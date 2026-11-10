@@ -72,3 +72,37 @@ fn strict_print_reports_language_error_instead_of_panic() {
     assert!(stderr.contains("无法写入标准输出"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
+
+/// 标准输出与标准错误同时断开时，严格 `print` 的诊断出口仍按状态码 1 退出；
+/// 诊断写入失败被忽略，不能因为 `eprintln!` 失败再次 panic 或返回异常状态码。
+#[test]
+fn strict_print_exits_with_status_one_when_both_streams_are_closed() {
+    let (_workspace, binary) = build(
+        "func main():\n    var count = 0\n    while count < 100000:\n        print(\"0123456789\")\n        count += 1\n",
+    );
+    let mut child = Command::new(binary)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    drop(child.stderr.take());
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+}
+
+/// 带源码位置的运行时诊断（整数除零）在两个管道都断开时同样按状态码 1 退出，
+/// 覆盖 `abort_runtime_at` 的尽力写入路径。
+#[test]
+fn source_located_diagnostic_exits_with_status_one_when_both_streams_are_closed() {
+    let (_workspace, binary) = build("func main():\n    var zero = 0\n    print(1 %/% zero)\n");
+    let mut child = Command::new(binary)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    drop(child.stderr.take());
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+}

@@ -86,7 +86,7 @@ When `ok` is `false`, `value` holds a harmless placeholder (`0` or the empty str
 | `6` | Blocking wait failure | `try_sleep` |
 | `7` | Monotonic clock read failure | `try_monotonic_millis` |
 
-On a non-zero code the strict functions call the internal `mas_time_fail(code)`, which prints the same Chinese `运行时错误: ...` message as version 0.1.0 and exits with status code `1`.
+On a non-zero code the strict functions call the internal `mas_time_fail(code)`: they still print a Chinese `运行时错误: ...` message and exit with status code `1`, but the text is consolidated per error code (for example, all three date-format failures report “无法格式化时间字符串” and Windows timer failures report “阻塞等待失败”). It is no longer byte-for-byte identical to 0.1.0, so log matchers that relied on the old wording need updating.
 
 ## Prebuilt Native ABI
 

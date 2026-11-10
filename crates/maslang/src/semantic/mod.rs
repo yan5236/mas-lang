@@ -14,6 +14,7 @@ mod statements;
 mod tests;
 mod types;
 
+pub(crate) use self::containers::ARRAY_TRY_SET_STORAGE_HINT;
 pub use self::types::{FunctionSignature, ValueType};
 
 use self::types::SymbolInfo;

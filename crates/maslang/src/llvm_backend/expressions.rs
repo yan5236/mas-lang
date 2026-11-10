@@ -322,6 +322,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 编译安全转换结果上的 `ok/value` 属性访问，并从聚合结构中提取目标字段。
+    /// 没有安全零值占位的载荷（结构体、列表、字典、含托管元素的数组）在读取 `.value` 前
+    /// 检查 `.ok`，失败时报告带源码位置的受控语言诊断，而不是把空引用交给运行时。
     fn compile_property_access(
         &mut self,
         target: &Expr,
@@ -358,10 +360,18 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     .into_int_value()
                     .into(),
             },
-            PropertyName::Value => TypedValue {
-                value_type: value_type.as_ref().clone(),
-                value: self.extract_string_part(aggregate, 1, "safe_convert.value")?,
-            },
+            PropertyName::Value => {
+                if !Self::failure_placeholder_supported(value_type) {
+                    let ok = self
+                        .extract_string_part(aggregate, 0, "safe_convert.value.check")?
+                        .into_int_value();
+                    self.emit_safety_check(ok, 6, span)?;
+                }
+                TypedValue {
+                    value_type: value_type.as_ref().clone(),
+                    value: self.extract_string_part(aggregate, 1, "safe_convert.value")?,
+                }
+            }
         };
         Ok(CodegenValue::Value(extracted))
     }

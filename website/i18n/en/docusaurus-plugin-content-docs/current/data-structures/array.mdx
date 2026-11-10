@@ -53,7 +53,7 @@ func main():
 | `try_get(i)` | `try_result<T>` | Succeeds only when `0 <= i < N`; otherwise `ok = false` |
 | `try_set(i, v)` | `bool` | Writes only for a valid index; otherwise returns `false` and keeps the old value |
 
-As with lists, check `.ok` first and read `.value` only on success; on failure `.value` is just a placeholder. `try_set` needs an array that has a stable storage location (an array held by a variable or a struct field). An array element is a copy, so expressions such as `grid[0]` or an array returned by a function have no writable address and `try_set` on them is rejected at compile time; use an index assignment like `grid[0][1] = v` for that case.
+As with lists, check `.ok` first and read `.value` only on success. On failure, scalar and string payloads are safe to read; structs, lists, maps, and arrays containing managed elements have no safe placeholder, and reading `.value` directly reports a source-located language error and exits with status code 1. `try_set` needs an array that has a stable storage location (an array held by a variable or a struct field). An array element is a copy, so expressions such as `grid[0]` or an array returned by a function have no writable address and `try_set` on them is rejected during semantic analysis; use an index assignment like `grid[0][1] = v` for that case, which still exits on an out-of-range index like any strict index write.
 
 ## Difference from List
 

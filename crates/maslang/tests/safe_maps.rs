@@ -239,3 +239,46 @@ func main():
 "#);
     assert_eq!(stdout, "false\n0\ntrue\ntrue\nalpha\n");
 }
+
+/// 缺键的列表/结构体值没有安全零值占位：读取 `.value` 时在取值处给出受控语言诊断，
+/// 而不是把空引用交给 `len` 或字段访问；`.ok` 仍可在失败前正常输出。
+#[test]
+fn missing_managed_value_reports_language_error_on_value_access() {
+    for source in [
+        r#"
+func main():
+    var m: map<int,list<int>> = {1: [1]}
+    var miss = m.try_get(2)
+    print(miss.ok)
+    print(len(miss.value))
+"#,
+        r#"
+struct Person:
+    name: string
+func main():
+    var people: map<string,Person> = {"a": Person("x")}
+    var miss = people.try_get("b")
+    print(miss.ok)
+    print(miss.value.name)
+"#,
+    ] {
+        let root = TemporaryDirectory::create("mascript-safe-maps-error").unwrap();
+        let source_file = SourceFile::new(
+            root.path().join("main.ms").display().to_string(),
+            source.into(),
+        );
+        let settings = CompilerSettings::new(UiLanguage::ZhCn);
+        let binary = compile_to_executable(
+            &source_file,
+            &settings,
+            &CompileOptions::new(Some(root.path().join("main.exe"))),
+        )
+        .unwrap_or_else(|error| panic!("{}", error.render(settings.language, Some(&source_file))));
+        let output = Command::new(binary).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "false\n");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("没有有效的 .value"), "{stderr}");
+        assert!(!stderr.contains("panicked"), "{stderr}");
+    }
+}

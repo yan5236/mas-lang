@@ -110,7 +110,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.map_builder(self.builder.build_unconditional_branch(merge))?;
 
         self.builder.position_at_end(missing);
-        let placeholder = self.build_map_try_get_placeholder(value_type)?;
+        let placeholder = self.build_safe_failure_placeholder(value_type)?;
         let missing_result = self.build_safe_convert_result(
             value_type.clone(),
             self.context.bool_type().const_zero(),
@@ -129,18 +129,6 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             value_type: result_type,
             value: loaded,
         }))
-    }
-
-    /// 构造缺键时的占位载荷：标量取零值，结构体/可空/容器取 `null` 引用；
-    /// 字符串取有效的空串（全零 `{ null, 0 }` 会让 `len` 等入口解引用空指针），调用方仍须先判断 `.ok`。
-    fn build_map_try_get_placeholder(
-        &mut self,
-        value_type: &ValueType,
-    ) -> Result<BasicValueEnum<'ctx>, CompilerError> {
-        if matches!(value_type, ValueType::String) {
-            return Ok(self.build_string_literal("", false)?.into());
-        }
-        Ok(self.basic_type_for(value_type)?.const_zero())
     }
 
     /// 编译 `try_remove`：仅当 `contains` 判定键存在时才调用原有删除入口，

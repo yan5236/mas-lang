@@ -35,6 +35,22 @@ fn assert_output(text: &str, expected: &str) {
     }
 }
 
+/// 断言程序以受控语言诊断退出：状态码 1、没有 Rust panic，且失败前已输出的内容保留。
+fn assert_language_error(text: &str, expected_stdout: &str, message: &str) {
+    for level in [OptLevel::O0, OptLevel::O3] {
+        let output = execute(text, level);
+        assert_eq!(output.status.code(), Some(1), "{level:?}: {output:?}");
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            expected_stdout,
+            "{level:?}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{level:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{level:?}: {stderr}");
+    }
+}
+
 /// 列表下标读写越界、负下标都返回失败结果，容器内容与后续代码不受影响。
 #[test]
 fn list_try_get_and_try_set_are_recoverable() {
@@ -138,6 +154,36 @@ func main():
         text,
         "false\n0\ntrue\n2\nfalse\n1\ntrue\n1\n0\nfalse\n0\n1\n7\ndone\n",
     );
+}
+
+/// `try_pop(i)` 先求值下标实参，再按接收者的当前长度判断：
+/// 缩容后旧下标必须被拒绝，扩容后新增元素必须可弹出；带强制 GC 的实参也要保住接收者。
+#[test]
+fn try_pop_reads_length_after_evaluating_index() {
+    let text = r#"
+extern func mas_gc_collect()
+func shrink(xs: list<int>) -> int:
+    xs.pop()
+    mas_gc_collect()
+    return 0
+func grow(xs: list<int>) -> int:
+    xs.append(2)
+    mas_gc_collect()
+    return 1
+func main():
+    var shrunk_list = [1]
+    var shrunk = shrunk_list.try_pop(shrink(shrunk_list))
+    print(shrunk.ok)
+    print(len(shrunk_list))
+    print(42)
+    var grown_list = [1]
+    var grown = grown_list.try_pop(grow(grown_list))
+    print(grown.ok)
+    print(grown.value)
+    print(len(grown_list))
+    print("done")
+"#;
+    assert_output(text, "false\n0\n42\ntrue\n2\n1\ndone\n");
 }
 
 /// 非法切片（倒序、越界、负下标）返回 `ok=false` 且不改动原列表；合法切片复制元素槽位。
@@ -445,8 +491,65 @@ func main():
     assert_output(text, "true\n2\nfalse\ntrue\n7\nfalse\n7\ntrue\n2\ntrue\n9\nfalse\n");
 }
 
-/// 没有可写地址的数组值（数组元素、函数返回的临时数组）在编译期被拒绝，
-/// 而不是写进副本后仍报告 `true`。
+/// 失败结果的字符串载荷是有效空串：长度、比较和后续打印都安全，不需要先判 `.ok`。
+#[test]
+fn failed_string_payload_is_a_valid_empty_string() {
+    let text = r#"
+func main():
+    var xs = ["a"]
+    var miss = xs.try_get(1)
+    print(miss.ok)
+    print(len(miss.value))
+    print(miss.value == "")
+    var names = array<string,1>("a")
+    var array_miss = names.try_get(1)
+    print(array_miss.ok)
+    print(len(array_miss.value))
+    var empty: list<string> = []
+    var popped = empty.try_pop()
+    print(popped.ok)
+    print(len(popped.value))
+    print("done")
+"#;
+    assert_output(text, "false\n0\ntrue\nfalse\n0\nfalse\n0\ndone\n");
+}
+
+/// 结构体、列表、字典这类没有安全零值占位的失败载荷，在读取 `.value` 时给出带源码位置的
+/// 受控语言诊断；不会把空引用交给 `len`、字段访问或运行时，也不会触发 Rust panic。
+#[test]
+fn failed_managed_payload_access_reports_language_error() {
+    let nested_list = r#"
+func main():
+    var xs = [[1]]
+    var r = xs.try_get(1)
+    print(r.ok)
+    print(len(r.value))
+"#;
+    assert_language_error(nested_list, "false\n", "没有有效的 .value");
+
+    let struct_value = r#"
+struct Person:
+    name: string
+func main():
+    var people = [Person("a")]
+    var miss = people.try_get(1)
+    print(miss.ok)
+    print(miss.value.name)
+"#;
+    assert_language_error(struct_value, "false\n", "没有有效的 .value");
+
+    let nested_string_array = r#"
+func main():
+    var grid = array<array<string,1>,1>(array<string,1>("a"))
+    var miss = grid.try_get(1)
+    print(miss.ok)
+    print(miss.value[0])
+"#;
+    assert_language_error(nested_string_array, "false\n", "没有有效的 .value");
+}
+
+/// 没有可写地址的数组值（数组元素、函数返回的临时数组）在语义分析阶段被拒绝，
+/// 而不是写进副本后仍报告 `true`；诊断与代码生成共用同一文本。
 #[test]
 fn array_try_set_requires_writable_storage() {
     for body in [

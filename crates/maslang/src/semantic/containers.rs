@@ -4,6 +4,10 @@ use crate::source::Span;
 
 use super::{SemanticAnalyzer, ValueType};
 
+/// 固定数组 `try_set` 缺少可写存储位置时的统一诊断；语义分析和代码生成共用同一文本。
+pub(crate) const ARRAY_TRY_SET_STORAGE_HINT: &str = "固定数组 `try_set` 需要可写入的存储位置：\
+     请把数组保存在变量或结构体字段中，数组元素改用下标赋值，例如 `grid[0][1] = v`";
+
 impl<'a> SemanticAnalyzer<'a> {
     /// 推导列表字面量的元素类型，并校验元素必须同构。
     pub(super) fn infer_list_literal_type(
@@ -211,7 +215,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 self.infer_list_method_type(element_type, method, arguments, span)
             }
             ValueType::Array(element_type, size) => {
-                self.infer_array_method_type(element_type, size, method, arguments, span)
+                self.infer_array_method_type(target, element_type, size, method, arguments, span)
             }
             ValueType::Map(key_type, value_type) => {
                 self.infer_map_method_type(key_type, value_type, method, arguments, span)
@@ -461,6 +465,7 @@ impl<'a> SemanticAnalyzer<'a> {
     /// 推导固定数组安全方法的返回值类型；数组只提供可恢复的下标读写。
     fn infer_array_method_type(
         &mut self,
+        target: &Expr,
         element_type: Box<ValueType>,
         size: usize,
         method: MethodName,
@@ -483,6 +488,14 @@ impl<'a> SemanticAnalyzer<'a> {
                     return Err(CompilerError::semantic_message(
                         "数组方法 `try_set` 需要整数下标和元素值两个参数",
                         span,
+                    ));
+                }
+                // 固定数组是内联值，只有变量、结构体字段这类稳定存储位置才能写回；
+                // 数组元素、函数返回值等临时副本在语义阶段直接拒绝，和代码生成保持一致。
+                if !Self::is_writable_array_place(target) {
+                    return Err(CompilerError::semantic_message(
+                        ARRAY_TRY_SET_STORAGE_HINT,
+                        target.span(),
                     ));
                 }
                 self.require_int_argument(&arguments[0], method)?;
@@ -512,6 +525,16 @@ impl<'a> SemanticAnalyzer<'a> {
                 ),
                 span,
             )),
+        }
+    }
+
+    /// 判断表达式是否只由变量引用和结构体字段组成：这类目标在运行时仍有稳定存储地址。
+    fn is_writable_array_place(expression: &Expr) -> bool {
+        match expression {
+            Expr::Identifier { .. } => true,
+            Expr::Grouped { expression, .. } => Self::is_writable_array_place(expression),
+            Expr::FieldAccess { target, .. } => Self::is_writable_array_place(target),
+            _ => false,
         }
     }
 
