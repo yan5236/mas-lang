@@ -2,4 +2,8 @@
 /stdlib/time/native/**/*.c text eol=lf
 /stdlib/time/native/**/*.h text eol=lf
 
-*.ms linguist-language=mas
+# 强制将 .ms 文件归类并标记为 Mas lang 语言
+*.ms linguist-language=Mas-lang linguist-detectable=true
+
+# 确保 Cargo 项目中的 .rs 文件被正常计入（避免被误当成 Vendored/Documentation 排除）
+*.rs linguist-detectable=true
