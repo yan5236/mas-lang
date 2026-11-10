@@ -299,7 +299,11 @@ stdlib/io/
     │   ├── posix/io_posix.c        # 错误映射、路径字节串、常规文件读写
     │   └── posix/io_posix_fs.c     # 元数据、目录、mkdir、renameat2、删除
     ├── artifacts/
-    │   └── x86_64-pc-windows-msvc/ # 本机 cl.exe 实际编译输出 + manifest.toml
+    │   ├── x86_64-pc-windows-msvc/          # 本机 cl.exe 实际编译输出 + manifest.toml
+    │   ├── x86_64-unknown-linux-gnu/        # CI runner 编译输出（gcc）
+    │   ├── aarch64-unknown-linux-gnu/       # CI runner 编译输出（gcc）
+    │   ├── aarch64-apple-darwin/            # CI runner 编译输出（clang）
+    │   └── x86_64-apple-darwin/             # CI runner 编译输出（clang）
     └── test/
         ├── io_host_test.c          # 测试驱动入口、运行时桩、临时目录
         ├── io_test_api.c           # 公开 API 薄包装
@@ -394,22 +398,21 @@ Mas 的 `extern func` 不能可靠地按值传 16 字节结构体（Win64 下按
 | Windows x64 原生层 | **已实跑**：`native/test/run-tests.ps1` 在本机 MSVC 下编译并以 `/W4 /WX` 通过，**300 条断言全绿，退出码 0**（含并发追加、定位失败、断管部分写入、符号链接与 junction 用例） |
 | Windows x64 预编译产物 | 已按 0.1.0 / ABI 2 重新生成并回填审核修复后的源码指纹（`native/artifacts/x86_64-pc-windows-msvc/`，本机 cl.exe 输出）；默认消费路径已实跑 |
 | ABI 1 兼容 | **已实跑**：用 `12fd9c7` 的旧包（abi = 1、旧三参数写桥）配当前编译器默认构建，`write_text_to` 返回 `ok=true`；端到端用例 `io_legacy_std_write_symbol_keeps_abi1_semantics` 断言旧符号返回 7 字节 |
-| Linux x64/ARM64、macOS x64/ARM64 | **未运行**：本机无可用 POSIX 工具链。只用 `posix-syntax-probe.ps1` 做了 `gcc -fsyntax-only` 语法探测，**6 项探测通过**（每个文件 3 个分支）；这只证明语法与局部类型自洽，不证明 POSIX 上的实际行为 |
-| 跨平台 CI（Linux/macOS） | 预编译产物未交付的目标自动退回源码构建运行行为用例；默认消费用例显式跳过并打印原因，不再把「产物未交付」误报成产品缺陷 |
+| Linux x64/ARM64、macOS x64/ARM64 预编译产物 | 由 `.github/workflows/io-artifacts.yml` 在对应 GitHub runner 上从 C 源实际编译（run `42801176141`），4 个目标共 28 个对象 + 清单已回填；本地独立复算的 POSIX 源码/头文件指纹与清单一致（`6f7f0ea541d5b0ea` / `6a86db17f7ea0236`） |
+| Linux x64/ARM64、macOS x64/ARM64 运行 | **CI 实跑**（`native.yml` run `42802269261`，4 个 job 全绿）：每个目标都有 `fama run` 生成并执行真实程序、time 示例预编译消费，以及 `cargo test --workspace --locked`。`io_package` 在每个目标跑 **9 个用例**（断管用例仅 Windows），含默认预编译消费、`O_APPEND` 多进程并发追加、`renameat2`/`renamex_np` 目录改名与目标冲突、管道短读、ABI 1 旧写桥 |
 | Mas 包装层（`src/`） | 已补齐；C 侧 ABI 与其 `native.ms` 声明逐字段核对一致（字段顺序、错误码序号与入口名） |
 
-`posix-syntax-probe.ps1` 会把 POSIX 源复制到临时目录，把两参数 `mkdir` 调用替换成 MinGW 的 `_mkdir`，并补齐 `lstat`/`link`/`renamex_np`/`S_ISLNK` 声明，然后分别对 `io_posix.c` 与 `io_posix_fs.c` 走 `link`/`unlink` 回退分支、`-D__linux__` 的 `renameat2` 分支和 `-D__APPLE__` 的 `renamex_np` 分支，共 6 次 `gcc -fsyntax-only`。**通过只证明语法与局部类型自洽，不证明 POSIX 上的实际行为。**
+`posix-syntax-probe.ps1` 会把 POSIX 源复制到临时目录，把两参数 `mkdir` 调用替换成 MinGW 的 `_mkdir`，并补齐 `lstat`/`link`/`renamex_np`/`S_ISLNK` 声明，然后分别对 `io_posix.c` 与 `io_posix_fs.c` 走 `link`/`unlink` 回退分支、`-D__linux__` 的 `renameat2` 分支和 `-D__APPLE__` 的 `renamex_np` 分支，共 6 次 `gcc -fsyntax-only`。它只证明语法与局部类型自洽；实际行为由上面的 CI 运行覆盖。
 
-POSIX 侧需要在真实 Linux/macOS 上补测的清单（按风险排序）：
+POSIX 侧仍需补测的清单（按风险排序）：
 
-1. `renameat2(RENAME_NOREPLACE)`（Linux）与 `renamex_np(RENAME_EXCL)`（macOS）：目标已存在、跨文件系统、目录移动、旧内核/文件系统不支持时的错误映射。
-2. 目录名非法 UTF-8 → `InvalidUtf8`（需要能构造任意字节文件名的文件系统）。
-3. 符号链接：`remove_file` 删链接不删目标、`remove_dir` 拒绝对目录的链接。
-4. 权限不足（`EACCES`）与只读文件系统（`EROFS`）的映射。
-5. `EINTR` 重试路径（读/写）与等价于 `CloseHandle` 的关闭失败路径。
-6. 大文件偏移（>2 GiB）的 `seek` 与 `_FILE_OFFSET_BITS=64` 生效情况。
-7. POSIX 断管：向已关闭的管道写入默认会收到 `SIGPIPE`，当前运行时未接管该信号，断管是否返回可恢复错误而不是终止进程**未验证**（Windows 已有真实断管端到端用例）。
-8. 非 Apple、非 Linux 的其他 POSIX 目标走 `link()`+`unlink()` 回退，目录改名返回 `NotSupported`（当前没有这类发布目标）。
+1. 目录名非法 UTF-8 → `InvalidUtf8`（需要能构造任意字节文件名的文件系统）。
+2. 符号链接：`remove_file` 删链接不删目标、`remove_dir` 拒绝对目录的链接。
+3. 权限不足（`EACCES`）与只读文件系统（`EROFS`）的映射。
+4. `EINTR` 重试路径（读/写）与等价于 `CloseHandle` 的关闭失败路径。
+5. 大文件偏移（>2 GiB）的 `seek` 与 `_FILE_OFFSET_BITS=64` 生效情况。
+6. POSIX 断管：向已关闭的管道写入默认会收到 `SIGPIPE`，当前运行时未接管该信号，断管是否返回可恢复错误而不是终止进程**未验证**（Windows 已有真实断管端到端用例）。
+7. 跨文件系统改名（`EXDEV`）与非 Apple、非 Linux POSIX 的 `link()`+`unlink()` 回退（当前没有这类发布目标）。
 
 ### 测试驱动
 

@@ -42,7 +42,7 @@
 
 - [x] 4.1 增加一个正常 Fama 项目样例，用固定块大小复制二进制文件、逐行读配置、追加 UTF-8 日志。测试复制结果逐字节一致、中文路径可访问、配置行内容及日志追加正确。把 API、错误、文本/二进制边界、显式关闭、覆盖和平台约定写进包 README 与网站标准库文档。[依赖: 1.5, 2.4, 2.5, 3.1] [验证 Req 1–6]
 - [x] 4.2 更新语言文档中的类型、枚举、字符串方法、原生 ABI。示例使用实际支持的 Mas 语法，运行真实示例。当前 `time` 公开 API 和五目标对象保持兼容。[依赖: 4.1] [验证 Req 4, Req 5, Req 6]
-- [ ] 4.3 生成 Windows x64、Linux x64/ARM64、macOS x64/ARM64 对象和清单。复用 `time` 的维护流程，使用实际编译输出，保留包名、版本、目标、ABI、源码/头文件指纹与对象列表的一致性。缺少构建目标时记录缺口和复现步骤，待真实对象生成后再标记完成。[依赖: 4.1] [验证 Req 6]
+- [x] 4.3 生成 Windows x64、Linux x64/ARM64、macOS x64/ARM64 对象和清单。复用 `time` 的维护流程，使用实际编译输出，保留包名、版本、目标、ABI、源码/头文件指纹与对象列表的一致性。缺少构建目标时记录缺口和复现步骤，待真实对象生成后再标记完成。[依赖: 4.1] [验证 Req 6] —— 2026-11-10 已完成：Windows 由本机 cl.exe 生成；四个非 Windows 目标由 `.github/workflows/io-artifacts.yml` 在对应 runner 上生成并回填，默认消费由 `native.yml` 在四个 runner 上实跑验证（见下方记录）。
 - [x] 4.4 通过普通 Fama 依赖安装/构建/运行验证各目标。默认路径无 `--allow-native-source-build`，源码回退另测。运行 `cargo test --workspace --locked`、`cargo fmt --all -- --check` 和 `git diff --check`。编辑器或网站有改动时按各自 package.json 的已有命令验证。最后检查 diff，记录目标级通过、失败和未验证项。[依赖: 4.2, 4.3] [验证 Req 1–6]
 
 ## 后续交接
@@ -81,7 +81,7 @@ IO 发布后再启动 `net` 规范，用小型 HTTP 服务验证多连接、超�
 
 ### 未完成 / 未验证
 
-- 阶段 4.3 只生成了 `x86_64-pc-windows-msvc` 的真实对象与清单；Linux x64/ARM64、macOS x64/ARM64 缺本机构建环境，状态保持未完成。回填方式：`workflow_dispatch` 触发 `.github/workflows/io-artifacts.yml`，下载 artifact 后放入 `stdlib/io/native/artifacts/<triple>/`，并在 `stdlib/io/settings.toml` 增加对应 `[native.prebuilt.<triple>]`；本地复现命令为 `rm -rf examples/projects/io-api/mod_module && fama install examples/projects/io-api && fama build examples/projects/io-api --allow-native-source-build`。
+- 阶段 4.3 当时只生成了 `x86_64-pc-windows-msvc` 的真实对象与清单；Linux x64/ARM64、macOS x64/ARM64 缺本机构建环境。回填方式：`workflow_dispatch` 触发 `.github/workflows/io-artifacts.yml`，下载 artifact 后放入 `stdlib/io/native/artifacts/<triple>/`，并在 `stdlib/io/settings.toml` 增加对应 `[native.prebuilt.<triple>]`；本地复现命令为 `rm -rf examples/projects/io-api/mod_module && fama install examples/projects/io-api && fama build examples/projects/io-api --allow-native-source-build`。**该缺口已在 2026-11-10 第三轮通过 CI/CD 回填并验证，见文末记录。**
 - POSIX 运行时行为未验证（本机 WSL 被宿主拒绝、MinGW 缺 `lstat`/`link`/两参数 `mkdir`、无 Docker），只做语法探测；待补测清单写进 `stdlib/io/README.md`。
 - Windows 控制台文本分支未在自动化测试中覆盖：测试进程的标准输出都是管道，`is_terminal` 为假；重定向/管道语义已由 fama 用例验证，控制台只按实现逻辑审查。
 - 部分写入与关闭失败的注入只在 C 驱动内可控；「操作成功但关闭失败」没有稳定的宿主注入手段，保留代码路径与审查结论。
@@ -130,12 +130,20 @@ IO 发布后再启动 `net` 规范，用小型 HTTP 服务验证多连接、超�
 | --- | --- |
 | `pwsh -File stdlib/io/native/test/run-tests.ps1` | **300 条断言、0 失败、EXIT=0**（新增并发追加、失败定位、断管部分写入、管道短读/宿主读取次数断言；并发追加实测 `251658240` 字节） |
 | `pwsh -File stdlib/io/native/test/posix-syntax-probe.ps1` | 2 个 POSIX 文件 × 3 条分支（link/unlink、Linux `renameat2`、macOS `renamex_np`）全部通过；仅语法层面 |
-| `cargo test --locked -p fama --test io_package -- --test-threads=1` | **9 passed**：示例端到端、错误类别、标准流顺序、非法 UTF-8、默认预编译消费、管道短读、Windows 断管部分写入、目录内部绑定不可导入、ABI 1 旧写桥兼容 |
+| `cargo test --locked -p fama --test io_package -- --test-threads=1` | **Windows 10 passed**；Linux/macOS 每个目标 **9 passed**（断管用例仅 Windows）：示例端到端、错误类别、标准流顺序、非法 UTF-8、默认预编译消费、管道短读、并发追加、目录内部绑定不可导入、ABI 1 旧写桥兼容 |
 | `fama run examples/projects/io-api`（无 `--allow-native-source-build`） | 通过：预编译产物与修复后的源码指纹一致，输出与 README 预期一致（含 `listing`、`seek`、`append`） |
+
+### 跨平台预编译产物回填与验证（CI/CD）
+
+- `io-artifacts` 工作流 run `42801176141`：4 个 runner（Linux x64、Linux ARM64、macOS ARM64、macOS Intel）全部成功，各生成 7 个对象 + `manifest.toml`（ABI 2）。产物已回填到 `stdlib/io/native/artifacts/<triple>/`，`settings.toml` 增加 4 个 `[native.prebuilt.<triple>]`。
+- 指纹一致性：本地独立按 `compute_fingerprint` 的 FNV-1a 规则复算 POSIX 源码/头文件指纹，得到 `fnv1a64:6f7f0ea541d5b0ea` / `fnv1a64:6a86db17f7ea0236`，与 4 份 POSIX 清单完全一致。
+- 对象结构抽查：Linux 对象为 ELF x86_64 / aarch64；macOS 对象为 Mach-O arm64 / x86_64；对象只引用新写桥 `mas_runtime_std_write_v2`，没有旧的四参数调用。
+- `native.yml` 工作流 run `42802269261`：4 个 job 全绿（Linux x64 4m55s、Linux ARM64 6m45s、macOS ARM64 9m11s、macOS Intel 21m32s）。每个目标都跑通 `fama run` 生成并执行真实程序、`time` 示例预编译消费和 `cargo test --workspace --locked`。
+- `io_package` 在每个目标以**默认预编译消费**运行：Windows 10 个用例、Linux/macOS 9 个用例，全部通过，覆盖 `O_APPEND` 多进程并发追加、`renameat2`/`renamex_np` 目录改名与目标冲突、管道短读、ABI 1 旧写桥。
+- Intel macOS runner 原先的 MacPorts 步骤因上游 `libffi` 二进制 archive 缺失（404）失败；工作流改为先源码编译 `libffi` 再安装 `llvm-19` 二进制包，两个工作流均已同步，`native.yml` 的 Intel job 因此可以完成验证。
 
 ### 仍未完成 / 未验证
 
-- Linux x64/ARM64、macOS x64/ARM64 的预编译对象仍未交付（阶段 4.3 保持未完成）；需要 `workflow_dispatch` 运行 `.github/workflows/io-artifacts.yml` 后回填并重跑默认消费验证。
-- POSIX 运行时行为仍未实跑：`renamex_np` 的目录移动/目标冲突、`O_APPEND` 并发追加只在语法层检查。
 - POSIX 断管：向已关闭管道写入默认可能由 `SIGPIPE` 终止进程，运行时未接管该信号；断管返回可恢复错误只在 Windows 上验证。
+- POSIX 侧仍未覆盖：目录名非法 UTF-8、符号链接删除规则、权限/只读文件系统错误映射、`EINTR` 重试、>2 GiB 偏移、跨文件系统改名。
 - Windows 交互式控制台文本分支仍未自动化（测试进程的标准输出都是管道）。
