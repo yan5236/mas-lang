@@ -48,13 +48,14 @@ jobs:
       - name: Install LLVM on Intel macOS
         if: runner.os == 'macOS' && runner.arch == 'X64'
         run: |
-          pkg="$RUNNER_TEMP/macports.pkg"
+          # Homebrew 不再为 Intel macOS 提供 llvm@19 bottle，MacPorts 的二进制镜像
+          # 曾出现缺包（libffi 404）。这里直接使用 LLVM 官方发布的 X64 产物。
           curl --fail --silent --show-error --location --retry 3 \
-            https://distfiles.macports.org/MacPorts/MacPorts-2.12.7-15-Sequoia.pkg \
-            -o "$pkg"
-          sudo installer -pkg "$pkg" -target /
-          sudo /opt/local/bin/port -N -b install llvm-19
-          echo "LLVM_SYS_191_PREFIX=/opt/local/libexec/llvm-19" >> "$GITHUB_ENV"
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-macOS-X64.tar.xz \
+            -o "$RUNNER_TEMP/llvm.tar.xz"
+          mkdir -p "$RUNNER_TEMP/llvm"
+          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP/llvm" --strip-components=1
+          echo "LLVM_SYS_191_PREFIX=$RUNNER_TEMP/llvm" >> "$GITHUB_ENV"
       - name: Reinstall the io dependency
         run: |
           rm -rf examples/projects/io-api/mod_module
