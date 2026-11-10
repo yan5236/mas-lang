@@ -32,7 +32,7 @@
 2. WHEN 宿主时钟读取失败、UTC 拆解失败或时间格式化失败 THEN 系统 SHALL 通过 `try_unix_seconds`/`try_unix_millis`/`try_monotonic_millis`/`try_now_utc`/`try_now_email_date`/`try_now_http_date` 返回 `ok=false`。
 3. WHEN Windows 宿主时钟早于 Unix 纪元 THEN 系统 SHALL 以 `ok=false, code=2` 报告失败，不得用负时间戳充当失败哨兵。
 4. WHEN POSIX `nanosleep` 被 `EINTR` 中断 THEN 系统 SHALL 继续等待剩余时间。
-5. WHEN 调用既有严格 API（`sleep`、`unix_seconds` 等） THEN 系统 SHALL 保持原有函数名、返回类型与“中文错误 + 状态码 1”的失败语义。
+5. WHEN 调用既有严格 API（`sleep`、`unix_seconds` 等） THEN 系统 SHALL 保持原有函数名、返回类型与“中文错误 + 状态码 1”的失败语义；诊断文本按错误码归并，不承诺与 0.1.0 逐字一致。
 
 ## 需求 4：列表与固定数组可恢复访问
 
@@ -46,6 +46,9 @@
 4. WHEN 固定数组 `try_get`/`try_set` 下标越界 THEN 系统 SHALL 返回失败状态且不访问元素地址。
 5. WHEN 元素类型为结构体、嵌套容器或可空值 THEN 系统 SHALL 保留共享引用语义，并保证 `try_result<T>` 载荷在后续 GC 中仍然存活。
 6. WHEN 集合允许 `null` 元素 THEN 系统 SHALL 用 `ok` 区分“未命中”与“命中但元素为 null”。
+7. WHEN 安全入口失败 AND 载荷为字符串 THEN `.value` SHALL 是有效空串，可以安全做长度与比较。
+8. WHEN 安全入口失败 AND 载荷为结构体、列表、字典或含托管元素的数组 THEN 读取 `.value` SHALL 报告带源码位置的语言错误并以状态码 1 退出，不得把空引用交给运行时。
+9. WHEN `try_pop(i)` 的下标实参改变列表长度 THEN 系统 SHALL 在实参求值后按当前长度判断：缩容后拒绝旧下标，扩容后允许弹出新增元素。
 
 ## 需求 5：字典缺键可恢复
 
@@ -83,7 +86,7 @@
 ## 技术约束 (非功能需求)
 
 1. 结果表示：有值的安全入口沿用 `try_result<T>`（`.ok` / `.value`），只表示成功/失败的操作返回 `bool`。
-2. 兼容性：既有严格接口的函数名、返回类型、成功路径与失败语义保持不变。
+2. 兼容性：既有严格接口的函数名、返回类型、成功路径与“中文错误 + 状态码 1”的失败语义保持不变；time 严格接口的诊断文本按错误码归并，该变化单独记录。
 3. 原生 ABI：time 标准库升级到 `abi = 2`，预编译产物与清单必须同步刷新，禁止旧对象与新调用方式混用。
 4. 平台支持：Windows（x86_64-pc-windows-msvc）为本机验证目标；Linux/macOS 产物由 GitHub Actions 原生 runner 生成后回填。
 5. 测试：每个安全入口同时断言失败结果、后续代码可达与失败后的状态；收尾执行 `cargo test --workspace --locked`。

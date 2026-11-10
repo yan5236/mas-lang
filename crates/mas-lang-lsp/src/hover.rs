@@ -15,11 +15,14 @@ pub fn hover_for(text: &str, snapshot: &SymbolSnapshot, position: Position) -> O
     let symbol = snapshot
         .symbols()
         .iter()
-        .filter(|symbol| symbol.kind != SymbolKind::FIELD)
+        .filter(|symbol| {
+            symbol.kind != SymbolKind::FIELD && symbol.kind != SymbolKind::ENUM_MEMBER
+        })
         .find(|symbol| symbol.name == word || symbol.name.ends_with(&format!(".{word}")))
         .or_else(|| {
             snapshot.symbols().iter().find(|symbol| {
                 symbol.kind != SymbolKind::FIELD
+                    && symbol.kind != SymbolKind::ENUM_MEMBER
                     && symbol
                         .detail
                         .as_deref()
@@ -42,6 +45,8 @@ pub fn empty_hover() -> Option<Hover> {
 fn hover_text(symbol: &MasSymbol) -> String {
     let kind = match symbol.kind {
         SymbolKind::STRUCT => "结构体",
+        SymbolKind::ENUM => "枚举",
+        SymbolKind::ENUM_MEMBER => "枚举成员",
         SymbolKind::FIELD => "字段",
         SymbolKind::PROPERTY => "可空值属性",
         SymbolKind::FUNCTION => "函数",

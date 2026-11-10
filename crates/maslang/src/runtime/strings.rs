@@ -372,11 +372,19 @@ pub extern "C" fn mas_runtime_abort(message: *const c_char) -> ! {
     abort_runtime(text)
 }
 
+/// 尽力把运行时诊断写入标准错误：写入失败时静默忽略。
+/// 标准输出与标准错误同时断开时，诊断出口不能因为 `eprintln!` 的写入失败再次 panic。
+fn write_stderr(text: &str) {
+    let stderr = std::io::stderr();
+    let mut handle = stderr.lock();
+    let _ = handle.write_all(text.as_bytes());
+}
+
 /// 以统一的运行时错误格式输出消息，并立刻终止当前进程。
 #[cold]
 #[inline(never)]
 fn abort_runtime(message: &str) -> ! {
-    eprintln!("运行时错误: {}", message);
+    write_stderr(&format!("运行时错误: {message}\n"));
     std::process::exit(1);
 }
 
@@ -395,9 +403,10 @@ fn abort_runtime_at(message: &str, site: RuntimeErrorSite) -> ! {
     let line_number = line.to_string();
     let line_number_padding = " ".repeat(line_number.len());
     let carets = "^".repeat(caret_width);
-    eprintln!(
-        "运行时错误: {message}\n--> {path}:{line}:{column}\n{line_number} | {line_text}\n{line_number_padding} | {caret_padding}{carets}"
+    let diagnostic = format!(
+        "运行时错误: {message}\n--> {path}:{line}:{column}\n{line_number} | {line_text}\n{line_number_padding} | {caret_padding}{carets}\n"
     );
+    write_stderr(&diagnostic);
     std::process::exit(1);
 }
 

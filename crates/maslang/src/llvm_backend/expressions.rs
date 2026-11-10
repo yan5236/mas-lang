@@ -253,6 +253,25 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                         "call.list_len",
                     )
                 }
+                ValueType::Bytes => {
+                    let (ptr, len) = self.bytes_parts(argument.value.into_struct_value())?;
+                    let function = self.module.get_function("mas_runtime_bytes_len").unwrap_or_else(
+                        || {
+                            self.module.add_function(
+                                "mas_runtime_bytes_len",
+                                self.context.i64_type().fn_type(
+                                    &[
+                                        self.context.ptr_type(AddressSpace::default()).into(),
+                                        self.context.i64_type().into(),
+                                    ],
+                                    false,
+                                ),
+                                None,
+                            )
+                        },
+                    );
+                    (function, vec![ptr.into(), len.into()], "call.bytes_len")
+                }
                 ValueType::Map(_, _) => {
                     let (map_value, _, _) = self.expect_map_value(argument, span)?;
                     (self.runtime.map_len, vec![map_value.into()], "call.map_len")
@@ -273,6 +292,15 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
 
         if self.structs.contains_key(name) {
             return self.compile_constructor(name, arguments, span);
+        }
+        if name == "bytes_from_list" {
+            return self.compile_bytes_from_list(arguments, span);
+        }
+        if name == "encode_utf8" {
+            return self.compile_encode_utf8(arguments, span);
+        }
+        if name == "decode_utf8" {
+            return self.compile_decode_utf8(arguments, span);
         }
         if let Some(value) = self.compile_builtin_convert_call(name, arguments, span)? {
             return Ok(CodegenValue::Value(value));
@@ -322,6 +350,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 编译安全转换结果上的 `ok/value` 属性访问，并从聚合结构中提取目标字段。
+    /// 没有安全零值占位的载荷（结构体、列表、字典、含托管元素的数组）在读取 `.value` 前
+    /// 检查 `.ok`，失败时报告带源码位置的受控语言诊断，而不是把空引用交给运行时。
     fn compile_property_access(
         &mut self,
         target: &Expr,
@@ -358,10 +388,18 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     .into_int_value()
                     .into(),
             },
-            PropertyName::Value => TypedValue {
-                value_type: value_type.as_ref().clone(),
-                value: self.extract_string_part(aggregate, 1, "safe_convert.value")?,
-            },
+            PropertyName::Value => {
+                if !Self::failure_placeholder_supported(value_type) {
+                    let ok = self
+                        .extract_string_part(aggregate, 0, "safe_convert.value.check")?
+                        .into_int_value();
+                    self.emit_safety_check(ok, 6, span)?;
+                }
+                TypedValue {
+                    value_type: value_type.as_ref().clone(),
+                    value: self.extract_string_part(aggregate, 1, "safe_convert.value")?,
+                }
+            }
         };
         Ok(CodegenValue::Value(extracted))
     }
@@ -1014,6 +1052,15 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     span,
                 )?))
             }
+            ValueType::Bytes => {
+                let compiled_index = self.compile_expr(index)?;
+                let index_value = self.expect_value(compiled_index)?;
+                Ok(CodegenValue::Value(self.compile_bytes_index(
+                    target_value,
+                    index_value,
+                    span,
+                )?))
+            }
             ValueType::Map(key_type, value_type) => {
                 let compiled_index = self.compile_expr(index)?;
                 let index_value = self.expect_value(compiled_index)?;
@@ -1134,6 +1181,15 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 }
                 self.compile_map_method_call(target_value, method, arguments, span)
             }
+            ValueType::Bytes => {
+                if method != MethodName::Slice {
+                    return Err(CompilerError::build_message(
+                        format!("字节类型不支持方法 `{}`", method.display_name()),
+                        span,
+                    ));
+                }
+                self.compile_bytes_slice(target_value, arguments, span)
+            }
             _ if method.supports_string_target() => Err(CompilerError::build_message(
                 format!(
                     "字符串方法 `{}` 只能用于 `string` 类型",
@@ -1159,6 +1215,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let string_value =
             self.expect_string_value(target_value, span, "当前表达式不是字符串类型")?;
         let mut target_args = self.build_string_runtime_arguments(string_value)?;
+        let pointer_type = self.context.ptr_type(AddressSpace::default());
+        let int_type = self.context.i64_type();
 
         match method {
             MethodName::Trim => Ok(CodegenValue::Value(
@@ -1211,6 +1269,188 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     )?,
                 ))
             }
+            MethodName::Split => {
+                let separator = self.compile_string_method_argument(&arguments[0])?;
+                target_args.extend(self.build_string_runtime_arguments(separator)?);
+                target_args.extend(self.build_map_error_site_arguments(span)?);
+                let function = self.string_method_runtime(
+                    "string_split",
+                    pointer_type.fn_type(
+                        &[
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                        ],
+                        false,
+                    ),
+                );
+                let call = self.map_builder(self.builder.build_call(
+                    function,
+                    &target_args,
+                    "call.string_split",
+                ))?;
+                Ok(CodegenValue::Value(TypedValue {
+                    value_type: ValueType::List(Box::new(ValueType::String)),
+                    value: call.try_as_basic_value().unwrap_basic(),
+                }))
+            }
+            MethodName::IndexOf => {
+                let needle = self.compile_string_method_argument(&arguments[0])?;
+                target_args.extend(self.build_string_runtime_arguments(needle)?);
+                let start_value = if let Some(start) = arguments.get(1) {
+                    self.compile_int_method_argument(start, method)?
+                } else {
+                    int_type.const_zero()
+                };
+                target_args.push(start_value.into());
+                target_args.extend(self.build_map_error_site_arguments(span)?);
+                let function = self.string_method_runtime(
+                    "string_index_of",
+                    int_type.fn_type(
+                        &[
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                        ],
+                        false,
+                    ),
+                );
+                let call = self.map_builder(self.builder.build_call(
+                    function,
+                    &target_args,
+                    "call.string_index_of",
+                ))?;
+                let position = call.try_as_basic_value().unwrap_basic().into_int_value();
+                let found = self.map_builder(self.builder.build_int_compare(
+                    inkwell::IntPredicate::SGE,
+                    position,
+                    int_type.const_zero(),
+                    "index_of.found",
+                ))?;
+                let valid = self.map_builder(self.builder.build_int_z_extend(
+                    found,
+                    self.context.i8_type(),
+                    "index_of.valid",
+                ))?;
+                Ok(CodegenValue::Value(self.wrap_nullable_with_validity(
+                    ValueType::Int,
+                    position.into(),
+                    valid,
+                )?))
+            }
+            MethodName::Substring => {
+                let start_value = self.compile_int_method_argument(&arguments[0], method)?;
+                let end_value = self.compile_int_method_argument(&arguments[1], method)?;
+                target_args.push(start_value.into());
+                target_args.push(end_value.into());
+                target_args.extend(self.build_map_error_site_arguments(span)?);
+                let function = self.string_method_runtime(
+                    "string_substring",
+                    pointer_type.fn_type(
+                        &[
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            pointer_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                        ],
+                        false,
+                    ),
+                );
+                let result = self.build_optional_string_result_from_call(
+                    function,
+                    &target_args,
+                    "call.string_substring",
+                    span,
+                )?;
+                Ok(CodegenValue::Value(result))
+            }
+            MethodName::ToLower | MethodName::ToUpper => {
+                let lowering = method == MethodName::ToLower;
+                target_args.extend(self.build_map_error_site_arguments(span)?);
+                let function = self.string_method_runtime(
+                    if lowering {
+                        "string_to_lower"
+                    } else {
+                        "string_to_upper"
+                    },
+                    pointer_type.fn_type(
+                        &[
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                        ],
+                        false,
+                    ),
+                );
+                let call_name = if lowering {
+                    "call.string_to_lower"
+                } else {
+                    "call.string_to_upper"
+                };
+                Ok(CodegenValue::Value(
+                    self.build_located_string_result_from_call(function, &target_args, call_name)?,
+                ))
+            }
+            MethodName::Repeat => {
+                let count_value = self.compile_int_method_argument(&arguments[0], method)?;
+                target_args.push(count_value.into());
+                target_args.extend(self.build_map_error_site_arguments(span)?);
+                let function = self.string_method_runtime(
+                    "string_repeat",
+                    pointer_type.fn_type(
+                        &[
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            pointer_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            pointer_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                            int_type.into(),
+                        ],
+                        false,
+                    ),
+                );
+                let result = self.build_optional_string_result_from_call(
+                    function,
+                    &target_args,
+                    "call.string_repeat",
+                    span,
+                )?;
+                Ok(CodegenValue::Value(result))
+            }
             MethodName::Append
             | MethodName::Remove
             | MethodName::Pop
@@ -1224,11 +1464,134 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::TryPop
             | MethodName::TryIndex
             | MethodName::TryRemove
-            | MethodName::TrySlice => Err(CompilerError::build_message(
+            | MethodName::TrySlice
+            | MethodName::Slice => Err(CompilerError::build_message(
                 format!("字符串类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
         }
+    }
+
+    /// 字符串方法运行时入口末尾统一的源码定位参数个数：路径、源码与 span 起止。
+    const STRING_ERROR_SITE_ARGUMENTS: usize = 6;
+
+    /// 声明或取得字符串方法运行时函数；模块内首次使用时按给定签名登记，避免修改共享声明表。
+    fn string_method_runtime(
+        &self,
+        name: &str,
+        signature: inkwell::types::FunctionType<'ctx>,
+    ) -> FunctionValue<'ctx> {
+        self.module
+            .get_function(name)
+            .unwrap_or_else(|| self.module.add_function(name, signature, None))
+    }
+
+    /// 编译字符串方法的整数实参，并校验静态类型必须是 `int`。
+    fn compile_int_method_argument(
+        &mut self,
+        argument: &Expr,
+        method: MethodName,
+    ) -> Result<inkwell::values::IntValue<'ctx>, CompilerError> {
+        let compiled = self.compile_expr(argument)?;
+        let value = self.expect_value(compiled)?;
+        if value.value_type != ValueType::Int {
+            return Err(CompilerError::build_message(
+                format!("字符串方法 `{}` 的该参数必须是整数", method.display_name()),
+                argument.span(),
+            ));
+        }
+        Ok(value.value.into_int_value())
+    }
+
+    /// 把 `out_len` 输出槽插入到调用实参中的源码定位参数之前；定位参数固定为末尾 6 个。
+    fn insert_out_len_argument(
+        &self,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        out_len: PointerValue<'ctx>,
+    ) -> Result<Vec<BasicMetadataValueEnum<'ctx>>, CompilerError> {
+        let insert_index = args
+            .len()
+            .checked_sub(Self::STRING_ERROR_SITE_ARGUMENTS)
+            .ok_or_else(|| {
+                CompilerError::build_message("字符串运行时定位参数数量不合法", Span::new(0, 0))
+            })?;
+        let mut call_args = args.to_vec();
+        call_args.insert(insert_index, out_len.into());
+        Ok(call_args)
+    }
+
+    /// 调用带 `(out_len, out_valid)` 输出参数和末尾源码定位参数的运行时函数，并按有效标记构造 `string?`。
+    fn build_optional_string_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+        _span: Span,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let int_type = self.context.i64_type();
+        let out_len_ptr = self.allocate_local(&ValueType::Int, "string.optional.out_len")?;
+        self.map_builder(self.builder.build_store(out_len_ptr, int_type.const_zero()))?;
+        let out_valid_ptr = self.allocate_validity_slot("string.optional.valid")?;
+        self.map_builder(
+            self.builder
+                .build_store(out_valid_ptr, self.context.i8_type().const_zero()),
+        )?;
+
+        // 运行时签名把 `(out_len, out_valid)` 放在定位参数之前，因此先按位置插入再追加有效标记。
+        let mut call_args = self.insert_out_len_argument(args, out_len_ptr)?;
+        call_args.insert(
+            call_args.len() - Self::STRING_ERROR_SITE_ARGUMENTS,
+            out_valid_ptr.into(),
+        );
+        let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
+        let pointer = call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+        let length = self
+            .map_builder(self.builder.build_load(
+                int_type,
+                out_len_ptr,
+                "load.string.optional.len",
+            ))?
+            .into_int_value();
+        let valid = self
+            .map_builder(self.builder.build_load(
+                self.context.i8_type(),
+                out_valid_ptr,
+                "load.string.optional.valid",
+            ))?
+            .into_int_value();
+        let string_value = self.build_runtime_string(pointer, length)?;
+        self.wrap_nullable_with_validity(ValueType::String, string_value.into(), valid)
+    }
+
+    /// 调用带末尾源码定位参数和 `out_len` 输出槽的字符串运行时函数，重建非空字符串结果。
+    fn build_located_string_result_from_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+        call_name: &str,
+    ) -> Result<TypedValue<'ctx>, CompilerError> {
+        let int_type = self.context.i64_type();
+        let out_len_ptr = self.allocate_local(&ValueType::Int, "string.located.out_len")?;
+        self.map_builder(self.builder.build_store(out_len_ptr, int_type.const_zero()))?;
+        let call_args = self.insert_out_len_argument(args, out_len_ptr)?;
+        let call = self.map_builder(self.builder.build_call(function, &call_args, call_name))?;
+        let pointer = call
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+        let length = self
+            .map_builder(
+                self.builder
+                    .build_load(int_type, out_len_ptr, "load.string.located.len"),
+            )?
+            .into_int_value();
+        Ok(TypedValue {
+            value_type: ValueType::String,
+            value: self.build_runtime_string(pointer, length)?.into(),
+        })
     }
 
     /// 编译列表方法；实参按元素类型提升可空值，返回的对象引用由表达式入口保活。
@@ -1336,7 +1699,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::TryPop
             | MethodName::TryIndex
             | MethodName::TryRemove
-            | MethodName::TrySlice => Err(CompilerError::build_message(
+            | MethodName::TrySlice
+            | MethodName::Split
+            | MethodName::IndexOf
+            | MethodName::Substring
+            | MethodName::ToLower
+            | MethodName::ToUpper
+            | MethodName::Repeat
+            | MethodName::Slice => Err(CompilerError::build_message(
                 format!("列表类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -1422,7 +1792,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | MethodName::Trim
             | MethodName::StartsWith
             | MethodName::EndsWith
-            | MethodName::Replace => Err(CompilerError::build_message(
+            | MethodName::Replace
+            | MethodName::Split
+            | MethodName::IndexOf
+            | MethodName::Substring
+            | MethodName::ToLower
+            | MethodName::ToUpper
+            | MethodName::Repeat
+            | MethodName::Slice => Err(CompilerError::build_message(
                 format!("字典类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -1567,7 +1944,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 ))?;
                 Ok(vec![bool_value.into()])
             }
-            ValueType::String => {
+            ValueType::String | ValueType::Bytes => {
                 let string_value = value.value.into_struct_value();
                 let ptr = self.extract_string_part(string_value, 0, "list.string.ptr")?;
                 let len = self.extract_string_part(string_value, 1, "list.string.len")?;
@@ -1588,8 +1965,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         element_type: &ValueType,
         call_name: &str,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
-        if matches!(element_type, ValueType::String) {
-            return self.build_string_list_result_from_call(function, args, call_name);
+        if matches!(element_type, ValueType::String | ValueType::Bytes) {
+            return self.build_managed_list_result_from_call(
+                function,
+                args,
+                element_type,
+                call_name,
+            );
         }
 
         let call = self.map_builder(self.builder.build_call(function, args, call_name))?;
@@ -1683,10 +2065,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 处理字符串列表读取与弹出调用，使用额外长度输出参数重建内部字符串值。
-    pub(super) fn build_string_list_result_from_call(
+    pub(super) fn build_managed_list_result_from_call(
         &mut self,
         function: FunctionValue<'ctx>,
         args: &[BasicMetadataValueEnum<'ctx>],
+        element_type: &ValueType,
         call_name: &str,
     ) -> Result<TypedValue<'ctx>, CompilerError> {
         let out_len_ptr = self.allocate_local(&ValueType::Int, "list.string.out_len")?;
@@ -1711,7 +2094,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             .into_int_value();
 
         Ok(TypedValue {
-            value_type: ValueType::String,
+            value_type: element_type.clone(),
             value: self.build_runtime_string(pointer, length)?.into(),
         })
     }
@@ -1857,6 +2240,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | ValueType::Float
             | ValueType::Bool
             | ValueType::String
+            | ValueType::Bytes
             | ValueType::Struct(_)
             | ValueType::Nullable(_)
             | ValueType::List(_)

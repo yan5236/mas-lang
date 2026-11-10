@@ -109,7 +109,7 @@ func main():
 | `try_remove(v)` | `bool` | Returns `false` when absent; otherwise removes the first match |
 | `try_slice(a, b)` | `try_result<list<T>>` | Succeeds only when `0 <= a <= b <= len` and returns a new list |
 
-Check `.ok` first and read `.value` only on success. On failure `.value` is a harmless placeholder (`0`, `0.0`, `false`, an empty string, or `null`) and must not be used as a real result. Every `try_*` failure keeps the list length, elements, and reference relationships unchanged, and the code after it keeps running. Like slicing, `try_slice` copies the element slots while struct, list, and dictionary elements still share the original object references.
+Check `.ok` first and read `.value` only on success. On failure the placeholder falls into two groups: scalars and strings can be read safely (`0`, `0.0`, `false`, a valid empty string); structs, lists, maps, and arrays containing managed elements have no safe placeholder, and reading `.value` directly reports a source-located language error and exits with status code 1. Every `try_*` failure keeps the list length, elements, and reference relationships unchanged, and the code after it keeps running. Like slicing, `try_slice` copies the element slots while struct, list, and dictionary elements still share the original object references. `try_pop(i)` evaluates the index argument first and then checks the receiver's current length: after a shrink the old index is rejected, and after a grow the new element can be popped.
 
 When elements may be `null`, `.ok` tells the two cases apart: `try_get` with `ok = true` and `.value == null` means the position holds a `null` element, while `ok = false` means the index is invalid. `try_index` and `try_remove` match `null` elements as well.
 

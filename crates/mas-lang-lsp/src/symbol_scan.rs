@@ -18,6 +18,14 @@ pub(super) fn scan_tokens_for_symbols(text: &str, tokens: &[Token]) -> Vec<MasSy
                 tokens[index + 1].span,
                 Some(format!("struct {name}")),
             )),
+            (TokenKind::Enum, TokenKind::Identifier(name)) => symbols.push(make_symbol(
+                text,
+                name,
+                SymbolKind::ENUM,
+                declaration_range_span(tokens, index, tokens[index + 1].span),
+                tokens[index + 1].span,
+                Some(format!("enum {name}")),
+            )),
             (TokenKind::Func, TokenKind::Identifier(name)) => symbols.push(make_symbol(
                 text,
                 name,

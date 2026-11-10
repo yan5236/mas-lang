@@ -113,6 +113,38 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
             }
             BinaryOp::Equal | BinaryOp::NotEqual => {
+                // 枚举只允许与同一枚举比较；跨枚举或与整数比较都属于名义身份错误。
+                if left.enum_identity().is_some() || right.enum_identity().is_some() {
+                    return if left == right {
+                        Ok(ValueType::Bool)
+                    } else if left.enum_identity().is_some() && right.enum_identity().is_some() {
+                        Err(CompilerError::semantic_message(
+                            format!(
+                                "不同枚举类型 `{}` 与 `{}` 不能比较",
+                                left.display_name(),
+                                right.display_name()
+                            ),
+                            span,
+                        ))
+                    } else {
+                        Err(CompilerError::semantic_message(
+                            format!(
+                                "枚举 `{}` 只能与同一枚举类型比较，不能与 `{}` 比较",
+                                if left.enum_identity().is_some() {
+                                    left.display_name()
+                                } else {
+                                    right.display_name()
+                                },
+                                if left.enum_identity().is_some() {
+                                    right.display_name()
+                                } else {
+                                    left.display_name()
+                                }
+                            ),
+                            span,
+                        ))
+                    };
+                }
                 if left == right
                     && left != &ValueType::Unit
                     && !matches!(
@@ -192,6 +224,13 @@ impl<'a> SemanticAnalyzer<'a> {
         if self.structs.contains_key(name) {
             return self.infer_constructor(name, arguments, span);
         }
+        if self.enums.contains_key(name) {
+            let display = self.enums[name].display_name.clone();
+            return Err(CompilerError::semantic_message(
+                format!("枚举 `{display}` 不能当作结构体构造；成员引用写成 `{display}.成员名`"),
+                span,
+            ));
+        }
         if name == "print" {
             if self.current_return_type.is_none() {
                 return Err(CompilerError::semantic_message(
@@ -206,12 +245,19 @@ impl<'a> SemanticAnalyzer<'a> {
                 ));
             }
             let argument_type = self.infer_expression_type(&arguments[0])?;
+            if argument_type.enum_identity().is_some() {
+                return Err(CompilerError::semantic_message(
+                    "枚举没有隐式字符串转换，`print` 不接受枚举值",
+                    arguments[0].span(),
+                ));
+            }
             if matches!(
                 argument_type,
                 ValueType::Unit
                     | ValueType::Struct(_)
                     | ValueType::Nullable(_)
                     | ValueType::Null
+                    | ValueType::Bytes
                     | ValueType::SafeConvertResult(_)
                     | ValueType::List(_)
                     | ValueType::Map(_, _)
@@ -239,12 +285,19 @@ impl<'a> SemanticAnalyzer<'a> {
                 ));
             }
             let argument_type = self.infer_expression_type(&arguments[0])?;
+            if argument_type.enum_identity().is_some() {
+                return Err(CompilerError::semantic_message(
+                    "枚举没有隐式字符串转换，`try_print` 不接受枚举值",
+                    arguments[0].span(),
+                ));
+            }
             if matches!(
                 argument_type,
                 ValueType::Unit
                     | ValueType::Struct(_)
                     | ValueType::Nullable(_)
                     | ValueType::Null
+                    | ValueType::Bytes
                     | ValueType::SafeConvertResult(_)
                     | ValueType::List(_)
                     | ValueType::Map(_, _)
@@ -273,16 +326,21 @@ impl<'a> SemanticAnalyzer<'a> {
             if !matches!(
                 argument_type,
                 ValueType::String
+                    | ValueType::Bytes
                     | ValueType::Array(_, _)
                     | ValueType::List(_)
                     | ValueType::Map(_, _)
             ) {
                 return Err(CompilerError::semantic_message(
-                    "内建函数 `len` 只支持字符串、列表、字典或数组类型",
+                    "内建函数 `len` 只支持字符串、字节、列表、字典或数组类型",
                     arguments[0].span(),
                 ));
             }
             return Ok(ValueType::Int);
+        }
+
+        if let Some(value_type) = self.infer_bytes_builtin_type(name, arguments, span)? {
+            return Ok(value_type);
         }
 
         if let Some(value_type) = self.infer_builtin_convert_type(name, arguments, span)? {

@@ -1,0 +1,137 @@
+---
+sidebar_position: 4
+---
+
+# 错误处理
+
+`io` 的文件、目录和流操作都会返回结果结构（`stdin()`/`stdout()`/`stderr()` 这三个借用入口除外，它们直接返回 `File`），不会因为文件不存在、权限不足或关闭后继续使用而直接终止进程。这一页讲清楚怎么判断失败、失败时字段里有什么，以及 12 个错误类别分别代表什么。
+
+## 先看 ok，再看 code
+
+所有结果都有两个共同字段：
+
+- `ok: bool`：`true` 表示操作成功，`false` 表示失败。
+- `code: IOErrorKind`：成功时是 `IOErrorKind.None`，失败时是具体类别。
+
+**判断成功/失败以 `ok` 为准**，不要依赖枚举内部序号，也不要把 `code` 当整数比较。
+
+```mas-lang
+import io { IOErrorKind, read_text }
+
+func main():
+    var text = read_text("missing.txt")
+    if not text.ok:
+        if text.code == IOErrorKind.NotFound:
+            print("文件不存在")
+        else:
+            print("其他读取错误")
+```
+
+## 失败时字段里有什么
+
+失败不是「什么都不保证」：每种结果类型都有固定的安全占位值，调用方可以先统一处理失败，再决定是否读载荷。
+
+| 类型 | 额外字段 | 失败时的值 |
+| --- | --- | --- |
+| `IOStatus` | 无 | 只有 `ok = false` 和 `code` |
+| `OpenResult` | `value: File?` | `null` |
+| `BytesResult` | `value: bytes` | 有效空字节（长度 0） |
+| `TextResult` | `value: string` | 空字符串 |
+| `ReadResult` | `value: bytes`、`eof: bool` | 空字节、`eof = false` |
+| `LineResult` | `value: string`、`eof: bool` | 空字符串、`eof = false` |
+| `WriteResult` | `written: int` | 宿主已接受的字节数（可能非 0） |
+| `SeekResult` | `position: int` | `0` |
+| `MetadataResult` | `kind: FileKind`、`size: int?` | `FileKind.Other`、`size = null` |
+| `DirResult` | `value: list<string>` | 空列表，迭代器已关闭 |
+
+## IOErrorKind 的 12 个成员
+
+| 成员 | 含义 | 常见入口 |
+| --- | --- | --- |
+| `None` | 成功 | 全部 |
+| `NotFound` | 路径不存在 | `open`、`read_file`、`read_text`、`metadata`、`list_dir`、`remove_file`、`make_dir`（父目录缺失） |
+| `PermissionDenied` | 宿主拒绝访问 | 打开、写入、删除、建目录 |
+| `AlreadyExists` | 目标已存在且不许覆盖 | `make_dir`、`rename` |
+| `InvalidArgument` | 参数非法：负的读取长度、空路径、含 NUL 的路径、目录当文件打开 | 全部 |
+| `InvalidUtf8` | 文本边界遇到非法 UTF-8，或 POSIX 非法 UTF-8 目录名 | `read_text`、`read_line`、`write_text`、`write_text_to`、`list_dir` |
+| `Closed` | 句柄已关闭或令牌未知 | 关闭后的任意操作、重复 `close` |
+| `WrongMode` | 操作与打开模式不符 | 只写句柄上 `read`、追加句柄上读取 |
+| `NotSupported` | 宿主或文件系统不支持 | 标准流 `close`/`seek`、输入方向 `flush`、跨文件系统 `rename` |
+| `DirectoryNotEmpty` | 删除的目录不是空目录 | `remove_dir` |
+| `TooLarge` | 位置、大小或计数超出有符号 64 位范围 | `seek`、读写计数 |
+| `Other` | 无法归类的宿主错误 | 全部 |
+
+枚举不能和 `int` 比较，也不能转成 `int`；用 `==` 和上表的成员名判断即可。
+
+## 部分成功
+
+有些失败不是「全都没做」：
+
+- **分块读取**：宿主先交付了一部分数据后出错，库先返回这部分数据（`ok = true`），把错误留到下一次正数读取或 `read_line`。所以循环里既要看 `ok`，也要看 `eof`。
+- **写入**：失败时 `written` 保留宿主已经接受的字节数。需要续写时，从剩余部分继续，而不是从头重写。
+- **按行读取**：完整读出的行照常交付；在完整行之前遇到错误时，丢弃这一行的残片并返回错误。
+- **关闭**：操作成功但 `close` 失败时报告关闭错误；操作失败且关闭也失败时保留第一次的错误。`flush` 和 `close` 不承诺断电持久化。
+- **整文件读写**：覆盖可能已经部分写入，不承诺原子性。
+
+## 常见分支
+
+### 文件不存在 vs 没有权限
+
+```mas-lang
+import io { FileMode, IOErrorKind, open }
+
+func main():
+    var opened = open("settings.txt", FileMode.Read)
+    if not opened.ok:
+        if opened.code == IOErrorKind.NotFound:
+            print("首次运行，还没有配置文件")
+        elif opened.code == IOErrorKind.PermissionDenied:
+            print("文件存在，但没有读取权限")
+        else:
+            print("其他打开错误")
+        return
+    var file = opened.value.value
+    print("打开成功")
+```
+
+### 关闭后继续使用
+
+```mas-lang
+import io { FileMode, IOErrorKind, close, open, read, write_file }
+
+func main():
+    write_file("data.bin", bytes_from_list([1]).value)
+    var opened = open("data.bin", FileMode.Read)
+    var file = opened.value.value
+    close(file)
+    var again = read(file, 1)
+    print(again.code == IOErrorKind.Closed) // true
+```
+
+关闭对同一个 `File` 的所有别名生效；但**其他文件句柄不受影响**，可以继续使用。
+
+### 文本编码错误
+
+`read_text` 和 `read_line` 遇到非法 UTF-8 返回 `InvalidUtf8`，不会插入替换字符。需要处理任意字节时改用 `read_file` / `read`，拿到 `bytes` 后再决定怎么解释。
+
+```mas-lang
+import io { IOErrorKind, read_text, write_file }
+
+func main():
+    write_file("maybe-binary.dat", bytes_from_list([255, 254]).value)
+    var text = read_text("maybe-binary.dat")
+    if not text.ok and text.code == IOErrorKind.InvalidUtf8:
+        print("这不是合法 UTF-8，改用 read_file 读字节")
+```
+
+### 标准流和平台限制
+
+标准流的 `close`、`seek`，输入方向的 `flush`，以及跨文件系统 `rename` 都返回 `NotSupported`。这不是 bug，是契约：调用方应把这些当作「该操作不适用于此对象」，换一条路径完成需求。
+
+## 处理建议
+
+1. 入口返回后先检查 `ok`；失败时按 `code` 分支，不要读可能无效的载荷。
+2. 循环读取同时判断 `ok` 和 `eof`；不要只凭 `len(value) == 0` 判断结束，因为 `read(0)` 是合法的空读取。
+3. 写入失败先看 `written`，再决定是否续写。
+4. 关闭失败仍视为句柄失效，不要重试同一个句柄，重新 `open` 即可。
+5. 需要「要么全成功要么全不做」的文件更新时，自己用临时文件 + 重命名组合实现。

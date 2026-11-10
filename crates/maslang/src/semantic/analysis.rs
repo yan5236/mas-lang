@@ -7,6 +7,7 @@ impl<'a> SemanticAnalyzer<'a> {
     /// 校验整棵程序语法树中的声明、控制流与类型规则。
     pub fn analyze(&mut self, program: &Program) -> Result<(), CompilerError> {
         let _ = self.settings;
+        self.collect_enums(program)?;
         self.collect_structs(program)?;
         self.collect_function_signatures(program)?;
 
@@ -14,6 +15,7 @@ impl<'a> SemanticAnalyzer<'a> {
             if !matches!(
                 statement,
                 Stmt::StructDecl { .. }
+                    | Stmt::EnumDecl { .. }
                     | Stmt::FunctionDecl { .. }
                     | Stmt::ExternFunctionDecl { .. }
             ) {
@@ -71,6 +73,9 @@ impl<'a> SemanticAnalyzer<'a> {
                     | "try_div"
                     | "try_mod"
                     | "try_neg"
+                    | "bytes_from_list"
+                    | "encode_utf8"
+                    | "decode_utf8"
             ) {
                 return Err(CompilerError::semantic_message(
                     format!("用户函数不能覆盖内建函数 `{name}`"),
@@ -95,6 +100,31 @@ impl<'a> SemanticAnalyzer<'a> {
             } else {
                 ValueType::Unit
             };
+
+            // 原生 ABI 不支持按值传递或返回 16 字节字节结构：Windows x64 用隐藏返回指针与
+            // 间接传参，编译器 IR 的声明与之不一致，会产生错位的实参。字节载荷必须放进
+            // 结构体字段传递，因此这里在签名层直接拒绝顶层 bytes 参数与返回值。
+            if is_extern {
+                if parameter_types
+                    .iter()
+                    .any(|value_type| *value_type == ValueType::Bytes)
+                {
+                    return Err(CompilerError::semantic_message(
+                        format!(
+                            "原生函数 `{name}` 不能声明 `bytes` 参数；请放进结构体字段传递"
+                        ),
+                        *span,
+                    ));
+                }
+                if return_type == ValueType::Bytes {
+                    return Err(CompilerError::semantic_message(
+                        format!(
+                            "原生函数 `{name}` 不能返回 `bytes`；请写回结构体字段"
+                        ),
+                        *span,
+                    ));
+                }
+            }
 
             self.functions.insert(
                 name.clone(),

@@ -1,0 +1,145 @@
+---
+sidebar_position: 3
+---
+
+# 文件系统
+
+除了按流读写，`io` 还提供「一次处理整个文件」的入口，以及目录、元数据、创建、重命名和删除操作。这些入口都返回结果结构，不会因为常见的宿主失败而终止进程。
+
+## 整文件读写
+
+| 接口 | 行为 |
+| --- | --- |
+| `read_file(path)` | 读完整文件为 `bytes`；空文件成功，失败时 `value` 为空字节 |
+| `read_text(path)` | 读完整文件为 `string`；严格校验 UTF-8，非法编码返回 `InvalidUtf8` |
+| `write_file(path, data)` | 创建或**覆盖**（截断） |
+| `append_file(path, data)` | 创建或**追加** |
+| `write_text(path, text)` | 严格验证 UTF-8 后创建或覆盖 |
+| `append_text(path, text)` | 严格验证 UTF-8 后创建或追加 |
+
+```mas-lang
+import io { append_text, read_text, write_text }
+
+func main():
+    var path = "notes.txt"
+    var first = write_text(path, "第一行")
+    var second = append_text(path, "\n第二行")
+    print(first.ok and second.ok) // true
+    print(read_text(path).value)  // 第一行
+                                  // 第二行
+```
+
+`write_text` / `append_text` 在打开文件**之前**验证文本：文本非法时返回 `InvalidUtf8`，已有文件不会被截断。`read_text` 不做替换字符，遇到非法 UTF-8 直接返回 `InvalidUtf8` 和空字符串。
+
+整文件写入不承诺原子性：覆盖过程中失败时，文件可能已经被部分改写。需要「要么全有要么全无」时，先写临时文件再检查结果、成功后重命名。
+
+## 查询元数据
+
+`metadata(path)` 跟随符号链接，返回 `MetadataResult`：
+
+- `kind: FileKind`：`Regular`（普通文件）、`Directory`（目录）或 `Other`（设备、管道等）。
+- `size: int?`：只有普通文件带字节大小，目录和其他类型为 `null`。
+- 失败时 `kind` 为 `Other`、`size` 为 `null`。
+
+```mas-lang
+import io { FileKind, metadata }
+
+func main():
+    var info = metadata("app.log")
+    if info.ok:
+        print(info.kind == FileKind.Regular) // true
+        if info.size != null:
+            print(info.size.value) // 字节数
+```
+
+## 枚举目录
+
+`list_dir(path)` 返回**直接子项的名称**，不包含完整路径，也不包含 `.` 与 `..`。顺序未指定，需要固定顺序时自己排序。
+
+- 空目录返回成功和空列表。
+- 枚举中途失败时返回错误，并丢弃已经收集到的部分结果；内部迭代器在成功和失败路径上都会关闭。
+
+```mas-lang
+import io { FileKind, list_dir, metadata }
+
+func main():
+    var listing = list_dir(".")
+    if not listing.ok:
+        print("无法枚举目录")
+        return
+    for name in listing.value:
+        var info = metadata(name)
+        if info.kind == FileKind.Directory:
+            print("[目录] " + name)
+        else:
+            print("[文件] " + name)
+```
+
+## 创建目录
+
+`make_dir(path)` 只创建**一级**目录：
+
+- 父目录不存在 → `NotFound`
+- 目标已存在 → `AlreadyExists`
+- 成功 → `ok = true`，`code = None`
+
+需要多级目录时，按层级依次调用（例如先 `build`，再 `build/data`），并允许中间层返回 `AlreadyExists`。
+
+## 重命名
+
+`rename(source, destination)` 在同一文件系统内移动文件或目录，**目标已存在时失败**（`AlreadyExists`），绝不静默覆盖。跨文件系统移动，或宿主/文件系统不支持「禁止覆盖的重命名」原语时，返回 `NotSupported`。
+
+```mas-lang
+import io { IOErrorKind, rename }
+
+func main():
+    var moved = rename("draft.txt", "final.txt")
+    if not moved.ok:
+        if moved.code == IOErrorKind.AlreadyExists:
+            print("目标已存在，换一个名字")
+        if moved.code == IOErrorKind.NotSupported:
+            print("跨文件系统或宿主不支持")
+```
+
+## 删除
+
+| 接口 | 行为 |
+| --- | --- |
+| `remove_file(path)` | 删除文件，或指向文件的符号链接；不跟随链接删除目标 |
+| `remove_dir(path)` | 只删除**空**目录；非空返回 `DirectoryNotEmpty` |
+
+`remove_dir` 拒绝符号链接和 Windows 目录重解析点（junction 等），不会把「删链接」变成「删目标」。删除是不可逆操作，调用前先用 `metadata` 确认类型。
+
+## 路径规则
+
+- 路径是合法 UTF-8 的 `string`；内嵌 NUL 一律返回 `InvalidArgument`。
+- 路径可以是相对路径（相对于进程当前工作目录）或绝对路径；Fama 运行项目时当前目录是工程根目录。
+- Unicode 路径按宿主规则访问。Windows 使用宽字符 API；POSIX 目录里出现非法 UTF-8 名称时返回 `InvalidUtf8`，不做损失性替换。
+- 目录不能当文件打开（`InvalidArgument`），普通文件接口也不承诺能读写设备。
+
+## 平台差异
+
+| 行为 | Windows | POSIX |
+| --- | --- | --- |
+| 路径编码 | UTF-8 → UTF-16，宽字符 API | 校验后的 UTF-8 字节 + 终止 NUL |
+| 目录名非法 UTF-8 | 宽字符路径天然可表示 Unicode | 返回 `InvalidUtf8` |
+| 删除目录 | 拒绝 junction 等目录重解析点后删空目录 | 拒绝符号链接后删空目录 |
+| 禁止覆盖改名 | `MoveFileExW` 不带替换标志 | `renameat2(RENAME_NOREPLACE)`，否则 `link` + `unlink`；都不可用返回 `NotSupported` |
+| 跨文件系统移动 | `NotSupported` | `NotSupported` |
+
+平台间一致的约定（有测试覆盖）：目录不能当文件打开、只删空目录、改名禁止覆盖、含 NUL 的路径一律 `InvalidArgument`。
+
+## 错误处理
+
+目录和文件系统操作常见的失败类别：
+
+| 场景 | 类别 |
+| --- | --- |
+| 路径不存在 | `NotFound` |
+| 没有权限、只读文件系统 | `PermissionDenied` |
+| 建目录/改名时目标已存在 | `AlreadyExists` |
+| 删除非空目录 | `DirectoryNotEmpty` |
+| 跨文件系统移动、平台不支持 | `NotSupported` |
+| 目录名非法 UTF-8（POSIX） | `InvalidUtf8` |
+
+完整的 12 个类别和失败占位值见[错误处理](./errors)。

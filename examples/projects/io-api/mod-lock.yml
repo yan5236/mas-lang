@@ -1,0 +1,7 @@
+dependencies:
+  io:
+    version: 0.1.0
+    source:
+      type: path
+      path: ../../../stdlib/io
+    store_path: mod_module/io@0.1.0

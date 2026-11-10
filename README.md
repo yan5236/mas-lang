@@ -13,4 +13,4 @@ cargo run --locked -p maslang -- run examples/regression/syntax/standalone-hello
 
 把 `run` 换成 `build` 可保留可执行文件。默认产物位于源码旁的 `build/` 目录，在 Linux 上是 ELF，在 macOS 上是 Mach-O，在 Windows 上带 `.exe` 后缀。
 
-更多内容见 [语言文档](website/docs/introduction.mdx)、[VS Code 扩展](editors/vscode/README.md)和 [time 标准库示例](stdlib/time/README.md)。
+更多内容见 [语言文档](website/docs/introduction.mdx)、[VS Code 扩展](editors/vscode/README.md)、[time 标准库示例](stdlib/time/README.md)与 [io 标准库示例](stdlib/io/README.md)。

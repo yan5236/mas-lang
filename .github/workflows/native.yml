@@ -36,11 +36,14 @@ jobs:
       - name: Install LLVM on Intel macOS
         if: runner.os == 'macOS' && runner.arch == 'X64'
         run: |
+          # Intel macOS 没有 Homebrew 的 llvm@19 bottle；MacPorts 二进制镜像当前缺少
+          # 新版 libffi（archive 404），先源码编译 libffi，再装 llvm-19 的二进制包。
           pkg="$RUNNER_TEMP/macports.pkg"
           curl --fail --silent --show-error --location --retry 3 \
             https://distfiles.macports.org/MacPorts/MacPorts-2.12.7-15-Sequoia.pkg \
             -o "$pkg"
           sudo installer -pkg "$pkg" -target /
+          sudo /opt/local/bin/port -N -s install libffi
           sudo /opt/local/bin/port -N -b install llvm-19
           echo "LLVM_SYS_191_PREFIX=/opt/local/libexec/llvm-19" >> "$GITHUB_ENV"
       - name: Verify executable format and output

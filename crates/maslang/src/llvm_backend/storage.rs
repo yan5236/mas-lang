@@ -54,10 +54,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Struct(_) | ValueType::Nullable(_) | ValueType::Null => {
                 global.set_initializer(&self.list_pointer_type().const_null())
             }
+            ValueType::Enum(_) => global.set_initializer(&self.context.i64_type().const_zero()),
             ValueType::Int => global.set_initializer(&self.context.i64_type().const_zero()),
             ValueType::Float => global.set_initializer(&self.context.f64_type().const_zero()),
             ValueType::Bool => global.set_initializer(&self.context.bool_type().const_zero()),
-            ValueType::String => global.set_initializer(&self.string_type.const_zero()),
+            ValueType::String | ValueType::Bytes => {
+                global.set_initializer(&self.string_type.const_zero())
+            }
             ValueType::SafeConvertResult(value_type) => global.set_initializer(
                 &self
                     .safe_convert_result_type(value_type.as_ref())?
@@ -128,10 +131,12 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Struct(_) | ValueType::Nullable(_) | ValueType::Null => {
                 self.list_pointer_type().into()
             }
+            ValueType::Enum(_) => self.context.i64_type().into(),
             ValueType::Int => self.context.i64_type().into(),
             ValueType::Float => self.context.f64_type().into(),
             ValueType::Bool => self.context.bool_type().into(),
             ValueType::String => self.string_type.into(),
+            ValueType::Bytes => self.string_type.into(),
             ValueType::SafeConvertResult(value_type) => {
                 self.safe_convert_result_type(value_type.as_ref())?.into()
             }

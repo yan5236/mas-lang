@@ -30,7 +30,9 @@ impl<'a> SemanticAnalyzer<'a> {
             return Ok(actual);
         }
         match expression {
-            Expr::FieldAccess { target, name, span } => self.infer_field_type(target, name, *span),
+            Expr::FieldAccess { target, name, span } => {
+                self.infer_field_or_member_type(target, name, *span)
+            }
             Expr::Literal { value, .. } => Ok(match value {
                 Literal::Null => ValueType::Null,
                 Literal::Int(_) => ValueType::Int,

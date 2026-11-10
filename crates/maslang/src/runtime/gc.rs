@@ -7,6 +7,8 @@ enum GcObject {
         offsets: &'static [u64],
     },
     String(Box<[u8]>, Option<usize>),
+    /// 托管字节对象：内容不做 UTF-8 校验，GC 只追踪缓冲区地址。
+    Bytes(Box<[u8]>),
     StringBuilder(Box<Vec<u8>>),
     List(*mut MsList),
     Map(*mut MsMap),
@@ -18,6 +20,7 @@ impl GcObject {
         match self {
             Self::Record { words, .. } => words.len() * 8,
             Self::String(bytes, _) => bytes.len(),
+            Self::Bytes(bytes) => bytes.len(),
             Self::StringBuilder(bytes) => std::mem::size_of::<Vec<u8>>() + bytes.capacity(),
             Self::List(ptr) => unsafe {
                 std::mem::size_of::<MsList>()
@@ -48,7 +51,7 @@ impl GcObject {
                     });
                 }
             }
-            Self::String(..) | Self::StringBuilder(_) => {}
+            Self::String(..) | Self::Bytes(_) | Self::StringBuilder(_) => {}
             Self::List(ptr) => unsafe {
                 let list = &**ptr;
                 if (KIND_RECORD..=9).contains(&list.elem_kind) {
@@ -94,7 +97,7 @@ impl Drop for GcObject {
     fn drop(&mut self) {
         unsafe {
             match self {
-                Self::Record { .. } | Self::String(..) | Self::StringBuilder(_) => {}
+                Self::Record { .. } | Self::String(..) | Self::Bytes(_) | Self::StringBuilder(_) => {}
                 Self::List(ptr) => {
                     let list = Box::from_raw(*ptr);
                     if !list.data.is_null() {
@@ -200,8 +203,17 @@ fn gc_allocate_string(bytes: Box<[u8]>) -> *const u8 {
     ptr
 }
 
-/// 读取编译器登记的字面量长度，或缓存完整托管字符串的 Unicode 标量数。
-/// 外部缓冲区和局部切片返回 None，交给调用方逐次校验和计数。
+/// 接管字节缓冲区并返回稳定地址；空字节复用静态存储，内容不做 UTF-8 校验。
+fn gc_allocate_bytes(bytes: Box<[u8]>) -> *const u8 {
+    if bytes.is_empty() {
+        return b"".as_ptr();
+    }
+    let ptr = bytes.as_ptr();
+    gc_track(ptr as usize, GcObject::Bytes(bytes));
+    ptr
+}
+
+/// 读取编译器登记的字面量长度，或缓存完整托管字符串的 Unicode 标量数。/// 外部缓冲区和局部切片返回 None，交给调用方逐次校验和计数。
 fn gc_string_scalar_count(ptr: *const u8, len: u64) -> Option<usize> {
     GC_HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();

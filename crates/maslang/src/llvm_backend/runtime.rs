@@ -994,11 +994,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Float => Ok(2),
             ValueType::Bool => Ok(3),
             ValueType::String => Ok(4),
+            // 字节对象与字符串同为「指针 + 长度」槽位，复用同一元素标记以共享列表读写入口。
+            ValueType::Bytes => Ok(4),
             ValueType::Nullable(inner) => Ok(match inner.as_ref() {
                 ValueType::Int => 6,
                 ValueType::Float => 7,
                 ValueType::Bool => 8,
-                ValueType::String => 9,
+                ValueType::String | ValueType::Bytes => 9,
                 _ => 5,
             }),
             ValueType::Struct(_) | ValueType::List(_) | ValueType::Map(_, _) => Ok(5),
@@ -1019,6 +1021,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Float => Ok("float"),
             ValueType::Bool => Ok("bool"),
             ValueType::String => Ok("string"),
+            // 字节对象复用字符串的列表运行时入口（ptr + len 布局完全一致）。
+            ValueType::Bytes => Ok("string"),
             ValueType::Struct(_)
             | ValueType::Nullable(_)
             | ValueType::List(_)

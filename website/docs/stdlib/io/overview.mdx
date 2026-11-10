@@ -1,0 +1,143 @@
+---
+sidebar_position: 1
+---
+
+# io — 文件、目录与标准流
+
+`io` 是应用级**同步** IO 标准库：读写文件、复制二进制、逐行读配置、枚举目录、查询元数据、删除和重命名，还能直接操作标准输入输出。包版本 `0.1.0`，原生 ABI 版本 `2`（ABI 1 的旧包仍可用，写桥的旧符号保留原语义）。
+
+它把**文本**和**二进制**分成两种类型：需要文本时用 `string`，处理图片、压缩包或任意文件时用 `bytes`。混用会在编译期或运行期被拦住，不会悄悄损坏数据。
+
+## 安装
+
+`io` 是普通标准库包，不是编译器内建模块。在项目 `settings.toml` 中声明 path 依赖：
+
+```toml
+[dependencies]
+"io" = { path = "../../../stdlib/io", version = "0.1.0" }
+```
+
+然后执行 `fama install`，包会安装到 `mod_module/io@0.1.0/`。完整可运行工程见仓库里的 `examples/projects/io-api`。
+
+## 导入
+
+`import io { ... }` 需要逐个列出用到的名字（函数、结果结构、枚举和 `File` 都从同一入口导出）：
+
+```mas-lang
+import io {
+    FileMode,
+    IOErrorKind,
+    close,
+    open,
+    read,
+    read_text,
+    write_file,
+}
+```
+
+## 快速上手
+
+```mas-lang
+import io { FileMode, IOErrorKind, close, open, read_text, write_file }
+
+func main():
+    var path = "demo.txt"
+    var written = write_file(path, encode_utf8("你好").value)
+    print("write ok=" + string(written.ok))
+
+    var text = read_text(path)
+    print("read text=" + text.value)
+
+    var opened = open(path, FileMode.Read)
+    var handle = opened.value.value
+    print("close ok=" + string(close(handle).ok))
+    print("closed=" + string(close(handle).code == IOErrorKind.Closed))
+```
+
+在工程根目录运行，输出：
+
+```text
+write ok=true
+read text=你好
+close ok=true
+closed=true
+```
+
+## API 一览
+
+### 文件与流
+
+| 接口 | 返回 | 说明 |
+| --- | --- | --- |
+| `open(path, mode)` | `OpenResult` | 打开文件；`value` 是 `File?`，成功后非空 |
+| `stdin()`、`stdout()`、`stderr()` | `File` | 借用进程标准流 |
+| `read(file, count)` | `ReadResult` | 最多读 `count` 字节，允许短读，区分 EOF 与失败 |
+| `read_line(file)` | `LineResult` | 读一行，剥除 LF 和它前面紧邻的 CR |
+| `write(file, data)` | `WriteResult` | 写完整个 `bytes`，失败时保留已接受字节数 |
+| `write_text_to(file, text)` | `WriteResult` | 严格验证 UTF-8 后写入，不加换行 |
+| `flush(file)` | `IOStatus` | 刷新缓冲 |
+| `close(file)` | `IOStatus` | 关闭常规文件；即使失败句柄也失效。标准流返回 `NotSupported`，借用句柄仍可用 |
+| `seek(file, offset, origin)` | `SeekResult` | 按 `Start`/`Current`/`End` 定位 |
+
+`FileMode` 的成员是 `Read`、`Write`、`Append`、`ReadWrite`；`SeekFrom` 的成员是 `Start`、`Current`、`End`。细节见[文件与流](./files-and-streams)。
+
+### 整文件与文本
+
+| 接口 | 返回 | 说明 |
+| --- | --- | --- |
+| `read_file(path)` | `BytesResult` | 读完整文件为 `bytes` |
+| `read_text(path)` | `TextResult` | 读完整文件为 `string`，严格校验 UTF-8 |
+| `write_file(path, data)` | `WriteResult` | 创建或覆盖 |
+| `append_file(path, data)` | `WriteResult` | 创建或追加 |
+| `write_text(path, text)` | `WriteResult` | 校验 UTF-8 后创建或覆盖 |
+| `append_text(path, text)` | `WriteResult` | 校验 UTF-8 后创建或追加 |
+
+### 文件系统
+
+| 接口 | 返回 | 说明 |
+| --- | --- | --- |
+| `metadata(path)` | `MetadataResult` | 跟随符号链接，返回类型与普通文件大小 |
+| `list_dir(path)` | `DirResult` | 直接子项名称，排除 `.` 与 `..` |
+| `make_dir(path)` | `IOStatus` | 创建一级目录 |
+| `rename(source, destination)` | `IOStatus` | 同文件系统移动，禁止覆盖 |
+| `remove_file(path)` | `IOStatus` | 删除文件或指向文件的链接 |
+| `remove_dir(path)` | `IOStatus` | 只删除空目录 |
+
+细节见[文件系统](./filesystem)。
+
+## 结果类型
+
+所有入口都返回结果结构，判断成功与否先看 `ok`：
+
+| 类型 | 字段 |
+| --- | --- |
+| `IOStatus` | `ok`、`code` |
+| `OpenResult` | `ok`、`code`、`value: File?` |
+| `BytesResult` | `ok`、`code`、`value: bytes` |
+| `TextResult` | `ok`、`code`、`value: string` |
+| `ReadResult`、`LineResult` | `ok`、`code`、相应 `value`、`eof: bool` |
+| `WriteResult` | `ok`、`code`、`written: int` |
+| `SeekResult` | `ok`、`code`、`position: int` |
+| `MetadataResult` | `ok`、`code`、`kind: FileKind`、`size: int?` |
+| `DirResult` | `ok`、`code`、`value: list<string>` |
+
+`code` 是 `IOErrorKind`，成功时为 `None`。12 个成员和失败占位值见[错误处理](./errors)。
+
+## 预编译产物
+
+| 目标 | 现状 |
+| --- | --- |
+| `x86_64-pc-windows-msvc` | 已带预编译产物，普通构建可直接使用 |
+| `x86_64-unknown-linux-gnu` | 待 CI 回填 |
+| `aarch64-unknown-linux-gnu` | 待 CI 回填 |
+| `x86_64-apple-darwin` | 待 CI 回填 |
+| `aarch64-apple-darwin` | 待 CI 回填 |
+
+四个待回填目标上，普通消费会因缺少预编译对象而报错；维护者可用 `fama build --allow-native-source-build` 从 C 源刷新产物。
+
+## 下一步
+
+- [文件与流](./files-and-streams)：打开模式、分块读取、逐行读取、写入、定位与关闭。
+- [文件系统](./filesystem)：整文件入口、元数据、目录、建目录、改名与删除。
+- [错误处理](./errors)：`IOErrorKind`、失败占位值、部分成功与常见分支。
+- [字节](../../basics/bytes)：`bytes` 的构造、转换、索引与比较。

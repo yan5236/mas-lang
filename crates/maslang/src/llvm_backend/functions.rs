@@ -29,31 +29,37 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 _ => continue,
             };
 
-            let parameter_types = parameters
+            let declared_parameter_types = parameters
                 .iter()
-                .map(|parameter| {
-                    let value_type = value_type_from_annotation(&parameter.type_name);
-                    match abi {
-                        FunctionAbi::User => self.basic_metadata_type_for(&value_type),
-                        FunctionAbi::Extern => self.extern_metadata_type_for(&value_type),
-                    }
+                .map(|parameter| self.value_type_from_annotation(&parameter.type_name))
+                .collect::<Vec<_>>();
+            let parameter_types = declared_parameter_types
+                .iter()
+                .map(|value_type| match abi {
+                    FunctionAbi::User => self.basic_metadata_type_for(value_type),
+                    FunctionAbi::Extern => self.extern_metadata_type_for(value_type),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let function_type = match return_type.as_ref().map(value_type_from_annotation) {
-                Some(ValueType::String) if abi == FunctionAbi::Extern => {
-                    let mut abi_parameters = parameter_types;
+            let declared_return_type = return_type
+                .as_ref()
+                .map(|annotation| self.value_type_from_annotation(annotation))
+                .unwrap_or(ValueType::Unit);
+            let function_type =
+                if abi == FunctionAbi::Extern && declared_return_type == ValueType::String {
+                    let mut abi_parameters = parameter_types.clone();
                     abi_parameters.push(self.context.ptr_type(AddressSpace::default()).into());
                     self.context
                         .ptr_type(AddressSpace::default())
                         .fn_type(&abi_parameters, false)
-                }
-                Some(value_type) => match abi {
-                    FunctionAbi::User => self.basic_type_for(&value_type)?,
-                    FunctionAbi::Extern => self.extern_basic_type_for(&value_type)?,
-                }
-                .fn_type(&parameter_types, false),
-                None => self.context.void_type().fn_type(&parameter_types, false),
-            };
+                } else if declared_return_type == ValueType::Unit {
+                    self.context.void_type().fn_type(&parameter_types, false)
+                } else {
+                    let llvm_return_type = match abi {
+                        FunctionAbi::User => self.basic_type_for(&declared_return_type)?,
+                        FunctionAbi::Extern => self.extern_basic_type_for(&declared_return_type)?,
+                    };
+                    llvm_return_type.fn_type(&parameter_types, false)
+                };
             let symbol_name = match abi {
                 FunctionAbi::User => format!("ms_user_{name}"),
                 FunctionAbi::Extern => name.clone(),
@@ -65,15 +71,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             self.functions.insert(
                 name.clone(),
                 FunctionInfo {
-                    parameter_types: parameters
-                        .iter()
-                        .map(|p| value_type_from_annotation(&p.type_name))
-                        .collect(),
+                    parameter_types: declared_parameter_types,
                     function,
-                    return_type: return_type
-                        .as_ref()
-                        .map(value_type_from_annotation)
-                        .unwrap_or(ValueType::Unit),
+                    return_type: declared_return_type,
                     abi,
                 },
             );
@@ -133,7 +133,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         self.current_function = Some(info.function);
         self.current_return_type = return_type
             .as_ref()
-            .map(value_type_from_annotation)
+            .map(|annotation| self.value_type_from_annotation(annotation))
             .unwrap_or(ValueType::Unit);
         self.scopes = vec![HashMap::new()];
         self.loop_stack.clear();
@@ -152,7 +152,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     parameter.span,
                 )
             })?;
-            let value_type = value_type_from_annotation(&parameter.type_name);
+            let value_type = self.value_type_from_annotation(&parameter.type_name);
             let pointer = self.allocate_local(&value_type, &parameter.name)?;
             self.map_builder(self.builder.build_store(pointer, value))?;
             self.current_scope_mut().insert(

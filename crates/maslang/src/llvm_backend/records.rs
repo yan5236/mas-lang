@@ -7,13 +7,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     fn record_layout(&self, name: &str) -> Result<StructType<'ctx>, CompilerError> {
         let fields = self.structs[name]
             .iter()
-            .map(|f| self.basic_type_for(&value_type_from_annotation(&f.type_name)))
+            .map(|f| self.basic_type_for(&self.value_type_from_annotation(&f.type_name)))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(self.context.struct_type(&fields, false))
     }
 
     /// 按目标机器布局创建零初始化 GC 对象；偏移表为模块常量，扫描时不猜测标量内容。
-    fn allocate_record(
+    pub(super) fn allocate_record(
         &mut self,
         types: &[ValueType],
     ) -> Result<(PointerValue<'ctx>, StructType<'ctx>), CompilerError> {
@@ -83,7 +83,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         let fields = self.structs[name].clone();
         let types = fields
             .iter()
-            .map(|f| value_type_from_annotation(&f.type_name))
+            .map(|f| self.value_type_from_annotation(&f.type_name))
             .collect::<Vec<_>>();
         let mut values = Vec::new();
         for (arg, ty) in args.iter().zip(&types) {
@@ -103,6 +103,27 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             value_type: ValueType::Struct(name.to_string()),
             value: pointer.into(),
         }))
+    }
+
+    /// 把非空载荷包装成可空值：结构体引用直接复用指针，其他类型分配单字段托管记录。
+    /// 记录会被 GC 追踪，因此字符串与字节字段的长度和指针在回收后仍然有效。
+    pub(super) fn build_nullable_payload(
+        &mut self,
+        inner: &ValueType,
+        value: BasicValueEnum<'ctx>,
+    ) -> Result<PointerValue<'ctx>, CompilerError> {
+        if matches!(inner, ValueType::Struct(_)) {
+            return Ok(value.into_pointer_value());
+        }
+        let (pointer, layout) = self.allocate_record(&[inner.clone()])?;
+        let field = self.map_builder(self.builder.build_struct_gep(
+            layout,
+            pointer,
+            0,
+            "nullable.init",
+        ))?;
+        self.map_builder(self.builder.build_store(field, value))?;
+        Ok(pointer)
     }
 
     /// 按期望类型编译实参或返回值，处理空容器和 T 到 T? 的提升；不隐式解包可空值。
@@ -221,7 +242,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             .enumerate()
             .find(|(_, f)| f.name == name)
             .ok_or_else(|| CompilerError::build_message("未知字段", span))?;
-        let ty = value_type_from_annotation(&field.type_name);
+        let ty = self.value_type_from_annotation(&field.type_name);
         let pointer = self.map_builder(self.builder.build_struct_gep(
             self.record_layout(record)?,
             target.value.into_pointer_value(),
@@ -251,12 +272,44 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     }
 
     /// 编译任意深度字段读取，目标对象在可能分配的后续表达式中保持可达。
+    /// `枚举名.成员` 在此直接降低为成员序号的 i64 常量，不经过普通字段访问。
     pub(super) fn compile_field_access(
         &mut self,
         target: &Expr,
         name: &str,
         span: Span,
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
+        if let Expr::Identifier {
+            name: enum_name, ..
+        } = target
+        {
+            let resolved = self.enums.get(enum_name).map(|descriptor| {
+                (
+                    descriptor.member_index(name),
+                    descriptor.display.clone(),
+                    enum_name.clone(),
+                )
+            });
+            if let Some((index, display, internal)) = resolved {
+                let Some(index) = index else {
+                    return Err(CompilerError::build_message(
+                        format!("代码生成阶段找不到枚举 `{display}` 的成员 `{name}`"),
+                        span,
+                    ));
+                };
+                return Ok(CodegenValue::Value(TypedValue {
+                    value_type: ValueType::Enum(EnumType::new(internal, display)),
+                    value: self.context.i64_type().const_int(index as u64, false).into(),
+                }));
+            }
+            // 标识符不是枚举时说明成员访问目标缺失，避免继续按普通字段读取生成代码。
+            if self.lookup_variable(enum_name).is_none() {
+                return Err(CompilerError::build_message(
+                    format!("代码生成阶段找不到枚举 `{enum_name}`"),
+                    span,
+                ));
+            }
+        }
         let compiled = self.compile_expr(target)?;
         let target = self.expect_value(compiled)?;
         self.load_field(target, name, span).map(CodegenValue::Value)

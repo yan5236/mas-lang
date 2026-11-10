@@ -11,9 +11,10 @@ impl<'a> SemanticAnalyzer<'a> {
                 CompilerError::semantic_message("模块导入应在语义分析前完成展开", *span),
             ),
             Stmt::StructDecl { span, .. }
+            | Stmt::EnumDecl { span, .. }
             | Stmt::FunctionDecl { span, .. }
             | Stmt::ExternFunctionDecl { span, .. } => Err(CompilerError::semantic_message(
-                "函数和结构体定义只能出现在顶层",
+                "函数、结构体和枚举定义只能出现在顶层",
                 *span,
             )),
             Stmt::VarDecl {
@@ -62,7 +63,10 @@ impl<'a> SemanticAnalyzer<'a> {
                         *span,
                     ));
                 }
-                if self.structs.contains_key(name) || self.current_scope().contains_key(name) {
+                if self.structs.contains_key(name)
+                    || self.enums.contains_key(name)
+                    || self.current_scope().contains_key(name)
+                {
                     return Err(CompilerError::semantic_message(
                         format!("{} `{name}` 在当前作用域中重复声明", binding_kind.keyword()),
                         *span,

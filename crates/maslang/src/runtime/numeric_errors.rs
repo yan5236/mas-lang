@@ -15,6 +15,8 @@ pub extern "C" fn mas_numeric_error(
         3 => "数组下标越界",
         5 => "不能读取 null 的值；请先用 != null 判断，再访问 .value",
         4 => "浮点数无法转换为整数：数值非有限或超出 i64 范围",
+        6 => "安全结果失败时没有有效的 .value；请先检查 .ok，再读取 .value",
+        7 => "字节下标越界",
         _ => "未知数值错误",
     };
     abort_runtime_at(

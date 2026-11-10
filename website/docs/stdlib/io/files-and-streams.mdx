@@ -1,0 +1,175 @@
+---
+sidebar_position: 2
+---
+
+# 文件与流
+
+这一页讲清楚四件事：怎么打开文件、怎么分块读、怎么写、什么时候必须关闭。文件操作入口都返回结果结构，先用 `ok` 判断成功，再看 `code`；三个标准流借用入口直接返回 `File`。
+
+## 打开文件
+
+`open(path, mode)` 返回 `OpenResult`。成功时 `value: File?` 非空，用 `.value` 取出句柄：
+
+```mas-lang
+import io { FileMode, open }
+
+func main():
+    var opened = open("app.log", FileMode.Append)
+    if not opened.ok:
+        print("打开失败")
+        return
+    var file = opened.value.value
+    // 使用 file …
+```
+
+四种模式的区别：
+
+| 模式 | 文件不存在 | 已有内容 |
+| --- | --- | --- |
+| `FileMode.Read` | 失败（`NotFound`） | 从头读，不截断 |
+| `FileMode.Write` | 创建 | **截断**为空文件 |
+| `FileMode.Append` | 创建 | 保留，每次写都到末尾 |
+| `FileMode.ReadWrite` | 失败（`NotFound`） | 保留，不截断，可读可写 |
+
+同一个路径打开两次会得到两个独立句柄，各自有位置和缓冲；关闭一个不影响另一个。
+
+## 分块读取
+
+`read(file, count)` 最多读取 `count` 个字节，返回 `ReadResult`：
+
+- 数据用 `value: bytes` 返回；`len(value)` 是本次实际读到的字节数。
+- **允许短读**：请求 1024 字节，可能只返回 100 字节，这是正常的。每次调用最多交付一块已就绪的数据；管道上拿到一段就返回，不会为了凑满请求继续等待。
+- `eof` 只在「没有返回数据，并且已经到文件末尾」时为 `true`。读到数据时 `eof` 一定是 `false`，下一次空读取才报告 EOF。
+- `read(file, 0)` 在句柄和模式有效时返回空字节、`eof = false`，不会真的去读宿主文件。
+- `count` 为负数返回 `InvalidArgument`；`count` 很大但已到末尾时直接返回 EOF，不会先申请巨量内存再失败。
+
+读取失败时 `value` 是空字节、`eof = false`。如果宿主已经交付了一部分数据后出错，库会先把这部分数据交给你，错误留到下一次正数读取或 `read_line`。
+
+```mas-lang
+import io { FileMode, close, open, read }
+
+func main():
+    var opened = open("data.bin", FileMode.Read)
+    if not opened.ok:
+        return
+    var file = opened.value.value
+    var chunk = read(file, 32)
+    if chunk.ok and not chunk.eof:
+        print(len(chunk.value)) // 本次读到的字节数，可能小于 32
+    close(file)
+```
+
+## 按行读取
+
+`read_line(file)` 返回 `LineResult`，行为和常见文本工具一致：
+
+- 读到 LF（`\n`）或文件末尾为止。
+- 剥除 LF，以及它**紧邻前面**的一个 CR（`\r`）；其他字符原样保留。
+- 空行是成功结果：`value` 为空串，`eof = false`。
+- 最后一段没有换行的文本仍然作为一行返回。
+- 文本必须是合法 UTF-8；遇到非法编码时消费掉这一行并返回 `InvalidUtf8`，不做替换。
+- 在完整行之前遇到读错误时，丢弃本次消费的残行并返回错误；已经完整读出的行照常交付。
+
+```mas-lang
+import io { FileMode, close, open, read_line }
+
+func main():
+    var opened = open("config.txt", FileMode.Read)
+    if not opened.ok:
+        return
+    var file = opened.value.value
+    var reading = true
+    while reading:
+        var line = read_line(file)
+        if not line.ok or line.eof:
+            reading = false
+        else:
+            print("[" + line.value + "]")
+    close(file)
+```
+
+`read` 和 `read_line` 共用同一个句柄的读缓冲和逻辑位置，可以在同一个文件上交替使用，不会互相吞掉数据。
+
+## 写入
+
+`write(file, data)` 接收 `bytes`，循环写到宿主接受完整段为止。返回 `WriteResult`：
+
+- `ok` 表示是否全部写完。
+- `written` 是宿主**已接受**的字节数，失败时保留这个值，方便判断写到哪了。
+- `Append` 模式每次写之前都会定位到文件末尾。
+
+`write_text_to(file, text)` 接收 `string`，先严格验证 UTF-8 再写入；非法文本返回 `InvalidUtf8`，不会添加换行。
+
+```mas-lang
+import io { FileMode, close, flush, open, write }
+
+func main():
+    var opened = open("out.bin", FileMode.Write)
+    if not opened.ok:
+        return
+    var file = opened.value.value
+    var result = write(file, bytes_from_list([0, 1, 255]).value)
+    print(result.written) // 3
+    flush(file)
+    close(file)
+```
+
+文本和二进制不能混写：`write` 只收 `bytes`，`write_text_to` 只收 `string`。写入失败时先检查 `written`，再决定是否重试剩余部分。
+
+## 定位
+
+`seek(file, offset, origin)` 返回 `SeekResult`：
+
+| 起点 | 含义 |
+| --- | --- |
+| `SeekFrom.Start` | 从文件开头计数 |
+| `SeekFrom.Current` | 从当前逻辑位置计数 |
+| `SeekFrom.End` | 从文件末尾计数 |
+
+成功后 `position` 是从文件开头计数的绝对位置。成功定位会丢弃旧读缓冲、清除 EOF 状态。位置和大小支持完整的有符号 64 位范围，超出返回 `TooLarge`。
+
+## 刷新与关闭
+
+- `flush(file)` 把库缓冲刷到宿主。常规写句柄成功；标准流会同时刷新宿主缓冲；**输入方向**返回 `NotSupported`，不会假装成功。
+- `close(file)` 关闭常规文件并让句柄失效。关闭对同一个 `File` 的**所有别名**生效；重复关闭返回 `Closed`，其他文件不受影响。
+- 即使 `close` 返回失败，常规文件的句柄也已经失效。标准流是借用句柄：`close` 返回 `NotSupported`，句柄仍然可用，这条规则不适用。
+- 丢失最后一个 Mas 引用不会自动关闭；进程退出由宿主回收资源。请在结束使用时显式关闭。
+
+## 标准流
+
+| 接口 | 能做什么 | 不能做什么 |
+| --- | --- | --- |
+| `stdin()` | `read`、`read_line` | `write`、`seek`、`close`（后两者 `NotSupported`） |
+| `stdout()` | `write`、`write_text_to`、`flush` | `read`、`seek`、`close` |
+| `stderr()` | `write`、`write_text_to`、`flush` | `read`、`seek`、`close` |
+
+- `stdout` 与 `print` 共用同一输出流，调用顺序保持一致。
+- 重定向到文件或管道时按原始字节处理。
+- Windows 附加控制台对无法表示的任意二进制写入返回可恢复错误；合法 UTF-8 文本可正常输出。
+- 标准流是借用句柄，`close`/`seek` 固定返回 `NotSupported`，不要拿它们和普通文件句柄混用。
+
+## 缓冲与逻辑位置
+
+每个常规文件句柄有一份读缓冲，`read` 和 `read_line` 共享它。逻辑位置指的是「下一个要读/写的字节」的绝对位置，预读进缓冲的数据**不**计入位置，所以 `seek(Current)` 和读写切换都以逻辑位置为准。
+
+实践建议：
+
+- 不要混用外部的系统描述符操作和本库的缓冲流操作。
+- `ReadWrite` 模式在读写之间切换时，显式 `seek` 或 `flush` 一次最清楚。
+- 同一条数据流只保留一个读取者，不要在两个句柄上交替读同一个位置。
+
+## 文本与二进制边界
+
+| 数据类型 | 入口 | 失败行为 |
+| --- | --- | --- |
+| `bytes` | `read`、`read_file`、`write`、`write_file`、`append_file` | 原样保留 NUL 和非法 UTF-8 |
+| `string` | `read_line`、`read_text`、`write_text_to`、`write_text`、`append_text` | 非法 UTF-8 返回 `InvalidUtf8` |
+
+`bytes` 和 `string` 不能隐式互转，也不能比较；需要时用 `encode_utf8` / `decode_utf8`。`bytes` 也不能作为 `map` 的键或值，但可以放进 `list<bytes>`（详见[字节](../../basics/bytes)）。
+
+## 小结
+
+1. 用 `open` 拿句柄，检查 `ok` 后从 `value.value` 取出 `File`。
+2. 二进制用 `read`/`write`，文本用 `read_line`/`write_text_to`；两者别混。
+3. 循环读到 `eof = true` 或 `ok = false` 为止；每次处理 `value` 的非空部分。
+4. 结束时显式 `close`；重复关闭得到 `Closed` 是预期行为。

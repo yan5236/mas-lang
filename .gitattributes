@@ -7,3 +7,7 @@
 
 # 确保 Cargo 项目中的 .rs 文件被正常计入（避免被误当成 Vendored/Documentation 排除）
 *.rs linguist-detectable=true
+
+# io 原生分发同样按源码字节校验，必须保持 LF，避免检出换行变化导致预编译产物指纹失效。
+/stdlib/io/native/**/*.c text eol=lf
+/stdlib/io/native/**/*.h text eol=lf

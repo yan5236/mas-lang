@@ -4,6 +4,10 @@ use crate::source::Span;
 
 use super::{SemanticAnalyzer, ValueType};
 
+/// 固定数组 `try_set` 缺少可写存储位置时的统一诊断；语义分析和代码生成共用同一文本。
+pub(crate) const ARRAY_TRY_SET_STORAGE_HINT: &str = "固定数组 `try_set` 需要可写入的存储位置：\
+     请把数组保存在变量或结构体字段中，数组元素改用下标赋值，例如 `grid[0][1] = v`";
+
 impl<'a> SemanticAnalyzer<'a> {
     /// 推导列表字面量的元素类型，并校验元素必须同构。
     pub(super) fn infer_list_literal_type(
@@ -71,7 +75,7 @@ impl<'a> SemanticAnalyzer<'a> {
         let first_key = self.infer_expression_type_with_hint(&entries[0].key, hinted_key)?;
         let first_value = self.infer_expression_type_with_hint(&entries[0].value, hinted_value)?;
         self.ensure_map_key_type(&first_key, entries[0].key.span())?;
-        self.ensure_list_element_type(&first_value, entries[0].value.span())?;
+        self.ensure_map_value_type(&first_value, entries[0].value.span())?;
 
         for entry in &entries[1..] {
             let key_type = self.infer_expression_type_with_hint(&entry.key, Some(&first_key))?;
@@ -145,6 +149,16 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
                 Ok((*element).clone())
             }
+            ValueType::Bytes => {
+                let index_type = self.infer_expression_type(index)?;
+                if index_type != ValueType::Int {
+                    return Err(CompilerError::semantic_message(
+                        "索引必须是整数",
+                        index.span(),
+                    ));
+                }
+                Ok(ValueType::Int)
+            }
             ValueType::Map(key, value) => {
                 let index_type = self.infer_expression_type_with_hint(index, Some(key.as_ref()))?;
                 if index_type != *key {
@@ -211,11 +225,12 @@ impl<'a> SemanticAnalyzer<'a> {
                 self.infer_list_method_type(element_type, method, arguments, span)
             }
             ValueType::Array(element_type, size) => {
-                self.infer_array_method_type(element_type, size, method, arguments, span)
+                self.infer_array_method_type(target, element_type, size, method, arguments, span)
             }
             ValueType::Map(key_type, value_type) => {
                 self.infer_map_method_type(key_type, value_type, method, arguments, span)
             }
+            ValueType::Bytes => self.infer_bytes_method_type(method, arguments, span),
             _ if method.supports_string_target() => Err(CompilerError::semantic_message(
                 format!(
                     "字符串方法 `{}` 只能用于 `string` 类型，当前目标类型为 `{}`",
@@ -286,6 +301,85 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
                 Ok(ValueType::String)
             }
+            MethodName::Split => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `split` 需要且只接受一个分隔符参数",
+                        span,
+                    ));
+                }
+                if self.infer_expression_type(&arguments[0])? != ValueType::String {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `split` 的分隔符参数必须是 string",
+                        arguments[0].span(),
+                    ));
+                }
+                Ok(ValueType::List(Box::new(ValueType::String)))
+            }
+            MethodName::IndexOf => {
+                if arguments.is_empty() || arguments.len() > 2 {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `index_of` 需要 1 到 2 个参数：目标子串，可选的起始标量下标",
+                        span,
+                    ));
+                }
+                if self.infer_expression_type(&arguments[0])? != ValueType::String {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `index_of` 的查找目标必须是 string",
+                        arguments[0].span(),
+                    ));
+                }
+                if let Some(start) = arguments.get(1) {
+                    if self.infer_expression_type(start)? != ValueType::Int {
+                        return Err(CompilerError::semantic_message(
+                            "字符串方法 `index_of` 的起始下标必须是整数",
+                            start.span(),
+                        ));
+                    }
+                }
+                Ok(ValueType::Nullable(Box::new(ValueType::Int)))
+            }
+            MethodName::Substring => {
+                if arguments.len() != 2 {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `substring` 需要起始和结束两个整数下标",
+                        span,
+                    ));
+                }
+                for argument in arguments {
+                    if self.infer_expression_type(argument)? != ValueType::Int {
+                        return Err(CompilerError::semantic_message(
+                            "字符串方法 `substring` 的下标参数必须是整数",
+                            argument.span(),
+                        ));
+                    }
+                }
+                Ok(ValueType::Nullable(Box::new(ValueType::String)))
+            }
+            MethodName::ToLower | MethodName::ToUpper => {
+                if !arguments.is_empty() {
+                    return Err(CompilerError::semantic_message(
+                        format!("字符串方法 `{}` 不接受参数", method.display_name()),
+                        span,
+                    ));
+                }
+                Ok(ValueType::String)
+            }
+            MethodName::Repeat => {
+                if arguments.len() != 1 {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `repeat` 需要且只接受一个整数次数",
+                        span,
+                    ));
+                }
+                if self.infer_expression_type(&arguments[0])? != ValueType::Int {
+                    return Err(CompilerError::semantic_message(
+                        "字符串方法 `repeat` 的次数参数必须是整数",
+                        arguments[0].span(),
+                    ));
+                }
+                Ok(ValueType::Nullable(Box::new(ValueType::String)))
+            }
             MethodName::Append
             | MethodName::Remove
             | MethodName::Pop
@@ -299,7 +393,8 @@ impl<'a> SemanticAnalyzer<'a> {
             | MethodName::TryPop
             | MethodName::TryIndex
             | MethodName::TryRemove
-            | MethodName::TrySlice => Err(CompilerError::semantic_message(
+            | MethodName::TrySlice
+            | MethodName::Slice => Err(CompilerError::semantic_message(
                 format!("字符串类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -451,7 +546,14 @@ impl<'a> SemanticAnalyzer<'a> {
             | MethodName::Trim
             | MethodName::StartsWith
             | MethodName::EndsWith
-            | MethodName::Replace => Err(CompilerError::semantic_message(
+            | MethodName::Replace
+            | MethodName::Split
+            | MethodName::IndexOf
+            | MethodName::Substring
+            | MethodName::ToLower
+            | MethodName::ToUpper
+            | MethodName::Repeat
+            | MethodName::Slice => Err(CompilerError::semantic_message(
                 format!("列表类型不支持方法 `{}`", method.display_name()),
                 span,
             )),
@@ -461,6 +563,7 @@ impl<'a> SemanticAnalyzer<'a> {
     /// 推导固定数组安全方法的返回值类型；数组只提供可恢复的下标读写。
     fn infer_array_method_type(
         &mut self,
+        target: &Expr,
         element_type: Box<ValueType>,
         size: usize,
         method: MethodName,
@@ -483,6 +586,14 @@ impl<'a> SemanticAnalyzer<'a> {
                     return Err(CompilerError::semantic_message(
                         "数组方法 `try_set` 需要整数下标和元素值两个参数",
                         span,
+                    ));
+                }
+                // 固定数组是内联值，只有变量、结构体字段这类稳定存储位置才能写回；
+                // 数组元素、函数返回值等临时副本在语义阶段直接拒绝，和代码生成保持一致。
+                if !Self::is_writable_array_place(target) {
+                    return Err(CompilerError::semantic_message(
+                        ARRAY_TRY_SET_STORAGE_HINT,
+                        target.span(),
                     ));
                 }
                 self.require_int_argument(&arguments[0], method)?;
@@ -515,6 +626,16 @@ impl<'a> SemanticAnalyzer<'a> {
         }
     }
 
+    /// 判断表达式是否只由变量引用和结构体字段组成：这类目标在运行时仍有稳定存储地址。
+    fn is_writable_array_place(expression: &Expr) -> bool {
+        match expression {
+            Expr::Identifier { .. } => true,
+            Expr::Grouped { expression, .. } => Self::is_writable_array_place(expression),
+            Expr::FieldAccess { target, .. } => Self::is_writable_array_place(target),
+            _ => false,
+        }
+    }
+
     /// 校验安全方法的整数参数，失败时给出方法名和源码位置。
     fn require_int_argument(
         &mut self,
@@ -528,6 +649,79 @@ impl<'a> SemanticAnalyzer<'a> {
             ));
         }
         Ok(())
+    }
+
+    /// 推导字节对象方法调用的返回类型；当前只支持严格切片 `slice(start, end)`。
+    /// 区间非法时返回 null，因此结果类型是 `bytes?`；不区分可恢复方法族。
+    pub(super) fn infer_bytes_method_type(
+        &mut self,
+        method: MethodName,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<ValueType, CompilerError> {
+        match method {
+            MethodName::Slice => {
+                if arguments.len() != 2 {
+                    return Err(CompilerError::semantic_message(
+                        "字节方法 `slice` 需要且只接受起始与结束两个整数下标",
+                        span,
+                    ));
+                }
+                for argument in arguments {
+                    if self.infer_expression_type(argument)? != ValueType::Int {
+                        return Err(CompilerError::semantic_message(
+                            "字节方法 `slice` 的下标必须是整数",
+                            argument.span(),
+                        ));
+                    }
+                }
+                Ok(ValueType::Nullable(Box::new(ValueType::Bytes)))
+            }
+            _ => Err(CompilerError::semantic_message(
+                format!(
+                    "字节类型不支持方法 `{}`；可用入口为 `slice`",
+                    method.display_name()
+                ),
+                span,
+            )),
+        }
+    }
+
+    /// 推导字节内建函数的返回类型，并校验参数类型：构造、编码与解码都返回可空结果。
+    pub(super) fn infer_bytes_builtin_type(
+        &mut self,
+        name: &str,
+        arguments: &[Expr],
+        span: Span,
+    ) -> Result<Option<ValueType>, CompilerError> {
+        let (expected, result) = match name {
+            "bytes_from_list" => (
+                "元素为整数的列表",
+                ValueType::Nullable(Box::new(ValueType::Bytes)),
+            ),
+            "encode_utf8" => ("string", ValueType::Nullable(Box::new(ValueType::Bytes))),
+            "decode_utf8" => ("bytes", ValueType::Nullable(Box::new(ValueType::String))),
+            _ => return Ok(None),
+        };
+        if arguments.len() != 1 {
+            return Err(CompilerError::semantic_message(
+                format!("内建函数 `{name}` 需要且只接受一个参数"),
+                span,
+            ));
+        }
+        let argument_type = self.infer_expression_type(&arguments[0])?;
+        let accepted = match name {
+            "bytes_from_list" => argument_type == ValueType::List(Box::new(ValueType::Int)),
+            "encode_utf8" => argument_type == ValueType::String,
+            _ => argument_type == ValueType::Bytes,
+        };
+        if !accepted {
+            return Err(CompilerError::semantic_message(
+                format!("内建函数 `{name}` 的参数类型必须是{expected}"),
+                arguments[0].span(),
+            ));
+        }
+        Ok(Some(result))
     }
 
     /// 推导字典方法调用的返回值类型，并校验方法参数规则。
@@ -612,7 +806,14 @@ impl<'a> SemanticAnalyzer<'a> {
             | MethodName::Trim
             | MethodName::StartsWith
             | MethodName::EndsWith
-            | MethodName::Replace => Err(CompilerError::semantic_message(
+            | MethodName::Replace
+            | MethodName::Split
+            | MethodName::IndexOf
+            | MethodName::Substring
+            | MethodName::ToLower
+            | MethodName::ToUpper
+            | MethodName::Repeat
+            | MethodName::Slice => Err(CompilerError::semantic_message(
                 format!("字典类型不支持方法 `{}`", method.display_name()),
                 span,
             )),

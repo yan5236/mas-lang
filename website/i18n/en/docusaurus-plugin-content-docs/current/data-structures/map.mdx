@@ -98,7 +98,7 @@ func main():
     print(len(scores))                   // 0
 ```
 
-`try_get` returns `try_result<V>`, the same result shape as the safe conversions such as `try_int`, with the read-only properties `.ok` and `.value`. For a missing key `.ok` is `false` and `.value` is a harmless placeholder (`0`, `0.0`, `false`, an empty string, or a `null` reference), so **check `.ok` first**. Key comparison matches `contains` exactly: struct keys by object identity, string keys by byte content, integer keys by value.
+`try_get` returns `try_result<V>`, the same result shape as the safe conversions such as `try_int`, with the read-only properties `.ok` and `.value`. For a missing key `.ok` is `false`. The `.value` placeholder is safe to read for `int`, `float`, `bool`, and strings (`0`, `0.0`, `false`, a valid empty string); structs, lists, maps, and other reference values have no safe placeholder, and reading `.value` directly reports a source-located language error and exits with status code 1. So **check `.ok` first**. Key comparison matches `contains` exactly: struct keys by object identity, string keys by byte content, integer keys by value.
 
 For nullable values, `try_get` still tells the two cases apart — a missing key versus a key whose value is `null`:
 

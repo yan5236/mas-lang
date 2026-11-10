@@ -18,9 +18,11 @@ struct Binding {
     scope: Span,
 }
 
-/// 当前内存文档的结构体字段、函数返回值及局部类型索引；不读取磁盘上的旧编辑内容。
+/// 当前内存文档的结构体字段、枚举成员、函数返回值及局部类型索引；不读取磁盘上的旧编辑内容。
 struct RecordIndex {
     records: HashMap<String, (Span, Vec<Parameter>)>,
+    /// 枚举外部名到（声明区间，成员名与成员声明区间）的索引。
+    enums: HashMap<String, (Span, Vec<(String, Span)>)>,
     functions: HashMap<String, TypeName>,
     bindings: Vec<Binding>,
 }
@@ -49,6 +51,7 @@ impl RecordIndex {
         let program = parse_editor_program(text)?;
         let mut index = Self {
             records: HashMap::new(),
+            enums: HashMap::new(),
             functions: HashMap::new(),
             bindings: Vec::new(),
         };
@@ -58,6 +61,20 @@ impl RecordIndex {
                     name, fields, span, ..
                 } => {
                     index.records.insert(name.clone(), (*span, fields.clone()));
+                }
+                Stmt::EnumDecl {
+                    name, members, span, ..
+                } => {
+                    index.enums.insert(
+                        name.clone(),
+                        (
+                            *span,
+                            members
+                                .iter()
+                                .map(|m| (m.name.clone(), m.span))
+                                .collect(),
+                        ),
+                    );
                 }
                 Stmt::FunctionDecl {
                     name,
@@ -174,7 +191,12 @@ impl RecordIndex {
                         && position <= b.scope.end
                 })
                 .max_by_key(|b| (b.scope.start, b.start))
-                .and_then(|b| b.ty.clone()),
+                .and_then(|b| b.ty.clone())
+                .or_else(|| {
+                    self.enums
+                        .contains_key(name)
+                        .then(|| TypeName::Named(name.clone()))
+                }),
             Expr::Call { callee, .. } => {
                 if let Expr::Identifier { name, .. } = callee.as_ref() {
                     if self.records.contains_key(name) {
@@ -204,17 +226,27 @@ impl RecordIndex {
         }
     }
 
-    /// 取得具名字段类型，或对可空类型 `.value` 去掉问号；不会直接展开可空对象的字段。
+    /// 取得具名字段类型、枚举成员类型，或对可空类型 `.value` 去掉问号；不会直接展开可空对象的字段。
     fn member_type(&self, ty: &TypeName, member: &str) -> Option<TypeName> {
         match ty {
             TypeName::Nullable(inner) if member == "value" => Some(*inner.clone()),
             TypeName::Named(name) => self
                 .records
-                .get(name)?
-                .1
-                .iter()
-                .find(|f| f.name == member)
-                .map(|f| f.type_name.clone()),
+                .get(name)
+                .and_then(|(_, fields)| {
+                    fields
+                        .iter()
+                        .find(|f| f.name == member)
+                        .map(|f| f.type_name.clone())
+                })
+                .or_else(|| {
+                    self.enums
+                        .get(name)
+                        .filter(|(_, members)| {
+                            members.iter().any(|(member_name, _)| member_name == member)
+                        })
+                        .map(|_| TypeName::Named(name.clone()))
+                }),
             _ => None,
         }
     }
@@ -280,10 +312,8 @@ pub fn member_completions(text: &str, position: Position) -> Option<Vec<Completi
         return Some(Vec::new());
     };
     let items = match index.receiver(text, dot) {
-        Some(TypeName::Named(name)) => index
-            .records
-            .get(&name)
-            .map(|(_, fields)| {
+        Some(TypeName::Named(name)) => {
+            if let Some((_, fields)) = index.records.get(&name) {
                 fields
                     .iter()
                     .map(|f| CompletionItem {
@@ -293,8 +323,21 @@ pub fn member_completions(text: &str, position: Position) -> Option<Vec<Completi
                         ..CompletionItem::default()
                     })
                     .collect()
-            })
-            .unwrap_or_default(),
+            } else if let Some((_, members)) = index.enums.get(&name) {
+                members
+                    .iter()
+                    .map(|(member, _)| CompletionItem {
+                        label: member.clone(),
+                        kind: Some(CompletionItemKind::ENUM_MEMBER),
+                        detail: Some(format!("{name}.{member}")),
+                        ..CompletionItem::default()
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+        Some(TypeName::String) => crate::completion::string_method_items(),
         Some(TypeName::Nullable(inner)) => vec![CompletionItem {
             label: "value".into(),
             kind: Some(CompletionItemKind::PROPERTY),
@@ -337,22 +380,41 @@ pub fn symbol_at(text: &str, position: Position) -> Option<MasSymbol> {
             });
         }
     }
+    for (enum_name, (_, members)) in &index.enums {
+        if let Some((_, member_span)) = members.iter().find(|(_, member_span)| *member_span == span) {
+            return Some(MasSymbol {
+                name: format!("{enum_name}.{word}"),
+                kind: SymbolKind::ENUM_MEMBER,
+                range: span_to_range(text, *member_span),
+                selection_range: span_to_range(text, *member_span),
+                detail: Some(format!("{enum_name}.{word}")),
+            });
+        }
+    }
     if span.start > 0 && text.as_bytes()[span.start - 1] == b'.' {
         let ty = index.receiver(text, span.start - 1)?;
         match ty {
             TypeName::Named(record) => {
-                let f = index
-                    .records
-                    .get(&record)?
-                    .1
-                    .iter()
-                    .find(|f| f.name == word)?;
+                if let Some((_, fields)) = index.records.get(&record) {
+                    if let Some(f) = fields.iter().find(|f| f.name == word) {
+                        return Some(MasSymbol {
+                            name: format!("{record}.{word}"),
+                            kind: SymbolKind::FIELD,
+                            range: span_to_range(text, f.span),
+                            selection_range: span_to_range(text, f.span),
+                            detail: Some(format!("{word}: {}", type_name_text(&f.type_name))),
+                        });
+                    }
+                    return None;
+                }
+                let (_, members) = index.enums.get(&record)?;
+                let (_, member_span) = members.iter().find(|(member, _)| member == word)?;
                 return Some(MasSymbol {
                     name: format!("{record}.{word}"),
-                    kind: SymbolKind::FIELD,
-                    range: span_to_range(text, f.span),
-                    selection_range: span_to_range(text, f.span),
-                    detail: Some(format!("{word}: {}", type_name_text(&f.type_name))),
+                    kind: SymbolKind::ENUM_MEMBER,
+                    range: span_to_range(text, *member_span),
+                    selection_range: span_to_range(text, *member_span),
+                    detail: Some(format!("{record}.{word}（枚举成员）")),
                 });
             }
             TypeName::Nullable(inner) if word == "value" => {
@@ -366,6 +428,17 @@ pub fn symbol_at(text: &str, position: Position) -> Option<MasSymbol> {
             }
             _ => return None,
         }
+    }
+    if let Some((declaration, _)) = index.enums.get(word) {
+        let fragment = text.get(declaration.start..declaration.end)?;
+        let start = declaration.start + fragment.find(word)?;
+        return Some(MasSymbol {
+            name: word.into(),
+            kind: SymbolKind::ENUM,
+            range: span_to_range(text, *declaration),
+            selection_range: span_to_range(text, Span::new(start, start + word.len())),
+            detail: Some(format!("enum {word}")),
+        });
     }
     let (declaration, _) = index.records.get(word)?;
     let fragment = text.get(declaration.start..declaration.end)?;

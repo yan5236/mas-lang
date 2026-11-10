@@ -1,0 +1,209 @@
+---
+sidebar_position: 6
+---
+
+# 字节：保存任意二进制数据
+
+`string` 必须是合法 UTF-8 文本。图片、压缩包、协议帧里经常出现 `0x00`、`0xFF` 这类字节，它们不是合法文本。**`bytes` 用来保存这种「任意字节」的数据**：内容原样保留，长度、下标、切片都按字节计算。
+
+## 为什么需要单独的 bytes
+
+一个 PNG 文件开头是 `0x89 0x50 0x4E 0x47`。如果硬塞进 `string`，程序就要么拒绝这段数据，要么在某个环节悄悄替换字符——两种结果都会破坏文件。`bytes` 不检查编码，也不解释内容，读进来是什么就存什么。
+
+```mas-lang
+func main():
+    var signature = bytes_from_list([137, 80, 78, 71]).value
+    print(len(signature)) // 4：按字节计数
+    print(signature[0])   // 137
+```
+
+## bytes 与 string 的区别
+
+| | `bytes` | `string` |
+| --- | --- | --- |
+| 内容约束 | 任意字节，包括 NUL 和非法 UTF-8 | 必须是合法 UTF-8 |
+| `len` 的计数单位 | 字节 | Unicode 标量（字符） |
+| 下标 `data[i]` | 支持，返回 `0..255` 的 `int` | 不支持 |
+| 切片 | `data.slice(start, end)` | 用 `substring` 方法 |
+| 与另一种类型比较 | 编译错误 | 编译错误 |
+| 直接 `print` | 编译错误 | 支持 |
+| 与另一种类型转换 | 只能用 `encode_utf8` / `decode_utf8` | 同左 |
+
+两者故意不能混用：编译器会拦住把二进制数据送进文本 API、或把文本当成字节切片的写法。
+
+## 构造 bytes
+
+`bytes_from_list(values)` 把一个 `list<int>` 按值复制成字节，每个元素必须在 `0..255` 内；有一项越界就返回 `null`，不会截断或取模。空列表得到合法的空字节对象。
+
+```mas-lang
+func main():
+    var values: list<int> = [0, 65, 255]
+    var data = bytes_from_list(values).value
+    print(len(data)) // 3
+    print(data[0])   // 0
+    print(data[1])   // 65
+    print(data[2])   // 255
+
+    print(bytes_from_list([256]) == null) // true：越界返回 null
+    print(bytes_from_list([-1]) == null)  // true
+
+    var empty: list<int> = []
+    var nothing = bytes_from_list(empty).value
+    print(len(nothing)) // 0
+```
+
+注意两件事：
+
+- `bytes_from_list` 返回 `bytes?`。确定元素都在范围内时可以直接写 `.value`；数据来自外部、可能越界时，先判断 `!= null`。
+- 空列表字面量 `[]` 没有元素类型，不能直接写 `bytes_from_list([])`，要先声明 `var empty: list<int> = []`。
+
+`encode_utf8(text)` 把文本编码成 UTF-8 字节，也返回 `bytes?`。正常的字符串字面量一定合法，所以通常直接取 `.value`；只有原生代码构造出的非法 UTF-8 字符串才会得到 `null`。
+
+```mas-lang
+func main():
+    var data = encode_utf8("你好😀").value
+    print(len(data)) // 10：三个字符分别占 3、3、4 字节
+```
+
+## 长度、下标与切片
+
+`len(data)` 返回字节数。`data[i]` 读取第 `i` 个字节的整数值（`0..255`）；下标从 0 开始，越界或负数会触发**带源码位置**的运行时错误，而不是返回 `null`。
+
+`data.slice(start, end)` 按半开区间 `[start, end)` 复制一段字节。负数、起点在终点之后、超出范围都返回 `null`。切片是独立的副本，之后换掉原变量的引用也不会影响已切出的内容。
+
+```mas-lang
+func main():
+    var values: list<int> = [0, 65, 255]
+    var data = bytes_from_list(values).value
+    print(len(data)) // 3
+    print(data[0])   // 0
+    print(data[1])   // 65
+    print(data[2])   // 255
+    var part = data.slice(1, 3).value
+    print(len(part)) // 2
+    print(part[0])   // 65
+    print(part[1])   // 255
+    print(data.slice(3, 1) == null) // true：起点在终点之后
+```
+
+## 比较
+
+两个 `bytes` 可以用 `==`、`!=` 逐字节比较；长度不同直接判定为不同。和 `string` 比较是编译错误，需要比较文本时先显式转换。
+
+```mas-lang
+func main():
+    var a = bytes_from_list([1, 2]).value
+    var b = bytes_from_list([1, 2]).value
+    var c = bytes_from_list([1, 3]).value
+    print(a == b) // true
+    print(a != c) // true
+```
+
+## 与文本互转
+
+`decode_utf8(data)` 严格校验 UTF-8：合法时返回 `string`，非法时返回 `null`，**不会**插入替换字符。合法的 NUL 字节可以正常解码成含 NUL 的字符串和长度为 1 的文本。
+
+```mas-lang
+func main():
+    var text = "你好😀"
+    var encoded = encode_utf8(text).value
+    print(len(encoded))                       // 10：UTF-8 字节数
+    print(decode_utf8(encoded).value == text) // true
+
+    var bad = bytes_from_list([255, 254]).value
+    print(decode_utf8(bad) == null) // true：不是合法 UTF-8
+
+    var nul = bytes_from_list([0]).value
+    print(decode_utf8(nul) != null)          // true
+    print(len(decode_utf8(nul).value))       // 1
+    print(len(encode_utf8("").value))        // 0
+```
+
+## 可以存放在哪里
+
+`bytes` 是语言内置的托管值类型，可以用于局部变量、全局变量、参数、返回值、结构体字段、`bytes?` 和 `list<bytes>`。
+
+```mas-lang
+struct Blob:
+    data: bytes
+
+var empty: list<int> = []
+var cache: bytes = bytes_from_list(empty).value
+
+func make() -> bytes:
+    return encode_utf8("hi").value
+
+func size(blob: Blob) -> int:
+    return len(blob.data)
+
+func main():
+    var blob = Blob(make())
+    var all: list<bytes> = [blob.data, cache]
+    print(size(blob))  // 2
+    print(len(all))    // 2
+    print(len(all[1])) // 0：cache 是空的合法字节
+
+    var maybe: bytes? = null
+    maybe = blob.data
+    print(maybe != null) // true
+    print(len(maybe.value))
+```
+
+### 字节列表
+
+`list<bytes>` 支持常用的列表操作：`append`、下标读取、`len`、`contains`、`index`、`pop`、`remove` 和 `try_get`；元素按**内容**比较，两个内容相同的字节对象被视为相等。
+
+```mas-lang
+func main():
+    var items: list<bytes> = [encode_utf8("a").value]
+    items.append(encode_utf8("b").value)
+    print(len(items))                              // 2
+    print(items.contains(encode_utf8("b").value)) // true：按内容比较
+    print(items.index(encode_utf8("a").value))    // 0
+    var last = items.pop()
+    print(len(last))                               // 1
+    var missing = items.try_get(9)
+    print(missing.ok)                              // false
+```
+
+`list<bytes>` **不能 `sort()`**：元素没有默认排序规则，调用会报「该列表不支持 sort()：元素没有默认排序规则」。需要排序时先自己定义比较规则（例如按长度或逐字节比较），再对下标或副本排序。
+
+`list<bytes?>` 同样可用（可空字节元素，读取时先判空再取 `.value`），但这属于实现附带能力，不是首版验收契约。
+
+`bytes` **不能作为字典的键，也不能作为字典的值**：
+
+- 键：`map<bytes,int>` 被拒绝，字典键只支持基础类型或结构体引用。
+- 值：`map<string,bytes>` 被拒绝，报「首版不支持把 `bytes` 作为字典值；请改写为结构体字段或 `list<bytes>`」。
+
+需要按名称保存字节时，放进结构体字段，或改用 `list<bytes>` 配合并行的名称列表。
+
+## GC 与所有权
+
+`bytes` 由运行时统一管理，**不可写、不可原地修改**。构造、切片、原生层的 `mas_runtime_bytes_clone` 都会复制内容，因此不必担心某个临时缓冲区被回收后数据失效。
+
+你只需要记住：
+
+- 字节对象可以安全地跨函数、跨模块、放进结构体或列表，并在 GC 之后继续使用。
+- 没有可写缓冲区、没有 `byte` 标量类型，也没有原地修改语法；需要新内容就构造新的 `bytes`。
+- 原生 C 代码不能用 `strlen` 测字节长度，也不能把栈上、`malloc` 或借入的地址挂到托管对象里；必须通过 `mas_runtime_bytes_clone` 复制。
+
+## 常见错误
+
+| 写法 | 原因与修正 |
+| --- | --- |
+| `print(data)` | `print` 只接受基础类型；先转换为文本，或逐字节打印 `data[i]`。 |
+| `int(data)`、`string(data)` | `bytes` 不参与基础类型转换；用 `decode_utf8` 得到文本。 |
+| `data == "abc"` | 两侧类型必须一致；文本先 `encode_utf8`，或字节先 `decode_utf8`。 |
+| `data.trim()`、`data.split(",")` | 这些是字符串方法；先 `decode_utf8` 再处理文本。 |
+| `data[0] = 1` | 字节对象不可写；下标赋值只支持列表、数组或字典。 |
+| `var table: map<bytes,int> = {}` | `map` 的键支持基础类型或结构体引用，不支持 `bytes`。 |
+| `var table: map<string,bytes> = {}` | 首版不支持把 `bytes` 作为字典值；改写为结构体字段或 `list<bytes>`。 |
+| `list<bytes>.sort()` | 字节没有默认排序规则；先自定义比较并排序下标或副本。 |
+| `bytes_from_list([1, 2.5])` | 元素必须是 `int`。 |
+| `bytes_from_list([])` | 空列表字面量缺少元素类型；先声明 `var empty: list<int> = []`。 |
+| `data.slice(0)` | `slice` 需要起始和结束两个下标。 |
+| `data[99]` | 运行时错误「字节下标越界」，带源码位置；先用 `len(data)` 判断范围。 |
+
+## 和文件 IO 的关系
+
+`io` 标准库把两种类型分开：`read`、`read_file` 返回 `bytes`，适合图片和任意二进制；`read_text`、`read_line` 返回 `string`，遇到非法 UTF-8 会返回 `InvalidUtf8`。需要在一个二进制文件里找文本片段时，先用 `read_file` 读字节，再对切出的片段调用 `decode_utf8`。

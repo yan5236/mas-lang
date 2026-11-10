@@ -7,6 +7,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     pub(super) fn gc_layout(value_type: &ValueType) -> Option<(u8, u64)> {
         match value_type {
             ValueType::String => Some((1, 1)),
+            // 字节对象与字符串同为「指针 + 长度」双字托管槽，GC 扫描方式一致。
+            ValueType::Bytes => Some((1, 1)),
             ValueType::Struct(_)
             | ValueType::Nullable(_)
             | ValueType::List(_)

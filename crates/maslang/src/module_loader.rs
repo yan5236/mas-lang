@@ -160,6 +160,9 @@ impl<'a> ModuleLoader<'a> {
                 Stmt::StructDecl {
                     is_public, name, ..
                 }
+                | Stmt::EnumDecl {
+                    is_public, name, ..
+                }
                 | Stmt::FunctionDecl {
                     is_public, name, ..
                 }
@@ -374,6 +377,23 @@ impl ModuleRewriter {
                 is_public,
                 name: self.rename_name(&name),
                 fields: self.rewrite_parameters(fields),
+                span,
+            },
+            Stmt::EnumDecl {
+                is_public,
+                name,
+                source_name,
+                members,
+                span,
+            } => Stmt::EnumDecl {
+                is_public,
+                name: if is_top_level {
+                    self.rename_name(&name)
+                } else {
+                    name
+                },
+                source_name,
+                members,
                 span,
             },
             Stmt::FunctionDecl {
@@ -802,6 +822,7 @@ fn collect_top_level_declarations(
         .iter()
         .filter_map(|statement| match statement {
             Stmt::StructDecl { name, .. }
+            | Stmt::EnumDecl { name, .. }
             | Stmt::FunctionDecl { name, .. }
             | Stmt::VarDecl { name, .. } => Some((
                 name.clone(),
@@ -1005,6 +1026,25 @@ fn shift_stmt(statement: Stmt, offset: usize) -> Stmt {
                 .map(|f| Parameter {
                     span: shift_span(f.span, offset),
                     ..f
+                })
+                .collect(),
+            span: shift_span(span, offset),
+        },
+        Stmt::EnumDecl {
+            is_public,
+            name,
+            source_name,
+            members,
+            span,
+        } => Stmt::EnumDecl {
+            is_public,
+            name,
+            source_name,
+            members: members
+                .into_iter()
+                .map(|member| crate::ast::EnumMember {
+                    name: member.name,
+                    span: shift_span(member.span, offset),
                 })
                 .collect(),
             span: shift_span(span, offset),

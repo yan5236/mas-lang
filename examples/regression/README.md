@@ -9,7 +9,7 @@
 | [compiler-stress](compiler-stress/) | 编译器后端回归，由 `cargo test -p maslang --locked msceshi` 执行 |
 | [config](config/) | 工具链配置负例 |
 
-完整项目放在 [projects](../projects/) 下，其中 [time-api](../projects/time-api/) 演示标准库时间 API，[language-server-demo](../projects/language-server-demo/) 用于验证语言服务器的补全、诊断和符号定位。
+完整项目放在 [projects](../projects/) 下，其中 [time-api](../projects/time-api/) 演示标准库时间 API，[io-api](../projects/io-api/) 演示标准库 IO（二进制复制、文本行、文件系统），[language-server-demo](../projects/language-server-demo/) 用于验证语言服务器的补全、诊断和符号定位。
 
 ## 运行方式
 

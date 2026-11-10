@@ -1,16 +1,36 @@
 use crate::ast::BindingKind;
 use crate::source::Span;
 
+/// 保存枚举的名义身份与源码显示名。
+///
+/// 身份取自模块装载器改写后的内部名，保证不同模块的同名枚举互不兼容；
+/// 显示名保留用户书写形式，避免诊断或语言服务暴露 `__ms_` 前缀。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnumType {
+    pub internal: String,
+    pub display: String,
+}
+
+impl EnumType {
+    /// 使用内部身份名和源码显示名创建枚举类型。
+    pub fn new(internal: String, display: String) -> Self {
+        Self { internal, display }
+    }
+}
+
 /// 表示语义分析阶段内部使用的值类型。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ValueType {
     Struct(String),
+    Enum(EnumType),
     Nullable(Box<ValueType>),
     Null,
     Int,
     Float,
     Bool,
     String,
+    /// 不可变字节对象；长度、索引和切片语义独立于字符串，内容可为任意字节。
+    Bytes,
     SafeConvertResult(Box<ValueType>),
     List(Box<ValueType>),
     Map(Box<ValueType>, Box<ValueType>),
@@ -23,12 +43,14 @@ impl ValueType {
     pub fn display_name(&self) -> String {
         match self {
             Self::Struct(name) => name.clone(),
+            Self::Enum(info) => info.display.clone(),
             Self::Nullable(inner) => format!("{}?", inner.display_name()),
             Self::Null => "null".to_string(),
             Self::Int => "int".to_string(),
             Self::Float => "float".to_string(),
             Self::Bool => "bool".to_string(),
             Self::String => "string".to_string(),
+            Self::Bytes => "bytes".to_string(),
             Self::SafeConvertResult(value) => {
                 format!("try_result<{}>", value.display_name())
             }
@@ -38,6 +60,14 @@ impl ValueType {
             }
             Self::Array(element, size) => format!("array<{},{}>", element.display_name(), size),
             Self::Unit => "unit".to_string(),
+        }
+    }
+
+    /// 返回枚举类型携带的名义身份；其他类型返回 `None`。
+    pub fn enum_identity(&self) -> Option<&EnumType> {
+        match self {
+            Self::Enum(info) => Some(info),
+            _ => None,
         }
     }
 }

@@ -5,7 +5,7 @@
 - [x] 1.1 确定统一结果表示（复用 `try_result<T>`，只表达成败的操作返回 `bool`）[关联: design.md §2.3]
 - [x] 1.2 扩展 `MethodName`（`try_get`/`try_set`/`try_pop`/`try_index`/`try_remove`/`try_slice`）与解析 [关联: design.md §2.3]
 - [x] 1.3 语义分析：列表/数组/字典安全方法类型、`try_print` 与受检整数内建类型 [关联: design.md §2.3]
-- [x] 1.4 代码生成分派：`safe_containers.rs`/`safe_maps.rs`/`safe_numeric.rs`/`safe_output.rs` 四个模块入口 [关联: design.md §2.2]
+- [x] 1.4 代码生成分派：`safe_lists.rs`/`safe_arrays.rs`/`safe_result.rs`/`safe_maps.rs`/`safe_numeric.rs`/`safe_output.rs` 模块入口 [关联: design.md §2.2]
 - [x] 1.5 GC 根布局：`try_result<T>` 载荷按字段 1 登记，保证引用型结果跨语句存活 [关联: design.md §2.3]
 
 ## 阶段 2：七项修复
@@ -39,3 +39,13 @@
 - [x] 4.3 通过 Actions 生成并回填 Linux/macOS 四份产物与清单（run 42562795801，四个矩阵任务 success）
 - [x] 4.4 `cargo test --workspace --locked` 全绿
 - [x] 4.5 `IMPLEMENTATION.md` 交付说明（基线、差异、契约、验证、遗留）
+
+## 阶段 5：Codex 回审修正
+
+- [x] 5.1 `try_pop(i)` 先求值下标实参再读取当前长度，补缩容/扩容双向回归与 GC 保活 [验证 Req 4.9]
+- [x] 5.2 失败载荷契约：字符串复用有效空串；结构体/列表/字典/含托管元素数组在 `.value` 访问处检查 `.ok` 并给出受控语言诊断 [验证 Req 4.7/4.8]
+- [x] 5.3 标准输出与标准错误同时断开时，`abort_runtime`/`abort_runtime_at` 尽力写诊断后仍以状态码 1 退出，补双管道回归 [验证 Req 2.2]
+- [x] 5.4 `array.try_set` 的可写位置在语义分析阶段拒绝，并让语义与代码生成共用同一诊断文本
+- [x] 5.5 按职责拆分 `safe_containers.rs` 为 `safe_lists.rs`/`safe_arrays.rs`/`safe_result.rs`，不增加转发层
+- [x] 5.6 修正 time 诊断文本“逐字一致”的表述，在回交、规格、time README 与网站记录兼容性变化
+- [x] 5.7 回交文档记录用户对 time ABI 2 与保留内建名的确认，以及嵌套数组写入未覆盖项
