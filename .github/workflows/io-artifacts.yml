@@ -8,11 +8,6 @@ name: Io native artifacts
 # Windows x64 的对象沿用 `time` 的做法在本机 MSVC 上生成，不放进这个矩阵。
 on:
   workflow_dispatch:
-  # 临时触发器：分支上首次引入该工作流时，用 push 事件让 GitHub 注册并运行；
-  # 产物回填完成后会移除，只保留手动触发。
-  push:
-    branches:
-      - fix/io-review-fixes
 
 permissions:
   contents: read

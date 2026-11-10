@@ -293,6 +293,16 @@ func main():
     print("rename ok=" + string(moved.ok))
     var blocked = rename(base + "/moved.dat", bad_path)
     print("rename overwrite=" + string(blocked.code == IOErrorKind.AlreadyExists))
+    var dir_a = make_dir(base + "/dir-a")
+    print("rename dir make ok=" + string(dir_a.ok))
+    var moved_dir = rename(base + "/dir-a", base + "/dir-b")
+    print("rename dir ok=" + string(moved_dir.ok))
+    var dir_meta = metadata(base + "/dir-b")
+    print("rename dir kind=" + string(dir_meta.kind == FileKind.Directory))
+    var dir_c = make_dir(base + "/dir-c")
+    print("rename dir target make ok=" + string(dir_c.ok))
+    var blocked_dir = rename(base + "/dir-b", base + "/dir-c")
+    print("rename dir overwrite=" + string(blocked_dir.code == IOErrorKind.AlreadyExists))
     var not_empty = remove_dir(base)
     print("remove non empty dir=" + string(not_empty.code == IOErrorKind.DirectoryNotEmpty))
     var absent = remove_file(base + "/absent.bin")
@@ -357,6 +367,11 @@ func main():
             "duplicate exists=true",
             "rename ok=true",
             "rename overwrite=true",
+            "rename dir make ok=true",
+            "rename dir ok=true",
+            "rename dir kind=true",
+            "rename dir target make ok=true",
+            "rename dir overwrite=true",
             "remove non empty dir=true",
             "remove absent=true",
             "dir kind=true",
@@ -879,5 +894,61 @@ func main():
     assert!(
         text.contains("raw_dir_open"),
         "诊断应指出无法导入的符号：\n{text}"
+    );
+}
+
+/// 多进程并发追加：每个进程用 `append_file` 追加 8 × 256 KiB，最终大小必须精确等于写入总量。
+/// Windows 验证 `FILE_APPEND_DATA`，Linux/macOS 验证 `O_APPEND`；任何覆盖都会让大小变小。
+#[test]
+fn io_concurrent_append_from_multiple_processes_keeps_every_byte() {
+    let project = create_project(
+        "io-concurrent-append",
+        r#"import io {
+    append_file,
+    read_file,
+}
+
+func main():
+    var data = read_file("payload.bin").value
+    for index in 0..8:
+        var result = append_file("log.bin", data)
+        if not result.ok:
+            print("append failed")
+    print("done")
+"#,
+    );
+    let chunk = 256 * 1024;
+    fs::write(project.path().join("payload.bin"), vec![0x5au8; chunk]).expect("写入追加载荷失败");
+    let build = build_project(project.path());
+    assert!(
+        build.status.success(),
+        "fama build 失败：{}",
+        render_output(&build)
+    );
+
+    let binary = binary_path(project.path(), "io-concurrent-append");
+    let children: Vec<_> = (0..4)
+        .map(|_| {
+            Command::new(&binary)
+                .current_dir(project.path())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("启动并发追加进程失败")
+        })
+        .collect();
+    for mut child in children {
+        let status = child.wait().expect("等待并发追加进程失败");
+        assert!(status.success(), "并发追加进程异常退出：{status:?}");
+    }
+
+    let size = fs::metadata(project.path().join("log.bin"))
+        .expect("读取并发追加文件失败")
+        .len();
+    assert_eq!(
+        size,
+        4 * 8 * chunk as u64,
+        "并发追加必须不丢字节：期望 {} 字节，实测 {size} 字节",
+        4 * 8 * chunk
     );
 }

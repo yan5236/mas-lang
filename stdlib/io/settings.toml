@@ -24,7 +24,9 @@ posix = [
   "native/platform/posix/io_posix_fs.c",
 ]
 
-# Windows x64 的预编译产物由本机 cl.exe 实际编译输出生成；其余目标待 CI 矩阵回填。
+# Windows x64 由本机 cl.exe 实际编译输出；四个非 Windows 目标由
+# `.github/workflows/io-artifacts.yml` 在对应 GitHub runner 上从同一份 C 源编译生成。
+# 清单里的源码/头文件指纹必须与包内文件一致，否则普通消费会拒绝该产物。
 [native.prebuilt.x86_64-pc-windows-msvc]
 manifest = "native/artifacts/x86_64-pc-windows-msvc/manifest.toml"
 objects = [
@@ -35,4 +37,52 @@ objects = [
   "native/artifacts/x86_64-pc-windows-msvc/io_paths.obj",
   "native/artifacts/x86_64-pc-windows-msvc/io_windows.obj",
   "native/artifacts/x86_64-pc-windows-msvc/io_windows_fs.obj",
+]
+
+[native.prebuilt.x86_64-unknown-linux-gnu]
+manifest = "native/artifacts/x86_64-unknown-linux-gnu/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-unknown-linux-gnu/io_common.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/io_state.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/io_stream.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/io_whole.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/io_paths.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/io_posix.o",
+  "native/artifacts/x86_64-unknown-linux-gnu/io_posix_fs.o",
+]
+
+[native.prebuilt.aarch64-unknown-linux-gnu]
+manifest = "native/artifacts/aarch64-unknown-linux-gnu/manifest.toml"
+objects = [
+  "native/artifacts/aarch64-unknown-linux-gnu/io_common.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/io_state.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/io_stream.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/io_whole.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/io_paths.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/io_posix.o",
+  "native/artifacts/aarch64-unknown-linux-gnu/io_posix_fs.o",
+]
+
+[native.prebuilt.aarch64-apple-darwin]
+manifest = "native/artifacts/aarch64-apple-darwin/manifest.toml"
+objects = [
+  "native/artifacts/aarch64-apple-darwin/io_common.o",
+  "native/artifacts/aarch64-apple-darwin/io_state.o",
+  "native/artifacts/aarch64-apple-darwin/io_stream.o",
+  "native/artifacts/aarch64-apple-darwin/io_whole.o",
+  "native/artifacts/aarch64-apple-darwin/io_paths.o",
+  "native/artifacts/aarch64-apple-darwin/io_posix.o",
+  "native/artifacts/aarch64-apple-darwin/io_posix_fs.o",
+]
+
+[native.prebuilt.x86_64-apple-darwin]
+manifest = "native/artifacts/x86_64-apple-darwin/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-apple-darwin/io_common.o",
+  "native/artifacts/x86_64-apple-darwin/io_state.o",
+  "native/artifacts/x86_64-apple-darwin/io_stream.o",
+  "native/artifacts/x86_64-apple-darwin/io_whole.o",
+  "native/artifacts/x86_64-apple-darwin/io_paths.o",
+  "native/artifacts/x86_64-apple-darwin/io_posix.o",
+  "native/artifacts/x86_64-apple-darwin/io_posix_fs.o",
 ]
