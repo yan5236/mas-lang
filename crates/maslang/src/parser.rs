@@ -1,7 +1,7 @@
 use crate::ast::{
-    AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, Expr, ImportItem, ImportKind,
-    ImportPath, Literal, MapEntry, MethodName, Parameter, Program, PropertyName, Stmt, TypeName,
-    UnaryOp,
+    AssignOp, AssignTarget, BinaryOp, BindingKind, ConditionalBranch, EnumMember, Expr, ImportItem,
+    ImportKind, ImportPath, Literal, MapEntry, MethodName, Parameter, Program, PropertyName, Stmt,
+    TypeName, UnaryOp,
 };
 use crate::diagnostic::CompilerError;
 use crate::lexer::Lexer;
@@ -65,6 +65,9 @@ impl<'a> Parser<'a> {
         if self.match_tag(TokenTag::Struct) {
             return self.parse_struct_declaration(false);
         }
+        if self.match_tag(TokenTag::Enum) {
+            return self.parse_enum_declaration(false);
+        }
         if self.match_tag(TokenTag::Func) {
             return self.parse_function_declaration(false);
         }
@@ -103,10 +106,13 @@ impl<'a> Parser<'a> {
         self.parse_expression_statement()
     }
 
-    /// 解析公开结构体、函数和变量声明；其他语句不能标记为 pub。
+    /// 解析公开结构体、枚举、函数和变量声明；其他语句不能标记为 pub。
     fn parse_public_statement(&mut self) -> Result<Stmt, CompilerError> {
         if self.match_tag(TokenTag::Struct) {
             return self.parse_struct_declaration(true);
+        }
+        if self.match_tag(TokenTag::Enum) {
+            return self.parse_enum_declaration(true);
         }
         if self.match_tag(TokenTag::Func) {
             return self.parse_function_declaration(true);
@@ -123,7 +129,7 @@ impl<'a> Parser<'a> {
         }
 
         Err(CompilerError::syntax_message(
-            "`pub` 只能用于顶层 `struct`、`func`、`extern func`、`var` 或 `const` 声明",
+            "`pub` 只能用于顶层 `struct`、`enum`、`func`、`extern func`、`var` 或 `const` 声明",
             self.peek().span,
         ))
     }
@@ -138,6 +144,7 @@ impl<'a> Parser<'a> {
                 | "float"
                 | "bool"
                 | "string"
+                | "bytes"
                 | "list"
                 | "map"
                 | "array"
@@ -153,6 +160,9 @@ impl<'a> Parser<'a> {
                 | "try_div"
                 | "try_mod"
                 | "try_neg"
+                | "bytes_from_list"
+                | "encode_utf8"
+                | "decode_utf8"
                 | "main"
         ) {
             return Err(CompilerError::syntax_message(
@@ -184,6 +194,80 @@ impl<'a> Parser<'a> {
             is_public,
             name,
             fields,
+            span: Span::merge(start, end),
+        })
+    }
+
+    /// 解析 `enum name:` 加缩进成员列表；成员按书写顺序占一个内部序号，序号属于实现细节。
+    fn parse_enum_declaration(&mut self, is_public: bool) -> Result<Stmt, CompilerError> {
+        let start = self.previous().span;
+        let (name, name_span) = self.consume_identifier("enum 后缺少枚举名")?;
+        if matches!(
+            name.as_str(),
+            "int"
+                | "float"
+                | "bool"
+                | "string"
+                | "bytes"
+                | "list"
+                | "map"
+                | "array"
+                | "print"
+                | "try_print"
+                | "len"
+                | "try_int"
+                | "try_float"
+                | "try_bool"
+                | "try_add"
+                | "try_sub"
+                | "try_mul"
+                | "try_div"
+                | "try_mod"
+                | "try_neg"
+                | "bytes_from_list"
+                | "encode_utf8"
+                | "decode_utf8"
+                | "main"
+        ) {
+            return Err(CompilerError::syntax_message(
+                "枚举名称不能覆盖内建名称或 main",
+                name_span,
+            ));
+        }
+        self.consume(TokenTag::Colon, "枚举名后需要 `:`")?;
+        self.consume(TokenTag::Newline, "枚举成员必须换行并缩进")?;
+        self.skip_newlines();
+        if !self.check(TokenTag::Indent) {
+            return Err(CompilerError::syntax_message(
+                "枚举至少需要一个成员，且成员必须缩进",
+                self.peek().span,
+            ));
+        }
+        self.consume(TokenTag::Indent, "枚举成员必须缩进")?;
+        let mut members = Vec::new();
+        while !self.check(TokenTag::Dedent) && !self.check(TokenTag::Eof) {
+            let (member_name, member_span) = self.consume_identifier("枚举成员缺少名称")?;
+            members.push(EnumMember {
+                name: member_name,
+                span: member_span,
+            });
+            self.consume(TokenTag::Newline, "每个枚举成员必须单独占一行")?;
+            self.skip_newlines();
+        }
+        let end = self
+            .consume(TokenTag::Dedent, "枚举定义缺少缩进结束")?
+            .span;
+        if members.is_empty() {
+            return Err(CompilerError::syntax_message(
+                "枚举至少需要一个成员",
+                name_span,
+            ));
+        }
+        Ok(Stmt::EnumDecl {
+            is_public,
+            name: name.clone(),
+            source_name: name,
+            members,
             span: Span::merge(start, end),
         })
     }
@@ -1361,6 +1445,7 @@ impl<'a> Parser<'a> {
             "float" => Ok(TypeName::Float),
             "bool" => Ok(TypeName::Bool),
             "string" => Ok(TypeName::String),
+            "bytes" => Ok(TypeName::Bytes),
             "list" => {
                 self.consume(TokenTag::Less, "`list` 类型缺少左尖括号 `<`")?;
                 let element_type = self.parse_type_name()?;

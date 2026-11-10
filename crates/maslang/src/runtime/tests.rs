@@ -1,4 +1,5 @@
 include!("strings.rs");
+include!("string_methods.rs");
 include!("string_builder.rs");
 include!("containers.rs");
 include!("borrowed_keys.rs");
@@ -410,4 +411,232 @@ fn integer_indexes_match_ordered_model_across_density_changes() {
     }
     mas_gc_leave();
     gc_shutdown();
+}
+
+/// 读取列表中的字符串元素，供字符串方法运行时测试断言内容。
+fn list_text(list: *const MsList, index: u64) -> String {
+    let mut len = 0u64;
+    let ptr = list_get_string(list, index, &mut len);
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    String::from_utf8(bytes.to_vec()).expect("运行时的字符串结果必须是合法 UTF-8")
+}
+
+/// 读取「返回指针 + 输出长度」的运行时字符串结果，供截取、大小写和重复测试复用。
+fn take_text(ptr: *const u8, len: u64) -> String {
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+    String::from_utf8(bytes.to_vec()).expect("运行时的字符串结果必须是合法 UTF-8")
+}
+
+/// 运行时单元测试不校验源码位置：统一补空路径、空源码与零 span。
+fn split_at(text: MsString, separator: MsString) -> *mut MsList {
+    string_split(
+        text.ptr,
+        text.len,
+        separator.ptr,
+        separator.len,
+        b"".as_ptr(),
+        0,
+        b"".as_ptr(),
+        0,
+        0,
+        0,
+    )
+}
+
+/// 使用空定位参数调用查找入口，单元测试只校验返回的标量位置。
+fn index_of_at(text: MsString, needle: MsString, start: i64) -> i64 {
+    string_index_of(
+        text.ptr,
+        text.len,
+        needle.ptr,
+        needle.len,
+        start,
+        b"".as_ptr(),
+        0,
+        b"".as_ptr(),
+        0,
+        0,
+        0,
+    )
+}
+
+/// 使用空定位参数调用截取入口，输出参数语义与生产调用完全一致。
+fn substring_at(
+    text: MsString,
+    start: i64,
+    end: i64,
+    out_len: *mut u64,
+    out_valid: *mut u8,
+) -> *const u8 {
+    string_substring(
+        text.ptr,
+        text.len,
+        start,
+        end,
+        out_len,
+        out_valid,
+        b"".as_ptr(),
+        0,
+        b"".as_ptr(),
+        0,
+        0,
+        0,
+    )
+}
+
+/// 使用空定位参数调用重复拼接入口。
+fn repeat_at(text: MsString, count: i64, out_len: *mut u64, out_valid: *mut u8) -> *const u8 {
+    string_repeat(
+        text.ptr,
+        text.len,
+        count,
+        out_len,
+        out_valid,
+        b"".as_ptr(),
+        0,
+        b"".as_ptr(),
+        0,
+        0,
+        0,
+    )
+}
+
+/// 使用空定位参数调用转小写入口。
+fn lower_at(text: MsString, out_len: *mut u64) -> *const u8 {
+    string_to_lower(
+        text.ptr,
+        text.len,
+        out_len,
+        b"".as_ptr(),
+        0,
+        b"".as_ptr(),
+        0,
+        0,
+        0,
+    )
+}
+
+/// 使用空定位参数调用转大写入口。
+fn upper_at(text: MsString, out_len: *mut u64) -> *const u8 {
+    string_to_upper(
+        text.ptr,
+        text.len,
+        out_len,
+        b"".as_ptr(),
+        0,
+        b"".as_ptr(),
+        0,
+        0,
+        0,
+    )
+}
+
+/// 空 needle 的测试字面量，避免在每处重复构造运行时字符串结构。
+fn empty_text() -> MsString {
+    MsString {
+        ptr: b"".as_ptr(),
+        len: 0,
+    }
+}
+
+/// 切分保留头尾与连续分隔符产生的空项，多字节分隔符和空输入都按字面规则处理。
+#[test]
+fn splits_keep_empty_items_and_trailing_separator() {
+    mas_gc_enter();
+    let text_value = text("a,b,,c,");
+    let separator = text(",");
+    let list = split_at(text_value, separator);
+    assert_eq!(list_len(list), 5);
+    let items = (0..5)
+        .map(|index| list_text(list, index))
+        .collect::<Vec<_>>();
+    assert_eq!(items, ["a", "b", "", "c", ""]);
+
+    let empty = text("");
+    let list = split_at(empty, separator);
+    assert_eq!(list_len(list), 1);
+    assert_eq!(list_text(list, 0), "");
+
+    let unicode = text("你😀好");
+    let emoji = text("😀");
+    let list = split_at(unicode, emoji);
+    assert_eq!(list_len(list), 2);
+    assert_eq!(list_text(list, 0), "你");
+    assert_eq!(list_text(list, 1), "好");
+
+    let repeated = text("a::b::");
+    let double_colon = text("::");
+    let list = split_at(repeated, double_colon);
+    assert_eq!(list_len(list), 3);
+    assert_eq!(list_text(list, 2), "");
+    mas_gc_leave();
+}
+
+/// 查找结果按 Unicode 标量计数，支持重叠搜索、空 needle 和越界起点。
+#[test]
+fn index_of_counts_unicode_scalars() {
+    mas_gc_enter();
+    let text_value = text("你好aaa");
+    let needle = text("a");
+    assert_eq!(index_of_at(text_value, needle, 0), 2);
+    let pair = text("aa");
+    assert_eq!(index_of_at(text_value, pair, 3), 3);
+    let missing = text("😀");
+    assert_eq!(index_of_at(text_value, missing, 0), -1);
+    assert_eq!(index_of_at(text_value, empty_text(), 2), 2);
+    assert_eq!(index_of_at(text_value, empty_text(), 99), -1);
+    assert_eq!(index_of_at(text_value, empty_text(), -1), -1);
+    mas_gc_leave();
+}
+
+/// 截取按半开区间与标量下标工作，非法范围写有效标记 0；重复拼接同样先检查长度与分配。
+#[test]
+fn substring_and_repeat_report_validity() {
+    mas_gc_enter();
+    let text_value = text("你e\u{301}😀");
+    let mut len = 0u64;
+    let mut valid = 0u8;
+    let ptr = substring_at(text_value, 1, 3, &mut len, &mut valid);
+    assert_eq!(valid, 1);
+    assert_eq!(take_text(ptr, len), "e\u{301}");
+
+    let ptr = substring_at(text_value, -1, 2, &mut len, &mut valid);
+    assert_eq!((valid, ptr.is_null()), (0, true));
+    let _ = substring_at(text_value, 2, 1, &mut len, &mut valid);
+    assert_eq!(valid, 0);
+    let _ = substring_at(text_value, 0, 5, &mut len, &mut valid);
+    assert_eq!(valid, 0);
+
+    let pair = text("ab");
+    let ptr = repeat_at(pair, 3, &mut len, &mut valid);
+    assert_eq!(valid, 1);
+    assert_eq!(take_text(ptr, len), "ababab");
+    let _ = repeat_at(pair, 0, &mut len, &mut valid);
+    assert_eq!((valid, len), (1, 0));
+    let ptr = repeat_at(pair, -1, &mut len, &mut valid);
+    assert_eq!((valid, ptr.is_null()), (0, true));
+    // 极大次数在分配前被拒绝，测试进程不会真的申请巨量内存。
+    let _ = repeat_at(pair, i64::MAX, &mut len, &mut valid);
+    assert_eq!(valid, 0);
+    mas_gc_leave();
+}
+
+/// 大小写转换使用 Rust 标准库的 Unicode 默认规则，允许长度变化。
+#[test]
+fn case_conversion_allows_length_changes() {
+    mas_gc_enter();
+    let mut len = 0u64;
+    let sharp = text("ß");
+    let ptr = upper_at(sharp, &mut len);
+    assert_eq!(take_text(ptr, len), "SS");
+    let ptr = lower_at(sharp, &mut len);
+    assert_eq!(take_text(ptr, len), "ß");
+
+    let dotted = text("İ");
+    let ptr = lower_at(dotted, &mut len);
+    assert_eq!(take_text(ptr, len), "i\u{307}");
+    let turkish = text("中文AbC");
+    let ptr = upper_at(turkish, &mut len);
+    assert_eq!(take_text(ptr, len), "中文ABC");
+    mas_gc_leave();
 }

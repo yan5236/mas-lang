@@ -125,6 +125,29 @@ fn collect_statement_symbol(text: &str, statement: &Stmt, symbols: &mut Vec<MasS
                 ));
             }
         }
+        Stmt::EnumDecl {
+            name, members, span, ..
+        } => {
+            let display_name = declared_name_in_span(text, *span, "enum").unwrap_or(name);
+            symbols.push(make_symbol(
+                text,
+                display_name,
+                SymbolKind::ENUM,
+                *span,
+                name_selection_span(text, *span, display_name),
+                Some(format!("enum {display_name}")),
+            ));
+            for member in members {
+                symbols.push(make_symbol(
+                    text,
+                    &format!("{display_name}.{}", member.name),
+                    SymbolKind::ENUM_MEMBER,
+                    member.span,
+                    member.span,
+                    Some(format!("{}（{} 成员）", member.name, display_name)),
+                ));
+            }
+        }
         Stmt::FunctionDecl {
             name,
             parameters,
@@ -321,6 +344,7 @@ pub(crate) fn type_name_text(name: &TypeName) -> String {
         TypeName::Float => "float".to_string(),
         TypeName::Bool => "bool".to_string(),
         TypeName::String => "string".to_string(),
+        TypeName::Bytes => "bytes".to_string(),
         TypeName::List(inner) => format!("list<{}>", type_name_text(inner)),
         TypeName::Map(key, value) => {
             format!("map<{}, {}>", type_name_text(key), type_name_text(value))

@@ -1,0 +1,178 @@
+---
+sidebar_position: 7
+---
+
+# 枚举：给一组固定选项起名字
+
+当一个值只可能是几种固定选项时——文件打开模式、订单状态、错误类别——用 `enum` 声明一个枚举。它比用 `int` 约定 `0`、`1`、`2` 更清楚：**写错成员名会在编译期报错**，不同枚举之间也不会被悄悄混用。
+
+## 声明枚举
+
+用 `enum`（或 `pub enum`）加冒号，换行缩进，每行一个成员：
+
+```mas-lang
+pub enum FileMode:
+    Read
+    Write
+    Append
+    ReadWrite
+```
+
+规则很短：
+
+- 枚举只能声明在**顶层**，不能写在函数或结构体里面。
+- 至少要有一个成员；成员名不能重复。
+- 成员名使用 `FileMode.Read` 的形式引用，不加引号，每行一个。
+- `pub` 表示其他模块可以导入；不写 `pub` 的枚举只在本模块内可用。
+- 枚举名不能是 `int` 这类内建类型名，也不能和已有顶层声明重名。
+
+## 使用成员
+
+成员本身就是一个值，可以直接赋给变量、作为参数、作为返回值：
+
+```mas-lang
+pub enum FileMode:
+    Read
+    Write
+    Append
+    ReadWrite
+
+func describe(mode: FileMode) -> string:
+    if mode == FileMode.Read:
+        return "只读"
+    if mode == FileMode.Write:
+        return "写入"
+    if mode == FileMode.Append:
+        return "追加"
+    return "读写"
+
+var default_mode: FileMode = FileMode.Read
+
+func main():
+    print(describe(default_mode))
+    var mode = FileMode.Append
+    print(describe(mode))
+    print(mode == FileMode.Read)
+    print(mode != FileMode.Write)
+```
+
+当前版本没有 `match` 或 `switch`，用 `if` / `elif` 链按成员分支即可；编译器会检查分支比较的两侧是不是同一个枚举。
+
+## 可空枚举
+
+枚举可以加 `?` 表示「某个成员，或者没有值」：
+
+```mas-lang
+enum Mode:
+    On
+    Off
+
+func main():
+    var fallback: Mode? = null
+    print(fallback == null) // true
+    fallback = Mode.On
+    if fallback != null:
+        print(fallback.value == Mode.On) // true
+```
+
+和别的可空类型一样：先判断 `!= null`，再用 `.value` 取出枚举值。`Mode?` 不是 `Mode`，不能直接把它传给要求 `Mode` 的参数。
+
+## 相等与禁止项
+
+同一个枚举的成员可以用 `==`、`!=` 比较，结果只按「是不是同一个成员」判断：
+
+```mas-lang
+enum Mode:
+    On
+    Off
+
+func main():
+    print(Mode.On == Mode.On)    // true
+    print(Mode.On == Mode.Off)   // false
+    print(Mode.Off != Mode.On)   // true
+```
+
+下面这些写法会被拒绝，需要改用显式判断或别的数据结构：
+
+| 写法 | 原因与修正 |
+| --- | --- |
+| `A.One == B.One` | 两个不同枚举不能比较；先确认它们是否本该是同一个枚举。 |
+| `A.One == 1` | 枚举不能和 `int` 比较，也没有隐式整数转换。 |
+| `var m = Mode.Bogus` | 成员不存在，报「枚举 `Mode` 没有成员 `Bogus`」并带源码位置。 |
+| `var n: int = A.One` | 同上；需要序号时在枚举旁边提供一个显式的映射函数。 |
+| `int(A.One)` | 内置转换只接受基础类型，不接受枚举。 |
+| `print(A.One)` | 枚举没有隐式字符串转换；用 `if` 链或映射函数转成文本再打印。 |
+| `var xs: list<A> = [A.One]` | 首版容器元素暂不支持枚举；改用枚举字段、可空枚举或显式序号。 |
+| `var m: map<A,int> = {A.One: 1}` | `map` 的键暂不支持枚举；改用 `int` 序号或结构体引用。 |
+| `A()` | 枚举不是结构体，不能当作构造器调用。 |
+| `enum Mode:`（没有成员） | 枚举至少需要一个成员。 |
+| `enum Mode:` 里两个 `Read` | 成员名不能重复。 |
+
+## 名义身份与导入
+
+枚举的身份由**声明位置**决定，不是由名字或成员序号决定。两个模块各自声明 `State`，即使成员名完全一样，也是两个不同的类型，不能互相赋值或比较。
+
+```mas-lang
+// model.ms
+pub enum State:
+    On
+    Off
+
+pub func is_on(state: State) -> bool:
+    return state == State.On
+```
+
+```mas-lang
+// main.ms
+import local.model { State, is_on }
+
+func main():
+    print(is_on(State.On)) // true
+    print(is_on(State.Off)) // false
+    var state: State = State.Off
+    print(state == State.Off) // true
+```
+
+导入时可以给枚举或函数起别名，也可以用 `export import` 再导出：
+
+```mas-lang
+// api.ms
+export import local.model { State as Mode, is_on as label }
+```
+
+```mas-lang
+// main.ms
+import local.model { State }
+import local.api { Mode, label }
+
+func main():
+    var mode: Mode = State.On
+    print(label(mode))          // true
+    print(State.Off == Mode.Off) // true
+```
+
+`State` 和别名 `Mode` 指向同一个声明，所以可以互相赋值、比较；如果 `api.ms` 自己重新声明一个 `Mode`，那就又是一个新类型了。
+
+## 内部表示
+
+编译器内部可能把枚举降级成整数序号，但**序号是实现细节**：不要依赖 `FileMode.Write` 等于 `1`，也不要把它写进文件格式或网络协议。需要稳定编号时，自己写一个显式映射函数：
+
+```mas-lang
+enum Mode:
+    On
+    Off
+
+func mode_code(mode: Mode) -> int:
+    if mode == Mode.On:
+        return 1
+    return 0
+
+func main():
+    print(mode_code(Mode.On)) // 1
+```
+
+## 什么时候用
+
+适合：文件模式、日志级别、任务状态、错误类别——选项由程序自己定义、数量固定、需要在编译期防止拼错。
+
+不适合：需要和外部系统交换的数值编号（用 `int` 加显式映射更稳）、需要携带额外数据的选项（首版枚举没有载荷）、需要遍历所有成员的场景（当前没有内置的成员列表）。

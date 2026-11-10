@@ -14,11 +14,12 @@ use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue, StructValue};
 
 use crate::ast::{Program, Stmt, TypeName};
 use crate::diagnostic::{CompilerError, MessageId};
-use crate::semantic::ValueType;
+use crate::semantic::{EnumType, ValueType};
 use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
 
 mod borrowed_keys;
+mod bytes;
 mod expressions;
 mod container_literals;
 mod functions;
@@ -121,6 +122,22 @@ struct RuntimeFunctions<'ctx> {
     map_values: FunctionValue<'ctx>,
 }
 
+/// 保存代码生成阶段需要的枚举信息：源码显示名和按书写顺序排列的成员名。
+///
+/// 成员下标即 enum 的内部整数 lowering，不对外公开；显示名避免诊断泄漏内部前缀。
+#[derive(Clone)]
+struct EnumDescriptor {
+    display: String,
+    members: Vec<String>,
+}
+
+impl EnumDescriptor {
+    /// 返回成员对应的整数序号；成员不存在时返回 `None`。
+    fn member_index(&self, name: &str) -> Option<usize> {
+        self.members.iter().position(|member| member == name)
+    }
+}
+
 /// 保存循环内 `break` 与 `continue` 的目标基本块。
 #[derive(Clone, Copy)]
 struct LoopContext<'ctx> {
@@ -144,6 +161,7 @@ struct CodeGenerator<'ctx, 'src> {
     globals: HashMap<String, VariableInfo<'ctx>>,
     global_initialized: HashMap<String, PointerValue<'ctx>>,
     structs: HashMap<String, Vec<crate::ast::Parameter>>,
+    enums: HashMap<String, EnumDescriptor>,
     functions: HashMap<String, FunctionInfo<'ctx>>,
     current_function: Option<FunctionValue<'ctx>>,
     entry_function: Option<FunctionValue<'ctx>>,
@@ -211,6 +229,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             globals: HashMap::new(),
             global_initialized: HashMap::new(),
             structs: HashMap::new(),
+            enums: HashMap::new(),
             functions: HashMap::new(),
             current_function: None,
             entry_function: None,
@@ -232,8 +251,25 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     /// 生成入口及用户函数的 LLVM IR，随后在入口注册可供运行时取长的长字符串字面量。
     fn compile_program(&mut self, program: &Program) -> Result<(), CompilerError> {
         for statement in &program.statements {
-            if let Stmt::StructDecl { name, fields, .. } = statement {
-                self.structs.insert(name.clone(), fields.clone());
+            match statement {
+                Stmt::StructDecl { name, fields, .. } => {
+                    self.structs.insert(name.clone(), fields.clone());
+                }
+                Stmt::EnumDecl {
+                    name,
+                    source_name,
+                    members,
+                    ..
+                } => {
+                    self.enums.insert(
+                        name.clone(),
+                        EnumDescriptor {
+                            display: source_name.clone(),
+                            members: members.iter().map(|m| m.name.clone()).collect(),
+                        },
+                    );
+                }
+                _ => {}
             }
         }
         self.declare_user_functions(program)?;
@@ -303,23 +339,34 @@ fn create_target_machine(
 }
 
 /// 把语法树中的类型标注转换为代码生成阶段复用的静态类型。
-fn value_type_from_annotation(annotation: &TypeName) -> ValueType {
-    match annotation {
-        TypeName::Named(name) => ValueType::Struct(name.clone()),
-        TypeName::Nullable(inner) => {
-            ValueType::Nullable(Box::new(value_type_from_annotation(inner)))
-        }
-        TypeName::Int => ValueType::Int,
-        TypeName::Float => ValueType::Float,
-        TypeName::Bool => ValueType::Bool,
-        TypeName::String => ValueType::String,
-        TypeName::List(element) => ValueType::List(Box::new(value_type_from_annotation(element))),
-        TypeName::Map(key, value) => ValueType::Map(
-            Box::new(value_type_from_annotation(key)),
-            Box::new(value_type_from_annotation(value)),
-        ),
-        TypeName::Array(element, size) => {
-            ValueType::Array(Box::new(value_type_from_annotation(element)), *size)
+impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
+    /// 把类型标注解析成代码生成使用的静态类型；具名类型按枚举登记表区分枚举与结构体。
+    pub(super) fn value_type_from_annotation(&self, annotation: &TypeName) -> ValueType {
+        match annotation {
+            TypeName::Named(name) => match self.enums.get(name) {
+                Some(descriptor) => {
+                    ValueType::Enum(EnumType::new(name.clone(), descriptor.display.clone()))
+                }
+                None => ValueType::Struct(name.clone()),
+            },
+            TypeName::Nullable(inner) => ValueType::Nullable(Box::new(
+                self.value_type_from_annotation(inner),
+            )),
+            TypeName::Int => ValueType::Int,
+            TypeName::Float => ValueType::Float,
+            TypeName::Bool => ValueType::Bool,
+            TypeName::String => ValueType::String,
+            TypeName::Bytes => ValueType::Bytes,
+            TypeName::List(element) => {
+                ValueType::List(Box::new(self.value_type_from_annotation(element)))
+            }
+            TypeName::Map(key, value) => ValueType::Map(
+                Box::new(self.value_type_from_annotation(key)),
+                Box::new(self.value_type_from_annotation(value)),
+            ),
+            TypeName::Array(element, size) => {
+                ValueType::Array(Box::new(self.value_type_from_annotation(element)), *size)
+            }
         }
     }
 }

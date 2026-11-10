@@ -1,0 +1,38 @@
+[project]
+name = "io"
+version = "0.1.0"
+
+[native]
+abi = 1
+source_fallback = "explicit"
+include = ["native/include"]
+
+[native.sources]
+common = [
+  "native/common/io_common.c",
+  "native/common/io_state.c",
+  "native/common/io_stream.c",
+  "native/common/io_whole.c",
+  "native/common/io_paths.c",
+]
+windows = [
+  "native/platform/windows/io_windows.c",
+  "native/platform/windows/io_windows_fs.c",
+]
+posix = [
+  "native/platform/posix/io_posix.c",
+  "native/platform/posix/io_posix_fs.c",
+]
+
+# Windows x64 的预编译产物由本机 cl.exe 实际编译输出生成；其余目标待 CI 矩阵回填。
+[native.prebuilt.x86_64-pc-windows-msvc]
+manifest = "native/artifacts/x86_64-pc-windows-msvc/manifest.toml"
+objects = [
+  "native/artifacts/x86_64-pc-windows-msvc/io_common.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/io_state.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/io_stream.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/io_whole.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/io_paths.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/io_windows.obj",
+  "native/artifacts/x86_64-pc-windows-msvc/io_windows_fs.obj",
+]

@@ -1,0 +1,11 @@
+[project]
+name = "io-api"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ms"
+output = "build"
+opt-level = 2
+
+[dependencies]
+"io" = { path = "../../../stdlib/io", version = "0.1.0" }

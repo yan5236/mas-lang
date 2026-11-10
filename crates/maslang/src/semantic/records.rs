@@ -32,8 +32,12 @@ impl SemanticAnalyzer<'_> {
                         | "try_div"
                         | "try_mod"
                         | "try_neg"
+                        | "bytes_from_list"
+                        | "encode_utf8"
+                        | "decode_utf8"
                         | "main"
                 ) || self.structs.insert(name.clone(), fields.clone()).is_some()
+                    || self.enums.contains_key(name)
                 {
                     return Err(CompilerError::semantic_message(
                         format!("结构体名称 `{name}` 重复或与内建名称冲突"),
@@ -108,6 +112,12 @@ impl SemanticAnalyzer<'_> {
         span: Span,
     ) -> Result<ValueType, CompilerError> {
         let target_type = self.infer_expression_type(target)?;
+        if target_type.enum_identity().is_some() {
+            return Err(CompilerError::semantic_message(
+                "枚举值没有字段；成员只能写成 `枚举名.成员`",
+                span,
+            ));
+        }
         let ValueType::Struct(record) = target_type else {
             return Err(CompilerError::semantic_message(
                 "字段访问需要结构体；可空值请先判断 `!= null`，再用 `.value` 取值",

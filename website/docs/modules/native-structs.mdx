@@ -91,6 +91,7 @@ Time *native_time_find(uint8_t found) {
 | `float` | `double` |
 | `bool` | `uint8_t`，只能写 0 或 1 |
 | `string` | `MasString`，UTF-8 指针与 `uint64_t` 长度 |
+| `bytes` | `MasBytes`，`const uint8_t *ptr` 与 `uint64_t len`（按字节计数，内容可为 NUL 或非法 UTF-8） |
 | `Other`、`Other?` | `Other*`；只有可空类型允许 NULL |
 | `int?`、`float?`、`bool?`、`string?` | 指向对应载荷的指针，NULL 表示缺失 |
 | `list<T>`、`map<K,V>` | 不透明托管指针；不要依赖其内部布局 |
@@ -118,6 +119,39 @@ NamedTime *native_named_time(void) {
 ```
 
 原生调用在当前线程同步执行。借入指针只保证在调用期间及仍有 Mas lang 引用时存活；C 不得把它保存到后台线程或长期全局状态后继续访问。类型声明、对象实际布局和偏移表必须一致：所有权检查不会替 C 验证每个字段。
+
+## 字节字段
+
+`bytes` 在 C 侧是 `MasBytes`，字段顺序固定为 `const uint8_t *ptr` 和 `uint64_t len`：
+
+```c
+#include "mas_runtime.h"
+
+typedef struct Blob { MasBytes data; } Blob;
+
+/* 复制任意字节（含 NUL 与 0xFF）进托管对象；表里登记 data 字段的偏移。 */
+Blob *native_blob(void) {
+    static const uint8_t payload[] = {0x00, 0x41, 0xff};
+    static const uint64_t refs[] = { offsetof(Blob, data) };
+    Blob *value = (Blob *)mas_record_alloc(sizeof(Blob), refs, 1);
+    value->data = mas_runtime_bytes_clone(payload, sizeof(payload));
+    return value;
+}
+```
+
+- `mas_runtime_bytes_clone(ptr, len)` 把任意字节复制到 GC 管理的字节对象，返回稳定的 `ptr + len`；调用方不得释放或修改返回的指针，也不能把栈、临时堆或借入地址直接挂进结构体。
+- 记录 trace 表要列出 `bytes` 字段本身的偏移（上例的 `offsetof(Blob, data)`），和 `MasString` 的 `label` 一样；漏登记时 GC 看不到这个字段，字节内容可能在回收后失效。
+- 长度以 `len` 为准，不能用 `strlen` 测内容长度，因为合法字节里可以有 NUL。
+- 读入方向同理：C 只在调用期间借用 `input->data.ptr`，需要保留就复制。
+
+**顶层 `extern func` 不能声明 `bytes` 参数，也不能返回 `bytes`。** Windows x64 对 16 字节结构的传参与返回约定和编译器生成的声明不一致，直接写会在链接后读到错位数据，所以编译器在签名阶段就拒绝：
+
+```text
+原生函数 `host_fill` 不能声明 `bytes` 参数；请放进结构体字段传递
+原生函数 `host_make` 不能返回 `bytes`；请写回结构体字段
+```
+
+做法和 `io` 标准库一样：定义一个字段布局一致的结构体，把字节放在字段里，用输入盒/输出盒按引用传递。普通的局部变量、全局变量、参数、返回值、`bytes?` 和 `list<bytes>` 不受这条限制，限制只针对**顶层 extern 边界**。
 
 ## 接入工程
 
@@ -147,3 +181,5 @@ objects = [
 普通调用方链接时使用包内的预编译对象；缺少当前目标的产物、清单不一致或 ABI 版本不匹配都会在链接前报错，且不会自动回退到源码编译。维护者可运行 `maslang build src/main.ms --allow-native-source-build`（或 `fama build --allow-native-source-build`）刷新产物，发布前再把 `native/artifacts/<target>/` 复制回标准库包。
 
 `stdlib/time` 的预编译对象覆盖 `x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、`x86_64-apple-darwin` 和 `aarch64-apple-darwin` 五个目标，当前包版本 `0.2.0`、`native.abi = 2`（可恢复的结果结构）。仓库 CI 在 Linux x86_64/aarch64 与 macOS x86_64/arm64 上运行测试和 `time` 示例，暂不包含 Windows 任务；Windows 产物随包分发，可用本地 MSVC 工具链消费。需要刷新非 Windows 目标时，手动触发 `Time native artifacts` 工作流（`.github/workflows/time-artifacts.yml`），下载四个 artifact 后回填到 `stdlib/time/native/artifacts/<target>/`。此接口采用显式指针与薄封装，不自动适配任意 C 结构体的按值调用约定。
+
+`stdlib/io` 沿用同样的输入盒/输出盒形态传递 `bytes` 字段（例如 `WriteArg.data`、`PathDataArg.data`），当前只有 `x86_64-pc-windows-msvc` 的预编译产物，其余目标等待 `.github/workflows/io-artifacts.yml` 回填。

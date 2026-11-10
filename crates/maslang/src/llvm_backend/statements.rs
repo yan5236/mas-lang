@@ -42,6 +42,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         match statement {
             Stmt::Import { .. } | Stmt::ExportImport { .. } => Ok(false),
             Stmt::StructDecl { .. }
+            | Stmt::EnumDecl { .. }
             | Stmt::FunctionDecl { .. }
             | Stmt::ExternFunctionDecl { .. } => Ok(false),
             Stmt::VarDecl {
@@ -52,7 +53,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 span,
                 ..
             } => {
-                let expected = annotation.as_ref().map(value_type_from_annotation);
+                let expected = annotation
+                    .as_ref()
+                    .map(|annotation| self.value_type_from_annotation(annotation));
                 let value = match (initializer.as_ref(), expected.as_ref()) {
                     (
                         Some(Expr::ListLiteral { elements, .. }),

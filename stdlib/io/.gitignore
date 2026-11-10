@@ -1,0 +1,4 @@
+# 本地编译输出与依赖缓存；native/artifacts 中的发布产物继续跟踪。
+/build/
+/src/build/
+/mod_module/

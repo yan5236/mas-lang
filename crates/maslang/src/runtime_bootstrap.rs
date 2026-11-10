@@ -4,6 +4,12 @@ pub fn bootstrap_source() -> &'static str {
         "#![allow(unsafe_op_in_unsafe_fn)]\n",
         include_str!("runtime/strings.rs"),
         "\n",
+        include_str!("runtime/bytes.rs"),
+        "\n",
+        include_str!("runtime/std_streams.rs"),
+        "\n",
+        include_str!("runtime/string_methods.rs"),
+        "\n",
         include_str!("runtime/string_builder.rs"),
         "\n",
         include_str!("runtime/numeric_errors.rs"),
@@ -46,6 +52,12 @@ mod tests {
         assert!(source.contains("pub extern \"C\" fn string_starts_with"));
         assert!(source.contains("pub extern \"C\" fn string_ends_with"));
         assert!(source.contains("pub extern \"C\" fn string_replace"));
+        assert!(source.contains("pub extern \"C\" fn string_split"));
+        assert!(source.contains("pub extern \"C\" fn string_index_of"));
+        assert!(source.contains("pub extern \"C\" fn string_substring"));
+        assert!(source.contains("pub extern \"C\" fn string_to_lower"));
+        assert!(source.contains("pub extern \"C\" fn string_to_upper"));
+        assert!(source.contains("pub extern \"C\" fn string_repeat"));
     }
 
     /// 校验运行时引导源码已经包含原生模块复用的通用字符串与错误辅助符号。

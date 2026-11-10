@@ -72,8 +72,82 @@ s.replace("World", "Mas lang")  // "  Hello Mas lang  "
 | `starts_with(s)` | 一个 `string` | `bool` | 是否以子串开头 |
 | `ends_with(s)` | 一个 `string` | `bool` | 是否以子串结尾 |
 | `replace(from, to)` | 两个 `string` | `string` | 替换**全部**非重叠匹配；`from` 为空串时原样返回 |
+| `split(sep)` | 一个 `string` | `list<string>` | 按字面分隔符切分，保留头尾和连续分隔符产生的空项 |
+| `index_of(needle)`、`index_of(needle, start)` | `string`，可选 `int` | `int?` | 查找首个匹配的位置（Unicode 标量下标） |
+| `substring(start, end)` | 两个 `int` | `string?` | 按半开区间截取子串 |
+| `to_lower()`、`to_upper()` | 无 | `string` | Unicode 默认大小写转换 |
+| `repeat(count)` | 一个 `int` | `string?` | 把字符串重复 `count` 次 |
 
 字符串方法也可以直接用在字面量上，例如 `"  hi  ".trim()`。
+
+### 切分：split
+
+`split(sep)` 按**字面**分隔符切分，不解释正则或通配符。头尾和连续分隔符产生的空项都会保留，所以 `"a,b,,c,".split(",")` 得到 5 项：`"a"`、`"b"`、`""`、`"c"`、`""`。
+
+```mas-lang
+func main():
+    var parts = "a,b,,c,".split(",")
+    print(len(parts))     // 5
+    print(parts[2] == "") // true：连续分隔符产生空项
+
+    var one = "整段".split(";")
+    print(len(one))       // 1：没有分隔符时返回整段
+    print("".split(",")[0] == "") // true：空输入得到一项空串
+```
+
+分隔符**不能是空串**：`"abc".split("")` 会报带源码位置的运行时错误（``字符串方法 `split` 的分隔符不能为空``），程序以状态码 1 退出，不会返回一个可疑的空列表。
+
+### 查找：index_of
+
+`index_of(needle)` 返回第一个匹配的位置，下标按 Unicode 标量计算（和 `len` 一致），不是 UTF-8 字节偏移。找不到时返回 `null`。可选的 `start` 指定从哪个下标开始搜索，默认 0。
+
+```mas-lang
+func main():
+    var text = "你好aaa"
+    print(text.index_of("好").value) // 1
+    print(text.index_of("a").value)  // 2
+    print(text.index_of("a", 3).value) // 3
+    print(text.index_of("😀") == null) // true：找不到
+```
+
+- `start` 超过字符串长度时返回 `null`；负数 `start` 也返回 `null`。
+- `needle` 为空串时返回合法的 `start` 本身；`start` 等于长度也是合法的（结果是长度）。
+- 匹配允许重叠，例如 `"aaa".index_of("aa", 1)` 返回 `1`。
+
+### 截取：substring
+
+`substring(start, end)` 使用半开区间 `[start, end)`，下标同样是 Unicode 标量。负数、起点大于终点、或超出字符串长度都返回 `null`；`start == end` 是合法的空子串。
+
+```mas-lang
+func main():
+    var text = "你好aaa"
+    print(text.substring(2, 4).value) // aa
+    print(text.substring(2, 2).value == "") // true：空子串
+    print(text.substring(3, 1) == null)     // true：倒序
+    print(text.substring(-1, 2) == null)    // true：负数
+    print(text.substring(0, 99) == null)    // true：越界
+```
+
+### 大小写与重复
+
+`to_lower()`、`to_upper()` 使用 Rust 标准库的 Unicode 默认大小写规则，**结果长度可以和原串不同**：`"ß".to_upper()` 是 `"SS"`，`"İ".to_lower()` 是两个标量（`i` + 组合点）。
+
+```mas-lang
+func main():
+    print("Hello".to_lower())   // hello
+    print("中文AbC".to_upper()) // 中文ABC
+    print("ß".to_upper())       // SS
+    print(len("İ".to_lower()))  // 2
+```
+
+`repeat(count)` 把字符串重复若干次：`count` 为 0 返回空串，负数返回 `null`，次数过大导致长度溢出或无法分配时也返回 `null`，不会申请巨量内存后崩溃。
+
+```mas-lang
+func main():
+    print("ab".repeat(3).value)    // ababab
+    print("ab".repeat(0).value == "") // true
+    print("ab".repeat(-1) == null) // true
+```
 
 ## 字符串拼接
 
@@ -85,4 +159,6 @@ s.replace("World", "Mas lang")  // "  Hello Mas lang  "
 
 ## 索引、切片与长度
 
-字符串不支持下标访问和切片，`s[0]`、`s[0:2]` 都会编译失败。取长度使用 `len(s)`；需要子串时可用 `contains`、`starts_with`、`ends_with` 判断，或用 `replace` 做替换。
+字符串仍然不支持下标访问和切片语法，`s[0]`、`s[0:2]` 都会编译失败。取长度使用 `len(s)`；需要子串时用 `substring(start, end)`，查找位置用 `index_of`，按分隔符切分用 `split`。这些方法都按 Unicode 标量计算下标，和 `len` 的计数单位一致。
+
+需要按 UTF-8 字节处理时，先看[字节](../basics/bytes)类型：`encode_utf8` 把文本变成 `bytes`，`decode_utf8` 再严格解码回文本。

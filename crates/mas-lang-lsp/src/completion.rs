@@ -13,6 +13,7 @@ pub fn keyword_items() -> Vec<CompletionItem> {
             "struct",
             "struct ${1:Name}:\n    ${2:field}: ${3:int}\n${0}",
         ),
+        snippet_keyword_item("enum", "enum ${1:Name}:\n    ${2:First}\n${0}"),
         plain_keyword_item("null"),
         plain_keyword_item("var"),
         plain_keyword_item("const"),
@@ -27,6 +28,33 @@ pub fn keyword_items() -> Vec<CompletionItem> {
         snippet_keyword_item("while", "while ${1} :\n    ${0}"),
         snippet_keyword_item("for", "for ${1} in ${2}..${3} :\n    ${0}"),
     ]
+}
+
+/// 返回字符串接收者上可用的实例方法补全项，标签与编译器实际支持的字符串方法保持一致。
+pub(crate) fn string_method_items() -> Vec<CompletionItem> {
+    [
+        ("trim", "trim()", "string"),
+        ("contains", "contains(${1})", "bool"),
+        ("starts_with", "starts_with(${1})", "bool"),
+        ("ends_with", "ends_with(${1})", "bool"),
+        ("replace", "replace(${1}, ${2})", "string"),
+        ("split", "split(${1})", "list<string>"),
+        ("index_of", "index_of(${1})", "int?"),
+        ("substring", "substring(${1}, ${2})", "string?"),
+        ("to_lower", "to_lower()", "string"),
+        ("to_upper", "to_upper()", "string"),
+        ("repeat", "repeat(${1})", "string?"),
+    ]
+    .into_iter()
+    .map(|(label, insert_text, detail)| CompletionItem {
+        label: label.to_string(),
+        kind: Some(CompletionItemKind::METHOD),
+        detail: Some(detail.to_string()),
+        insert_text: Some(insert_text.to_string()),
+        insert_text_format: Some(InsertTextFormat::SNIPPET),
+        ..CompletionItem::default()
+    })
+    .collect()
 }
 
 /// 根据当前文本位置和符号快照构造补全项，组合语法、类型、内建函数与文件符号。
@@ -63,9 +91,9 @@ pub fn completion_items_for(
 }
 
 /// 返回内建类型补全项，避免调用方重复维护类型关键字列表。
-fn type_items() -> Vec<CompletionItem> {
+pub fn type_items() -> Vec<CompletionItem> {
     [
-        "int", "float", "bool", "string", "int?", "float?", "bool?", "string?",
+        "int", "float", "bool", "string", "bytes", "int?", "float?", "bool?", "string?", "bytes?",
     ]
     .into_iter()
     .map(|label| CompletionItem {
@@ -95,6 +123,9 @@ fn builtin_items() -> Vec<CompletionItem> {
         ("try_div", "try_div(${1}, ${2})"),
         ("try_mod", "try_mod(${1}, ${2})"),
         ("try_neg", "try_neg(${1})"),
+        ("bytes_from_list", "bytes_from_list(${1})"),
+        ("encode_utf8", "encode_utf8(${1})"),
+        ("decode_utf8", "decode_utf8(${1})"),
     ]
     .into_iter()
     .map(|(label, insert_text)| CompletionItem {
@@ -112,11 +143,15 @@ fn symbol_items(snapshot: &SymbolSnapshot) -> Vec<CompletionItem> {
     snapshot
         .symbols()
         .iter()
-        .filter(|symbol| symbol.kind != tower_lsp::lsp_types::SymbolKind::FIELD)
+        .filter(|symbol| {
+            symbol.kind != tower_lsp::lsp_types::SymbolKind::FIELD
+                && symbol.kind != tower_lsp::lsp_types::SymbolKind::ENUM_MEMBER
+        })
         .map(|symbol| CompletionItem {
             label: symbol.name.clone(),
             kind: Some(match symbol.kind {
                 tower_lsp::lsp_types::SymbolKind::STRUCT => CompletionItemKind::STRUCT,
+                tower_lsp::lsp_types::SymbolKind::ENUM => CompletionItemKind::ENUM,
                 tower_lsp::lsp_types::SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
                 tower_lsp::lsp_types::SymbolKind::CONSTANT => CompletionItemKind::CONSTANT,
                 tower_lsp::lsp_types::SymbolKind::MODULE => CompletionItemKind::MODULE,

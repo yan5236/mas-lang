@@ -1,3 +1,6 @@
 # 原生分发清单按源码字节校验，固定换行以保持检出的指纹一致。
 /stdlib/time/native/**/*.c text eol=lf
 /stdlib/time/native/**/*.h text eol=lf
+# io 原生分发同样按源码字节校验，必须保持 LF，避免检出换行变化导致预编译产物指纹失效。
+/stdlib/io/native/**/*.c text eol=lf
+/stdlib/io/native/**/*.h text eol=lf

@@ -15,6 +15,8 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             | ValueType::Float
             | ValueType::Bool
             | ValueType::String
+            | ValueType::Bytes
+            | ValueType::Enum(_)
             | ValueType::Null
             | ValueType::Nullable(_)
             | ValueType::Unit => true,
@@ -33,11 +35,13 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
             ValueType::Int
             | ValueType::Float
             | ValueType::Bool
+            | ValueType::Enum(_)
             | ValueType::Null
             | ValueType::Nullable(_)
             | ValueType::Unit => true,
             ValueType::Array(element, _) => Self::zero_placeholder_safe(element),
             ValueType::String
+            | ValueType::Bytes
             | ValueType::Struct(_)
             | ValueType::List(_)
             | ValueType::Map(_, _)
@@ -45,7 +49,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         }
     }
 
-    /// 构造失败结果的无害占位载荷：字符串使用有效空串，其余类型使用零值。
+    /// 构造失败结果的无害占位载荷：字符串使用有效空串，字节使用合法空字节，其余类型使用零值。
     /// 只有 `failure_placeholder_supported` 为真的载荷会被直接读取，因此零值不会
     /// 以无效引用或空指针的形式进入运行时入口。
     pub(super) fn build_safe_failure_placeholder(
@@ -54,6 +58,9 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
     ) -> Result<BasicValueEnum<'ctx>, CompilerError> {
         if matches!(payload, ValueType::String) {
             return Ok(self.build_string_literal("", false)?.into());
+        }
+        if matches!(payload, ValueType::Bytes) {
+            return Ok(self.build_empty_bytes()?.into());
         }
         Ok(self.basic_type_for(payload)?.const_zero())
     }

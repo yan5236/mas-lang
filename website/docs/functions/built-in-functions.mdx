@@ -43,11 +43,42 @@ len({"a": 1})     // 1
 len(array<int, 3>(1, 2, 3)) // 3
 ```
 
-`len` 可用于 `string`、`list`、`map`、`array`，返回 `int`。
+`len` 可用于 `string`、`list`、`map`、`array` 和 `bytes`，返回 `int`。
 
 - 字符串按 Unicode 标量（字符）计数，不是 UTF-8 字节数：`len("你好")` 为 `2`，`len("👍")` 为 `1`
 - 组合字符可能由多个标量组成：`len("é")`（`e` + 组合尖音符）为 `2`；预组合字符 `é` 则为 `1`
+- `bytes` 按**字节**计数：`len(encode_utf8("你好").value)` 为 `6`
 - 数组返回固定长度，但实参表达式仍会先求值（如果有副作用会执行）
+
+## bytes 转换
+
+这三个函数把文本和任意字节互相转换，全局可用、无需导入。它们都返回可空值：失败时返回 `null`，不抛出异常。
+
+| 函数 | 返回 | 说明 |
+|------|------|------|
+| `bytes_from_list(values)` | `bytes?` | 把 `list<int>` 按值复制成字节；每个元素必须在 `0..255`，有一项越界就返回 `null`；空列表得到合法空字节 |
+| `encode_utf8(text)` | `bytes?` | 把合法 UTF-8 文本编码成字节；原生代码构造的非法 UTF-8 字符串返回 `null` |
+| `decode_utf8(data)` | `string?` | 严格校验 UTF-8 后解码；非法编码返回 `null`，合法 NUL 保留 |
+
+```mas-lang
+func main():
+    var data = bytes_from_list([0, 65, 255]).value
+    print(len(data))  // 3：字节数
+    print(data[1])    // 65
+
+    print(bytes_from_list([256]) == null) // true：越界
+
+    var encoded = encode_utf8("你好😀").value
+    print(len(encoded))                        // 10
+    print(decode_utf8(encoded).value == "你好😀") // true
+    print(decode_utf8(bytes_from_list([255]).value) == null) // true：非法 UTF-8
+
+    var empty: list<int> = []
+    print(len(bytes_from_list(empty).value)) // 0
+    print(len(encode_utf8("").value))        // 0
+```
+
+注意：`bytes_from_list([])` 里的空列表字面量没有元素类型，必须先声明 `var empty: list<int> = []` 再传入。`bytes` 不能直接打印、不能和 `string` 混用，详细规则见[字节](../basics/bytes)。
 
 ## 类型转换
 

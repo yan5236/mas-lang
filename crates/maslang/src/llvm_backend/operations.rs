@@ -292,6 +292,18 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     "cmp.int",
                 ))?
                 .into(),
+            (ValueType::Enum(_), ValueType::Enum(_)) => self
+                .map_builder(self.builder.build_int_compare(
+                    if op == BinaryOp::Equal {
+                        IntPredicate::EQ
+                    } else {
+                        IntPredicate::NE
+                    },
+                    left.value.into_int_value(),
+                    right.value.into_int_value(),
+                    "cmp.enum",
+                ))?
+                .into(),
             (ValueType::String, ValueType::String) => {
                 let left = left.value.into_struct_value();
                 let right = right.value.into_struct_value();
@@ -317,6 +329,14 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                     "cmp.string.bool",
                 ))?
                 .into()
+            }
+            (ValueType::Bytes, ValueType::Bytes) => {
+                return self.compile_bytes_equality(
+                    left,
+                    right,
+                    op == BinaryOp::NotEqual,
+                    span,
+                );
             }
             (ValueType::Float, ValueType::Float)
             | (ValueType::Float, ValueType::Int)

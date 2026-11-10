@@ -85,6 +85,13 @@ pub struct ConditionalBranch {
     pub span: Span,
 }
 
+/// 表示枚举声明中的单个成员名称及其源码区间。
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumMember {
+    pub name: String,
+    pub span: Span,
+}
+
 /// 表示当前阶段支持的所有语句节点。
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
@@ -92,6 +99,14 @@ pub enum Stmt {
         is_public: bool,
         name: String,
         fields: Vec<Parameter>,
+        span: Span,
+    },
+    /// 枚举声明；`name` 可能被模块装载器改写为内部身份名，`source_name` 始终保留用户书写形式。
+    EnumDecl {
+        is_public: bool,
+        name: String,
+        source_name: String,
+        members: Vec<EnumMember>,
         span: Span,
     },
     FunctionDecl {
@@ -208,6 +223,7 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Self::StructDecl { span, .. }
+            | Self::EnumDecl { span, .. }
             | Self::FunctionDecl { span, .. }
             | Self::ExternFunctionDecl { span, .. }
             | Self::Import { span, .. }
@@ -346,6 +362,18 @@ pub enum MethodName {
     StartsWith,
     EndsWith,
     Replace,
+    /// 按字面分隔符切分字符串，保留头尾与连续分隔符产生的空项；空分隔符是参数错误。
+    Split,
+    /// 返回首个匹配的 Unicode 标量位置；未命中或起点越界时返回空值。
+    IndexOf,
+    /// 按 Unicode 标量下标截取半开区间；负数、倒序或越界时返回空值。
+    Substring,
+    /// 使用 Unicode 默认规则转换为小写，允许长度变化。
+    ToLower,
+    /// 使用 Unicode 默认规则转换为大写，允许长度变化。
+    ToUpper,
+    /// 重复拼接指定次数；负数或无法分配时返回空值。
+    Repeat,
     /// 可恢复读取：越界或未命中时返回 `ok=false`，不触发运行时错误。
     TryGet,
     /// 可恢复写入：下标非法时返回 `false`，保持原值不变。
@@ -358,6 +386,8 @@ pub enum MethodName {
     TryRemove,
     /// 可恢复切片：范围非法时返回 `ok=false`。
     TrySlice,
+    /// 字节对象的严格切片：半开区间非法时返回 null，不触发运行时错误。
+    Slice,
 }
 
 impl MethodName {
@@ -377,12 +407,19 @@ impl MethodName {
             "starts_with" => Some(Self::StartsWith),
             "ends_with" => Some(Self::EndsWith),
             "replace" => Some(Self::Replace),
+            "split" => Some(Self::Split),
+            "index_of" => Some(Self::IndexOf),
+            "substring" => Some(Self::Substring),
+            "to_lower" => Some(Self::ToLower),
+            "to_upper" => Some(Self::ToUpper),
+            "repeat" => Some(Self::Repeat),
             "try_get" => Some(Self::TryGet),
             "try_set" => Some(Self::TrySet),
             "try_pop" => Some(Self::TryPop),
             "try_index" => Some(Self::TryIndex),
             "try_remove" => Some(Self::TryRemove),
             "try_slice" => Some(Self::TrySlice),
+            "slice" => Some(Self::Slice),
             _ => None,
         }
     }
@@ -391,7 +428,17 @@ impl MethodName {
     pub fn supports_string_target(self) -> bool {
         matches!(
             self,
-            Self::Trim | Self::Contains | Self::StartsWith | Self::EndsWith | Self::Replace
+            Self::Trim
+                | Self::Contains
+                | Self::StartsWith
+                | Self::EndsWith
+                | Self::Replace
+                | Self::Split
+                | Self::IndexOf
+                | Self::Substring
+                | Self::ToLower
+                | Self::ToUpper
+                | Self::Repeat
         )
     }
 
@@ -424,12 +471,19 @@ impl MethodName {
             Self::StartsWith => "starts_with",
             Self::EndsWith => "ends_with",
             Self::Replace => "replace",
+            Self::Split => "split",
+            Self::IndexOf => "index_of",
+            Self::Substring => "substring",
+            Self::ToLower => "to_lower",
+            Self::ToUpper => "to_upper",
+            Self::Repeat => "repeat",
             Self::TryGet => "try_get",
             Self::TrySet => "try_set",
             Self::TryPop => "try_pop",
             Self::TryIndex => "try_index",
             Self::TryRemove => "try_remove",
             Self::TrySlice => "try_slice",
+            Self::Slice => "slice",
         }
     }
 }
@@ -516,6 +570,8 @@ pub enum TypeName {
     Float,
     Bool,
     String,
+    /// 不可变字节对象：长度、索引与切片均按字节计算，内容不要求合法 UTF-8。
+    Bytes,
     List(Box<TypeName>),
     Map(Box<TypeName>, Box<TypeName>),
     Array(Box<TypeName>, usize),
@@ -529,6 +585,7 @@ impl TypeName {
             "float" => Some(Self::Float),
             "bool" => Some(Self::Bool),
             "string" => Some(Self::String),
+            "bytes" => Some(Self::Bytes),
             _ => None,
         }
     }

@@ -153,7 +153,7 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
         elements: &[Expr],
         span: Span,
     ) -> Result<CodegenValue<'ctx>, CompilerError> {
-        let element_value_type = value_type_from_annotation(element_type);
+        let element_value_type = self.value_type_from_annotation(element_type);
         if elements.len() != size {
             return Err(CompilerError::build_message(
                 format!(

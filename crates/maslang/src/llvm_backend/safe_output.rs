@@ -68,9 +68,11 @@ impl<'ctx, 'src> CodeGenerator<'ctx, 'src> {
                 Ok((self.runtime.print_string, vec![ptr.into(), len.into()]))
             }
             ValueType::Struct(_)
+            | ValueType::Enum(_)
             | ValueType::Nullable(_)
             | ValueType::Null
             | ValueType::Unit
+            | ValueType::Bytes
             | ValueType::SafeConvertResult(_)
             | ValueType::List(_)
             | ValueType::Map(_, _)

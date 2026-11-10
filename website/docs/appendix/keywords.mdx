@@ -17,6 +17,7 @@ sidebar_position: 1
 | `continue` | 关键字 | 继续下一轮循环 |
 | `elif` | 关键字 | 否则如果 |
 | `else` | 关键字 | 否则 |
+| `enum` | 关键字 | 定义枚举（成员用 `Type.Member` 引用） |
 | `export` | 关键字 | 重新导出（与 import 配合） |
 | `extern` | 关键字 | 声明外部 C 函数 |
 | `false` | 字面量 | 布尔假 |
@@ -42,7 +43,8 @@ sidebar_position: 1
 | 名称 | 说明 |
 |------|------|
 | `print` | 打印输出（只接受基础类型） |
-| `len` | 获取字符串、列表、字典或数组长度 |
+| `len` | 获取字符串、列表、字典、数组或字节的长度 |
+| `bytes_from_list` `encode_utf8` `decode_utf8` | 字节构造与文本/字节转换，失败返回 `null` |
 | `int` `float` `string` `bool` | 基础类型转换 |
 | `try_int` `try_float` `try_bool` | 安全转换，返回带 `ok`/`value` 的结果 |
 

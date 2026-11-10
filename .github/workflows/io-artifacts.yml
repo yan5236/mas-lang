@@ -1,0 +1,72 @@
+name: Io native artifacts
+
+# 只在手动触发时运行：为 `io` 0.1.0（原生 ABI 1）重新生成四个非 Windows 目标的预编译产物。
+# 产物以 artifact 形式上传（artifact 名即目标三元组），由维护者下载后回填到
+# `stdlib/io/native/artifacts/<triple>/`，本工作流不直接提交或推送任何文件。
+#
+# 前置条件：仓库里已经有消费 `io` 包的样例工程 `examples/projects/io-api`（阶段 4.1）。
+# Windows x64 的对象沿用 `time` 的做法在本机 MSVC 上生成，不放进这个矩阵。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  artifacts:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            triple: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+          - os: macos-15
+            triple: aarch64-apple-darwin
+          - os: macos-15-intel
+            triple: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-19-dev libpolly-19-dev libzstd-dev libxml2-dev
+          echo "LLVM_SYS_191_PREFIX=/usr/lib/llvm-19" >> "$GITHUB_ENV"
+      - name: Install LLVM on macOS
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        run: |
+          brew install llvm@19
+          echo "LLVM_SYS_191_PREFIX=$(brew --prefix llvm@19)" >> "$GITHUB_ENV"
+      - name: Install LLVM on Intel macOS
+        if: runner.os == 'macOS' && runner.arch == 'X64'
+        run: |
+          pkg="$RUNNER_TEMP/macports.pkg"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://distfiles.macports.org/MacPorts/MacPorts-2.12.7-15-Sequoia.pkg \
+            -o "$pkg"
+          sudo installer -pkg "$pkg" -target /
+          sudo /opt/local/bin/port -N -b install llvm-19
+          echo "LLVM_SYS_191_PREFIX=/opt/local/libexec/llvm-19" >> "$GITHUB_ENV"
+      - name: Reinstall the io dependency
+        run: |
+          rm -rf examples/projects/io-api/mod_module
+          cargo +stable run --locked -p fama -- install examples/projects/io-api
+      - name: Refresh prebuilt objects from C sources
+        run: cargo +stable run --locked -p fama -- build examples/projects/io-api --allow-native-source-build
+      - name: Verify the refreshed manifest
+        run: |
+          manifest="examples/projects/io-api/mod_module/io@0.1.0/native/artifacts/${{ matrix.triple }}/manifest.toml"
+          cat "$manifest"
+          grep -F 'package = "io"' "$manifest"
+          grep -F 'package_version = "0.1.0"' "$manifest"
+          grep -F 'abi = 1' "$manifest"
+          grep -F "target = \"${{ matrix.triple }}\"" "$manifest"
+      - name: Upload refreshed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.triple }}
+          path: examples/projects/io-api/mod_module/io@0.1.0/native/artifacts/${{ matrix.triple }}/**
+          if-no-files-found: error
