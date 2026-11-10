@@ -7,8 +7,10 @@
 #include <string.h>
 
 /**
- * 分块读取：正数请求可以短读；先交付已读字节，把宿主错误留到下一次正数读取。
- * `count` 为 0 时不触达宿主，返回空值且 `eof` 为 0。
+ * 分块读取：一次调用最多交付一块数据。缓冲区里已有预读数据就先交付它，
+ * 否则向宿主补充一块；拿到数据后立即返回，绝不为凑满 `count` 再读宿主，
+ * 因此管道上「上游只写了一部分并保持打开」时不会阻塞。`count` 为 0 时不触达宿主，
+ * 返回空值且 `eof` 为 0。
  */
 void mas_io_read(MasIoReadArg* in, MasIoReadResult* out) {
     MasIoEntry* entry;
@@ -56,39 +58,37 @@ void mas_io_read(MasIoReadArg* in, MasIoReadResult* out) {
 
     want = (size_t)in->count;
 
-    /* 按实际读到的字节有界扩容，不为一个很大的 count 预先分配整块内存。 */
-    while (total < want) {
+    /* 每调用一次最多交付一块：有预读就先交付，没有就补充一块。
+     * 拿到数据后立即返回，避免为凑满 count 再次阻塞在管道上。 */
+    {
         size_t available = mas_io_entry_available(entry);
         size_t chunk;
 
         if (available == 0) {
-            if (entry->eof_reached) {
-                break;
+            if (!entry->eof_reached) {
+                code = mas_io_entry_fill(entry);
             }
-            code = mas_io_entry_fill(entry);
-            if (code != MAS_IO_OK) {
-                break;
-            }
-            available = mas_io_entry_available(entry);
-            if (available == 0) {
-                break;
+            if (code == MAS_IO_OK) {
+                available = mas_io_entry_available(entry);
             }
         }
 
-        chunk = available < want - total ? available : want - total;
-        if (!mas_io_buffer_append(
-                &data,
-                &total,
-                &capacity,
-                entry->read_buffer + entry->buffer_offset,
-                chunk
-            )) {
-            code = MAS_IO_ERROR_OTHER;
-            break;
-        }
-        entry->buffer_offset += chunk;
-        if (!entry->is_std) {
-            entry->position += (int64_t)chunk;
+        if (code == MAS_IO_OK && available > 0) {
+            chunk = available < want ? available : want;
+            if (!mas_io_buffer_append(
+                    &data,
+                    &total,
+                    &capacity,
+                    entry->read_buffer + entry->buffer_offset,
+                    chunk
+                )) {
+                code = MAS_IO_ERROR_OTHER;
+            } else {
+                entry->buffer_offset += chunk;
+                if (!entry->is_std) {
+                    entry->position += (int64_t)chunk;
+                }
+            }
         }
     }
 
@@ -255,6 +255,11 @@ void mas_io_write(MasIoWriteArg* in, MasIoWriteResult* out) {
 
         code = mas_io_host_write(entry, in->data.ptr + total, length - total, &wrote);
         if (code != MAS_IO_OK) {
+            /* 宿主可能已经接受了一部分（标准流断管、部分写入）：先计入 written 再返回错误。 */
+            total += wrote;
+            if (!entry->is_std) {
+                entry->position += (int64_t)wrote;
+            }
             break;
         }
         if (wrote == 0) {
@@ -280,6 +285,8 @@ void mas_io_write(MasIoWriteArg* in, MasIoWriteResult* out) {
 
 /**
  * 定位：成功丢弃旧读缓冲、清除 EOF 与待报错误，返回从开头计数的绝对位置。
+ * End 起点用文件大小换算，不先移动宿主游标；目标非法或定位失败时读缓冲保持不变，
+ * 因此宿主游标与库内缓冲不会失步，后续读取不会静默漏数据。
  * 存在未报告错误时先返回该错误并清除它，下一次调用可以重试定位。
  */
 void mas_io_seek(MasIoSeekArg* in, MasIoSeekResult* out) {
@@ -326,7 +333,8 @@ void mas_io_seek(MasIoSeekArg* in, MasIoSeekResult* out) {
     } else {
         int64_t end_position = 0;
 
-        code = mas_io_platform_seek(entry->file, 0, MAS_IO_SEEK_END, &end_position);
+        /* 只查询大小，不把宿主游标移到末尾：否则目标非法时缓冲与游标会失步。 */
+        code = mas_io_platform_size(entry->file, &end_position);
         if (code != MAS_IO_OK) {
             mas_io_store_seek_result(out, code, 0);
             return;

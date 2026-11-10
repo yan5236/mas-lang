@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # io — 文件、目录与标准流
 
-`io` 是应用级**同步** IO 标准库：读写文件、复制二进制、逐行读配置、枚举目录、查询元数据、删除和重命名，还能直接操作标准输入输出。包版本 `0.1.0`，原生 ABI 版本 `1`。
+`io` 是应用级**同步** IO 标准库：读写文件、复制二进制、逐行读配置、枚举目录、查询元数据、删除和重命名，还能直接操作标准输入输出。包版本 `0.1.0`，原生 ABI 版本 `2`（ABI 1 的旧包仍可用，写桥的旧符号保留原语义）。
 
 它把**文本**和**二进制**分成两种类型：需要文本时用 `string`，处理图片、压缩包或任意文件时用 `bytes`。混用会在编译期或运行期被拦住，不会悄悄损坏数据。
 
@@ -76,7 +76,7 @@ closed=true
 | `write(file, data)` | `WriteResult` | 写完整个 `bytes`，失败时保留已接受字节数 |
 | `write_text_to(file, text)` | `WriteResult` | 严格验证 UTF-8 后写入，不加换行 |
 | `flush(file)` | `IOStatus` | 刷新缓冲 |
-| `close(file)` | `IOStatus` | 关闭；即使失败句柄也失效 |
+| `close(file)` | `IOStatus` | 关闭常规文件；即使失败句柄也失效。标准流返回 `NotSupported`，借用句柄仍可用 |
 | `seek(file, offset, origin)` | `SeekResult` | 按 `Start`/`Current`/`End` 定位 |
 
 `FileMode` 的成员是 `Read`、`Write`、`Append`、`ReadWrite`；`SeekFrom` 的成员是 `Start`、`Current`、`End`。细节见[文件与流](./files-and-streams)。

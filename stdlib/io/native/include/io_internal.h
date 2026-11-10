@@ -57,7 +57,7 @@ void mas_io_unregister_entry(MasIoEntry* entry);
 /** 读缓冲为空时向宿主补充一块数据；宿主返回 0 字节表示到达末尾。 */
 int64_t mas_io_entry_fill(MasIoEntry* entry);
 
-/** 写之前的模式切换：追加定位到末尾，读写模式同步底层游标到逻辑位置。 */
+/** 写之前的模式切换：追加落点由宿主保证，读写模式把底层游标同步到逻辑位置。 */
 int64_t mas_io_entry_sync_before_write(MasIoEntry* entry);
 
 /** 向宿主写入一次；标准流走运行时桥，常规文件走平台层。 */
@@ -109,6 +109,12 @@ int64_t mas_io_platform_flush(void* file);
 
 /** 按 `origin`（0=Start 1=Current 2=End）定位并返回从开头计数的绝对位置。 */
 int64_t mas_io_platform_seek(void* file, int64_t offset, int64_t origin, int64_t* position_out);
+
+/**
+ * 查询文件当前字节大小，不移动宿主游标（用于 End 起点定位，避免失败时游标失步）。
+ * 超出有符号 64 位范围返回 `TooLarge`。
+ */
+int64_t mas_io_platform_size(void* file, int64_t* size_out);
 
 /** 关闭并释放平台句柄；即使返回错误，句柄也不可再用。 */
 int64_t mas_io_platform_close(void* file);

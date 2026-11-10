@@ -22,10 +22,6 @@ struct StdArg:
 struct TokenArg:
     token: int
 
-// 只携带目录迭代器句柄的输入盒。
-struct HandleArg:
-    handle: int
-
 // 分块读取输入盒：count 为请求的最大字节数，负数由原生层报 InvalidArgument。
 struct ReadArg:
     token: int
@@ -111,19 +107,6 @@ struct RawMetadataResult:
     code: int
     kind: int
     size: int?
-
-// 原生目录打开结果：handle 是目录迭代器令牌，必须以 dir_close 释放。
-struct RawDirOpenResult:
-    ok: bool
-    code: int
-    handle: int
-
-// 原生目录项结果：done 表示枚举正常结束。
-struct RawDirEntryResult:
-    ok: bool
-    code: int
-    done: bool
-    name: string
 
 // 不携带额外载荷的操作状态；成功时 code 为 None。
 pub struct IOStatus:
@@ -226,15 +209,6 @@ pub extern func mas_io_append_file(input: PathDataArg, out: RawWriteResult)
 // 声明元数据查询入口：跟随符号链接，只有普通文件返回大小。
 pub extern func mas_io_metadata(input: PathArg, out: RawMetadataResult)
 
-// 声明目录迭代开始入口。
-pub extern func mas_io_dir_open(input: PathArg, out: RawDirOpenResult)
-
-// 声明目录迭代下一步入口：done 为真表示正常结束。
-pub extern func mas_io_dir_next(input: HandleArg, out: RawDirEntryResult)
-
-// 声明目录迭代关闭入口。
-pub extern func mas_io_dir_close(input: HandleArg, out: RawStatus)
-
 // 声明一级目录创建入口。
 pub extern func mas_io_make_dir(input: PathArg, out: RawStatus)
 
@@ -324,24 +298,6 @@ pub func raw_metadata(path: string) -> MetadataResult:
     var out = RawMetadataResult(false, 0, 2, null)
     mas_io_metadata(PathArg(path), out)
     return MetadataResult(out.ok, error_kind(out.code), file_kind(out.kind), out.size)
-
-// 打开目录迭代器。
-pub func raw_dir_open(path: string) -> RawDirOpenResult:
-    var out = RawDirOpenResult(false, 0, 0)
-    mas_io_dir_open(PathArg(path), out)
-    return out
-
-// 读取目录迭代器的下一个名称；done 表示枚举正常结束。
-pub func raw_dir_next(handle: int) -> RawDirEntryResult:
-    var out = RawDirEntryResult(false, 0, false, empty_text())
-    mas_io_dir_next(HandleArg(handle), out)
-    return out
-
-// 关闭目录迭代器，返回公开状态。
-pub func raw_dir_close(handle: int) -> IOStatus:
-    var out = RawStatus(false, 0)
-    mas_io_dir_close(HandleArg(handle), out)
-    return IOStatus(out.ok, error_kind(out.code))
 
 // 创建一级目录。
 pub func raw_make_dir(path: string) -> IOStatus:

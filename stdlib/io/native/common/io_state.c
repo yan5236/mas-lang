@@ -126,7 +126,10 @@ static int64_t mas_io_host_read(MasIoEntry* entry, unsigned char* buffer, size_t
     return mas_io_platform_read(entry->file, buffer, capacity, read_out);
 }
 
-/** 向宿主写入一次；标准流同样走运行时桥并收敛错误码。 */
+/**
+ * 向宿主写入一次；标准流同样走运行时桥并收敛错误码。
+ * `*written_out` 始终是宿主已接受的字节数：桥在部分写入或断管后也会回报前缀长度。
+ */
 int64_t mas_io_host_write(
     MasIoEntry* entry,
     const unsigned char* data,
@@ -134,18 +137,26 @@ int64_t mas_io_host_write(
     size_t* written_out
 ) {
     if (entry->is_std) {
-        long long wrote = mas_runtime_std_write(
+        unsigned long long accepted = 0;
+        long long result = mas_runtime_std_write_v2(
             (unsigned long long)entry->std_kind,
             data,
-            (unsigned long long)len
+            (unsigned long long)len,
+            &accepted
         );
-        if (wrote < 0) {
-            return mas_io_normalize_code(-(int64_t)wrote);
-        }
-        if ((unsigned long long)wrote > (unsigned long long)len) {
+
+        if (accepted > (unsigned long long)len) {
+            *written_out = 0;
             return MAS_IO_ERROR_OTHER;
         }
-        *written_out = (size_t)wrote;
+        *written_out = (size_t)accepted;
+        if (result < 0) {
+            return mas_io_normalize_code(-(int64_t)result);
+        }
+        if (accepted != (unsigned long long)len) {
+            /* 桥声称成功却没有接受全部字节：按可恢复错误处理，避免外层无限循环。 */
+            return MAS_IO_ERROR_OTHER;
+        }
         return MAS_IO_OK;
     }
     return mas_io_platform_write(entry->file, data, len, written_out);
@@ -182,8 +193,9 @@ int64_t mas_io_entry_fill(MasIoEntry* entry) {
 }
 
 /**
- * 写之前的模式切换：`Append` 每次定位到末尾；`ReadWrite` 若还有预读数据，
- * 先把宿主游标同步回逻辑位置，避免写到预读区之后。普通 `Write` 没有读缓冲。
+ * 写之前的模式切换：`Append` 的落点由宿主追加语义保证，这里只在能定位时同步逻辑位置；
+ * `ReadWrite` 若还有预读数据，先把宿主游标同步回逻辑位置，避免写到预读区之后。
+ * 普通 `Write` 没有读缓冲。
  */
 int64_t mas_io_entry_sync_before_write(MasIoEntry* entry) {
     int64_t position = 0;
@@ -193,11 +205,10 @@ int64_t mas_io_entry_sync_before_write(MasIoEntry* entry) {
         return MAS_IO_OK;
     }
     if (entry->mode == MAS_IO_MODE_APPEND) {
-        code = mas_io_platform_seek(entry->file, 0, MAS_IO_SEEK_END, &position);
-        if (code != MAS_IO_OK) {
-            return code;
+        /* 定位只用于更新逻辑位置，失败也不影响本次写入：落点由 FILE_APPEND_DATA / O_APPEND 决定。 */
+        if (mas_io_platform_seek(entry->file, 0, MAS_IO_SEEK_END, &position) == MAS_IO_OK) {
+            entry->position = position;
         }
-        entry->position = position;
         mas_io_entry_drop_buffer(entry);
         entry->eof_reached = 0;
         return MAS_IO_OK;
@@ -300,7 +311,10 @@ void mas_io_std(MasIoStdArg* in, MasIoOpenResult* out) {
     out->value = box;
 }
 
-/** 关闭句柄：先把令牌移出表使其立即失效，再释放平台资源与读缓冲。 */
+/**
+ * 关闭常规文件句柄：先把令牌移出表使其立即失效，再释放平台资源与读缓冲。
+ * 标准流不登记表项，前面的检查已返回 `NotSupported`，借用句柄不受影响。
+ */
 void mas_io_close(MasIoTokenArg* in, MasIoStatus* out) {
     MasIoEntry* entry;
     int64_t code;

@@ -1,4 +1,4 @@
-﻿# 独立 C 测试驱动：用本机 cl.exe 编译 stdlib/io 的原生源码与测试桩，跑真实文件断言。
+# 独立 C 测试驱动：用本机 cl.exe 编译 stdlib/io 的原生源码与测试桩，跑真实文件断言。
 # 不经过 Mas 工具链，也不需要 cargo；只依赖 Visual Studio 生成工具。
 #
 # 用法：
@@ -35,7 +35,8 @@ $sources = @(
     (Join-Path $testRoot 'io_host_test_text.c'),
     (Join-Path $testRoot 'io_host_test_std.c'),
     (Join-Path $testRoot 'io_host_test_fs.c'),
-    (Join-Path $testRoot 'io_host_test_links.c')
+    (Join-Path $testRoot 'io_host_test_links.c'),
+    (Join-Path $testRoot 'io_host_test_concurrency.c')
 )
 
 foreach ($source in $sources) {

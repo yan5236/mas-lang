@@ -1,6 +1,6 @@
 name: Io native artifacts
 
-# 只在手动触发时运行：为 `io` 0.1.0（原生 ABI 1）重新生成四个非 Windows 目标的预编译产物。
+# 只在手动触发时运行：为 `io` 0.1.0（原生 ABI 2）重新生成四个非 Windows 目标的预编译产物。
 # 产物以 artifact 形式上传（artifact 名即目标三元组），由维护者下载后回填到
 # `stdlib/io/native/artifacts/<triple>/`，本工作流不直接提交或推送任何文件。
 #
@@ -62,7 +62,7 @@ jobs:
           cat "$manifest"
           grep -F 'package = "io"' "$manifest"
           grep -F 'package_version = "0.1.0"' "$manifest"
-          grep -F 'abi = 1' "$manifest"
+          grep -F 'abi = 2' "$manifest"
           grep -F "target = \"${{ matrix.triple }}\"" "$manifest"
       - name: Upload refreshed artifacts
         uses: actions/upload-artifact@v4

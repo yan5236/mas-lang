@@ -178,7 +178,9 @@ int64_t mas_io_platform_open(const unsigned char* path, size_t path_len, int64_t
         disposition = CREATE_ALWAYS;
         break;
     case MAS_IO_MODE_APPEND:
-        access = GENERIC_WRITE;
+        /* 只申请 FILE_APPEND_DATA：宿主保证每次写入原子地落在文件末尾，
+         * 多个进程并发追加不会定位到同一位置互相覆盖。 */
+        access = FILE_APPEND_DATA;
         disposition = OPEN_ALWAYS;
         break;
     case MAS_IO_MODE_READ_WRITE:
@@ -303,6 +305,26 @@ int64_t mas_io_platform_seek(void* file, int64_t offset, int64_t origin, int64_t
     }
 
     *position_out = (int64_t)position.QuadPart;
+    return MAS_IO_OK;
+}
+
+/** 查询文件当前字节大小；`GetFileSizeEx` 不改变文件指针。 */
+int64_t mas_io_platform_size(void* file, int64_t* size_out) {
+    LARGE_INTEGER size;
+
+    if (file == NULL || size_out == NULL) {
+        return MAS_IO_ERROR_INVALID_ARGUMENT;
+    }
+    *size_out = 0;
+    if (!GetFileSizeEx((HANDLE)file, &size)) {
+        DWORD error = GetLastError();
+
+        return mas_io_win_map(error);
+    }
+    if (size.QuadPart < 0) {
+        return MAS_IO_ERROR_TOO_LARGE;
+    }
+    *size_out = (int64_t)size.QuadPart;
     return MAS_IO_OK;
 }
 

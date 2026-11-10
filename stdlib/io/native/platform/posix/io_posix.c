@@ -115,7 +115,8 @@ int64_t mas_io_platform_open(const unsigned char* path, size_t path_len, int64_t
         flags = O_WRONLY | O_CREAT | O_TRUNC;
         break;
     case MAS_IO_MODE_APPEND:
-        flags = O_WRONLY | O_CREAT;
+        /* O_APPEND 让每次 write 原子地落到文件末尾，多进程并发追加不会互相覆盖。 */
+        flags = O_WRONLY | O_CREAT | O_APPEND;
         break;
     case MAS_IO_MODE_READ_WRITE:
         flags = O_RDWR;
@@ -257,6 +258,28 @@ int64_t mas_io_platform_seek(void* file, int64_t offset, int64_t origin, int64_t
     }
 
     *position_out = (int64_t)result;
+    return MAS_IO_OK;
+}
+
+/** 查询文件当前字节大小；`fstat` 不改变文件偏移。 */
+int64_t mas_io_platform_size(void* file, int64_t* size_out) {
+    struct stat info;
+    int descriptor;
+
+    if (file == NULL || size_out == NULL) {
+        return MAS_IO_ERROR_INVALID_ARGUMENT;
+    }
+    *size_out = 0;
+    descriptor = mas_io_posix_decode(file);
+    if (fstat(descriptor, &info) != 0) {
+        int error = errno;
+
+        return mas_io_posix_map(error);
+    }
+    if ((off_t)(int64_t)info.st_size != info.st_size) {
+        return MAS_IO_ERROR_TOO_LARGE;
+    }
+    *size_out = (int64_t)info.st_size;
     return MAS_IO_OK;
 }
 

@@ -49,6 +49,7 @@ extern unsigned long long g_stderr_bytes;
 extern unsigned long long g_stdout_flushes;
 extern unsigned long long g_stderr_flushes;
 extern int g_std_write_fail_code;
+extern int g_std_write_partial_error;
 extern long long g_std_write_limit;
 
 /** 设置 stdin 桩的数据来源。 */
@@ -56,6 +57,15 @@ void io_test_stdin_set(const char* data, size_t length);
 
 /** 让 stdin 桩在读取到 `offset` 字节之后返回可恢复错误。 */
 void io_test_stdin_fail_after(size_t offset);
+
+/**
+ * 限制 stdin 桩每次宿主读取最多交付 `limit` 字节，模拟管道一次只有少量数据就绪。
+ * `(size_t)-1` 表示不限制。
+ */
+void io_test_stdin_deliver(size_t limit);
+
+/** 返回 stdin 桩被宿主读取的次数；用于断言拿到数据后不再请求更多。 */
+unsigned long long io_test_stdin_read_calls(void);
 
 /** 恢复标准流桩的默认状态。 */
 void io_test_std_reset(void);
@@ -95,5 +105,9 @@ void io_test_run_std(void);
 void io_test_run_text(void);
 void io_test_run_fs(void);
 void io_test_run_links(void);
+void io_test_run_concurrency(void);
+
+/** 子进程工作模式：向 `path` 追加 `iterations` 次、每次 `chunk` 字节；全部成功返回 0。 */
+int io_test_run_append_worker(const char* path, int iterations, size_t chunk);
 
 #endif

@@ -96,3 +96,46 @@ IO 发布后再启动 `net` 规范，用小型 HTTP 服务验证多连接、超�
 - 编译器直接调用的字节运行时入口一律用 `out: *mut MasBytes` 写回，不返回 16 字节结构：Windows x64 的 sret 约定与 IR 声明不一致会读到错位实参（实测）。顶层 `extern func` 的 `bytes` 参数与返回值在语义阶段被拒绝，字节载荷统一放进结构体字段。
 - `enum` 成员按声明顺序 lowering 为 i64，名义身份使用模块改写后的内部名，诊断与 LSP 使用源码显示名；不开放原生 enum ABI。
 - `io` 的全部原生入口使用「输入盒 + 输出盒」记录指针；令牌表、读缓冲、错误映射与平台差异都在 C 层，标准流经 `mas_runtime_std_read/write/flush` 复用 Rust 标准流，保持与 `print` 的顺序；直接连接终端时非 UTF-8 字节返回可恢复错误。
+
+## 审核修复记录（2026-11-10 第二轮）
+
+针对只读审核复现的问题逐项修复，并用真实入口回归。修复前的失败证据来自新增回归用例在同一工作区上的首次运行。
+
+### 修复项
+
+1. **[P1] 并发追加覆盖日志。** Windows 追加句柄改用 `FILE_APPEND_DATA`，POSIX 改用 `O_APPEND`；整文件追加不再「先定位到末尾再写」，落点由宿主保证。回归用例 `io_host_test_concurrency.c` 由同一测试可执行文件派生 8 个进程、各向同一文件追加 30 MiB：修复前最终大小不足，修复后为完整的 `251,658,240` 字节。
+2. **[P1] 失败的 `seek` 让后续读取静默漏数据。** `seek(End)` 改用新增的 `mas_io_platform_size`（Windows `GetFileSizeEx` / POSIX `fstat`）换算目标，不再先把宿主游标移到末尾；目标非法或定位失败时读缓冲保持不变。回归：40,000 字节文件读 1 字节后 `seek(-50000, End)` 报 `InvalidArgument`，继续读取仍交付剩余 39,999 字节并可重试定位。
+3. **[P1] 管道读等待凑满请求。** `read` 改为每次最多交付一块：有预读先交付，没有就补一块，拿到数据立即返回。回归：C 桩限制「每次宿主读取只交付 1 字节」并断言 `read(2)` 只触达宿主一次；Fama 端到端用例让上游只写 1 字节且保持写端打开，程序必须在 5 秒内返回 `len=1`。
+4. **[P2] 标准流部分写入后 `written` 错报 0。** `mas_runtime_std_write` 改为返回状态码，并通过 `accepted` 出参回报宿主已接受字节数；Rust 桥改为逐次 `write` 记录进度（不再用 `write_all`），C 写入循环在错误路径也累计已接受字节。回归：C 桩注入「同一次写入接受 6 字节后报错」；Windows 端到端用例读到 4 KiB 后关闭管道读端，断言 `ok=false` 且 `written >= 10`（已发出的 `delivered\n` 前缀）。
+5. **[P2] 外部工程可导入目录内部绑定。** 目录裸绑定（`mas_io_dir_open/next/close`、`raw_dir_*`、目录中间结果盒）移到唯一调用方 `fs.ms` 且不标 `pub`；`import io.native { raw_dir_open }` 现在编译失败，并有专门回归用例。其余 `io.native` 包装在包 README 中明确为包内实现细节、不承诺跨版本兼容。
+6. **跨平台发布门槛。** macOS 独占重命名接入 `renamex_np(RENAME_EXCL)`（单次原子、支持目录），POSIX 语法探测增加 `-D__APPLE__` 分支（每个文件 3 个分支，共 6 项通过）。`io_package` 在缺少当前目标预编译产物时退回源码构建继续跑行为用例，默认消费用例显式跳过并打印原因，避免跨平台 CI 把「产物未交付」误报成产品缺陷。
+7. **文档。** `close` 的「失败也失效」限定为常规文件；`read` 的单块短读、`Append` 的宿主追加语义、平台实现表、内部绑定性质、验证状态与未验证清单同步更新。
+
+### 发布前 ABI 修复（第三轮审核）
+
+标准流写桥此前原地改了签名（新增第四参数、改变返回值语义）但符号名不变：按 ABI 1 编译的旧包会把三参数调用到新四参数实现上，通过未初始化的第四参数写内存（复现：旧包默认构建后 `write_text_to` 返回 `ok=false`，行为未定义）。
+
+修复方式：
+
+- 新增 `mas_runtime_std_write_v2(which, ptr, len, accepted)`：返回 `0` 或负值错误码，失败时也写回已接受字节数。
+- 保留 `mas_runtime_std_write(which, ptr, len)` 原符号与原语义：成功返回已接受字节数，失败返回负值错误码。
+- 新对象只调用 v2；`native.abi` 升到 2，清单由维护流程重新生成；旧包（abi 1）继续链接 v1。
+- 回归：用 `12fd9c7` 的旧包配当前编译器默认构建并运行，`write_text_to` 返回 `ok=true`、`written=9`；新增 `io_legacy_std_write_symbol_keeps_abi1_semantics` 端到端用例，断言旧符号成功返回 7 字节。
+
+`settings.toml` 的 ABI 数字只校验包自身清单一致性，拦不住旧包调用新符号；真正起作用的是版本化符号。
+
+### 命令与结果
+
+| 命令 | 结果 |
+| --- | --- |
+| `pwsh -File stdlib/io/native/test/run-tests.ps1` | **300 条断言、0 失败、EXIT=0**（新增并发追加、失败定位、断管部分写入、管道短读/宿主读取次数断言；并发追加实测 `251658240` 字节） |
+| `pwsh -File stdlib/io/native/test/posix-syntax-probe.ps1` | 2 个 POSIX 文件 × 3 条分支（link/unlink、Linux `renameat2`、macOS `renamex_np`）全部通过；仅语法层面 |
+| `cargo test --locked -p fama --test io_package -- --test-threads=1` | **9 passed**：示例端到端、错误类别、标准流顺序、非法 UTF-8、默认预编译消费、管道短读、Windows 断管部分写入、目录内部绑定不可导入、ABI 1 旧写桥兼容 |
+| `fama run examples/projects/io-api`（无 `--allow-native-source-build`） | 通过：预编译产物与修复后的源码指纹一致，输出与 README 预期一致（含 `listing`、`seek`、`append`） |
+
+### 仍未完成 / 未验证
+
+- Linux x64/ARM64、macOS x64/ARM64 的预编译对象仍未交付（阶段 4.3 保持未完成）；需要 `workflow_dispatch` 运行 `.github/workflows/io-artifacts.yml` 后回填并重跑默认消费验证。
+- POSIX 运行时行为仍未实跑：`renamex_np` 的目录移动/目标冲突、`O_APPEND` 并发追加只在语法层检查。
+- POSIX 断管：向已关闭管道写入默认可能由 `SIGPIPE` 终止进程，运行时未接管该信号；断管返回可恢复错误只在 Windows 上验证。
+- Windows 交互式控制台文本分支仍未自动化（测试进程的标准输出都是管道）。

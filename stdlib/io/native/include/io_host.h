@@ -7,8 +7,12 @@
 /**
  * io 包的原生 ABI 版本，必须与 `settings.toml` 的 `native.abi` 以及各目标
  * `manifest.toml` 中的 `abi` 字段保持一致。
+ *
+ * 版本 2 只改变标准流写桥的签名：新增 `mas_runtime_std_write_v2`（返回状态码 +
+ * 已接受字节数出参）。ABI 1 的三参数 `mas_runtime_std_write` 保留原符号与原语义，
+ * 旧包可以继续在新运行时上链接运行。
  */
-#define MAS_IO_ABI_VERSION 1
+#define MAS_IO_ABI_VERSION 2
 
 /**
  * 错误码：序号与 Mas 侧 `IOErrorKind` 的成员顺序严格一致，是两侧唯一的映射约定。
@@ -236,11 +240,21 @@ void* mas_record_alloc(unsigned long long size, const unsigned long long* offset
 void mas_runtime_abort(const char* message);
 
 /**
- * 标准流桥：由运行时实现，原生层只调用。返回 `>= 0` 为字节数，`< 0` 为 `-错误码`
- * （错误码取值与 `MAS_IO_ERROR_*` 一致）。
+ * 标准流桥：由运行时实现，原生层只调用。
+ *
+ * 读：返回 `>= 0` 为字节数，`< 0` 为 `-错误码`（错误码取值与 `MAS_IO_ERROR_*` 一致）。
+ * 写（ABI 1，保留兼容）：`mas_runtime_std_write` 成功时返回已接受字节数，失败返回负值错误码。
+ * 写（ABI 2）：`mas_runtime_std_write_v2` 返回 `0` 或负值错误码，并通过 `accepted`
+ * 回报宿主已接受的字节数——即使失败也可能已经写出前缀，调用方必须使用这个值。
  */
 long long mas_runtime_std_read(unsigned char* ptr, unsigned long long capacity);
 long long mas_runtime_std_write(unsigned long long which, const unsigned char* ptr, unsigned long long len);
+long long mas_runtime_std_write_v2(
+    unsigned long long which,
+    const unsigned char* ptr,
+    unsigned long long len,
+    unsigned long long* accepted
+);
 long long mas_runtime_std_flush(unsigned long long which);
 
 /*

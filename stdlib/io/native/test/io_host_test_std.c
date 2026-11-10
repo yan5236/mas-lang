@@ -200,6 +200,64 @@ static void test_stdin_reads(void) {
     io_test_std_reset();
 }
 
+/**
+ * 覆盖标准流部分写入后同一次调用报错：断管时宿主可能已经接受前缀，
+ * `written` 必须保留这个前缀长度，否则调用方重试会重复发送。
+ */
+static void test_standard_stream_partial_write_reports_accepted(void) {
+    MasIoOpenResult stdout_open;
+
+    io_test_std_reset();
+    stdout_open = io_test_open_std(MAS_IO_STDOUT);
+    CHECK(stdout_open.ok, "借用 stdout 用于部分写入");
+    if (!stdout_open.ok) {
+        return;
+    }
+
+    g_std_write_limit = 6;
+    g_std_write_partial_error = MAS_IO_ERROR_NOT_SUPPORTED;
+    {
+        MasIoWriteResult failed = io_test_write(stdout_open.value, "hello world", 11);
+
+        CHECK(
+            !failed.ok && failed.code == MAS_IO_ERROR_NOT_SUPPORTED,
+            "部分写入后报错的错误码原样传播"
+        );
+        CHECK(failed.written == 6, "同一次写入部分成功后 written 保留已接受的 6 字节");
+        CHECK(g_stdout_bytes == 6, "只交付已接受的前缀");
+    }
+    io_test_std_reset();
+}
+
+/**
+ * 覆盖管道短读：宿主一次只交付 1 字节时，`read(2)` 必须立即返回这 1 字节，
+ * 不能为了凑满请求再次调用宿主（真实管道上第二次调用会一直阻塞到上游写入或关闭）。
+ */
+static void test_stdin_short_read_returns_immediately(void) {
+    MasIoOpenResult stdin_open;
+
+    io_test_std_reset();
+    io_test_stdin_set("XY", 2);
+    io_test_stdin_deliver(1);
+    stdin_open = io_test_open_std(MAS_IO_STDIN);
+    CHECK(stdin_open.ok, "借用 stdin 用于管道短读");
+    if (!stdin_open.ok) {
+        return;
+    }
+
+    {
+        MasIoReadResult first = io_test_read(stdin_open.value, 2);
+        unsigned long long calls_after_first = io_test_stdin_read_calls();
+        MasIoReadResult second = io_test_read(stdin_open.value, 2);
+
+        CHECK(first.ok && io_test_bytes_equal(first.value, "X", 1) && first.eof == 0, "管道只就绪 1 字节时返回 1 字节");
+        CHECK(calls_after_first == 1, "拿到数据后不再请求宿主的下一块，避免管道阻塞");
+        CHECK(second.ok && io_test_bytes_equal(second.value, "Y", 1) && second.eof == 0, "下一次读取取到剩余 1 字节");
+        CHECK(io_test_stdin_read_calls() == 2, "第二次读取只触达宿主一次");
+    }
+    io_test_std_reset();
+}
+
 /** 覆盖 seek 清除 EOF：读到末尾后回到开头仍能继续读。 */
 static void test_seek_clears_eof(void) {
     const char* path = io_test_path("cleareof.txt");
@@ -231,6 +289,10 @@ void io_test_run_std(void) {
     test_two_handles_independent();
     test_standard_streams();
     test_standard_stream_failures();
+    test_standard_stream_partial_write_reports_accepted();
+    /* 短读用例先于 `test_stdin_reads`：后者会把 stdin 表项读到 EOF，
+     * 而标准流表项是进程级的，缓冲与 EOF 状态跨用例保留。 */
+    test_stdin_short_read_returns_immediately();
     test_stdin_reads();
     test_seek_clears_eof();
 }

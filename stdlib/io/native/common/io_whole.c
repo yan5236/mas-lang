@@ -104,16 +104,8 @@ int64_t mas_io_write_whole_file(
         return code;
     }
 
-    if (mode == MAS_IO_MODE_APPEND) {
-        /* 追加语义要求每次都从文件末尾开始写；打开后先定位一次。 */
-        int64_t end_position = 0;
-
-        code = mas_io_platform_seek(file, 0, MAS_IO_SEEK_END, &end_position);
-        if (code != MAS_IO_OK) {
-            (void)mas_io_platform_close(file);
-            return code;
-        }
-    }
+    /* Append 的落点由宿主追加语义保证（Windows `FILE_APPEND_DATA`、POSIX `O_APPEND`），
+     * 这里不再预先定位到末尾：多进程并发追加时「先定位再写」会互相覆盖。 */
 
     while (total < len) {
         size_t wrote = 0;

@@ -1,14 +1,15 @@
 // 公开的文件系统操作：目录枚举在 Mas 包装层收集 `list<string>`，
 // 每条路径都关闭迭代器；读取失败时丢弃已收集的部分结果并返回错误。
+//
+// 目录迭代的原生绑定只在本模块内使用：需要隐藏的裸绑定和唯一调用方在同一模块，
+// 并且不标 `pub`，外部模块无法通过 `import io.fs` 或 `import io.native` 直接拿到
+// 返回整数错误码的入口。其他文件入口仍由 `local.native` 的公开包装调用。
 
-import local.codes { error_kind }
+import local.codes { empty_text, error_kind }
 import local.native {
     DirResult,
     IOStatus,
     MetadataResult,
-    raw_dir_close,
-    raw_dir_next,
-    raw_dir_open,
     raw_make_dir,
     raw_metadata,
     raw_remove_dir,
@@ -16,6 +17,60 @@ import local.native {
     raw_rename,
 }
 import local.types { IOErrorKind }
+
+// 目录迭代的路径输入盒；字段布局必须与 C 的 `MasIoPathArg` 一致（单个 string）。
+struct DirPathArg:
+    path: string
+
+// 目录迭代的句柄输入盒；字段布局必须与 C 的 `MasIoHandleArg` 一致（单个 int）。
+struct DirHandleArg:
+    handle: int
+
+// 原生目录打开结果：handle 是目录迭代器令牌，必须以关闭入口释放。
+// 字段顺序与 C 的 `MasIoDirOpenResult` 一致。
+struct DirOpenRaw:
+    ok: bool
+    code: int
+    handle: int
+
+// 原生目录项结果：done 表示枚举正常结束；字段顺序与 C 的 `MasIoDirEntryResult` 一致。
+struct DirEntryRaw:
+    ok: bool
+    code: int
+    done: bool
+    name: string
+
+// 原生状态结果；字段顺序与 C 的 `MasIoStatus` 一致。
+struct DirStatus:
+    ok: bool
+    code: int
+
+// 目录迭代开始入口；只在本模块内调用。
+extern func mas_io_dir_open(input: DirPathArg, out: DirOpenRaw)
+
+// 目录迭代下一步入口；只在本模块内调用。
+extern func mas_io_dir_next(input: DirHandleArg, out: DirEntryRaw)
+
+// 目录迭代关闭入口；只在本模块内调用。
+extern func mas_io_dir_close(input: DirHandleArg, out: DirStatus)
+
+// 打开目录迭代器；失败时 handle 为 0。
+func raw_dir_open(path: string) -> DirOpenRaw:
+    var out = DirOpenRaw(false, 0, 0)
+    mas_io_dir_open(DirPathArg(path), out)
+    return out
+
+// 取下一个直接子项名称；done 为真表示正常结束。
+func raw_dir_next(handle: int) -> DirEntryRaw:
+    var out = DirEntryRaw(false, 0, false, empty_text())
+    mas_io_dir_next(DirHandleArg(handle), out)
+    return out
+
+// 关闭目录迭代器；失败时返回可恢复状态。
+func raw_dir_close(handle: int) -> DirStatus:
+    var out = DirStatus(false, 0)
+    mas_io_dir_close(DirHandleArg(handle), out)
+    return out
 
 // 返回空名称列表，供目录枚举失败时的失败占位使用。
 func empty_names() -> list<string>:
@@ -51,7 +106,7 @@ pub func list_dir(path: string) -> DirResult:
     if failed:
         return DirResult(false, error_kind(failure), empty_names())
     if not closed.ok:
-        return DirResult(false, closed.code, empty_names())
+        return DirResult(false, error_kind(closed.code), empty_names())
     return DirResult(true, IOErrorKind.None, names)
 
 // 创建一级目录：父目录缺失报 NotFound，目标已存在报 AlreadyExists。

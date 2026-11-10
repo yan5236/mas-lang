@@ -62,7 +62,8 @@ pub func write_text_to(file: File, text: string) -> WriteResult:
 pub func flush(file: File) -> IOStatus:
     return raw_flush(file.token)
 
-// 关闭文件；即使返回失败，令牌也已失效，其他文件保持可用。
+// 关闭常规文件；即使返回失败，令牌也已失效，其他文件保持可用。
+// 标准流是借用句柄：返回 NotSupported，且句柄仍然可用。
 pub func close(file: File) -> IOStatus:
     return raw_close(file.token)
 

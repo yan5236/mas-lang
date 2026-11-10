@@ -28,12 +28,15 @@ static unsigned char g_stdin_data[4096];
 static size_t g_stdin_length = 0;
 static size_t g_stdin_offset = 0;
 static size_t g_stdin_fail_offset = (size_t)-1;
+static size_t g_stdin_delivery_limit = (size_t)-1;
+static unsigned long long g_stdin_read_calls = 0;
 
 unsigned long long g_stdout_bytes = 0;
 unsigned long long g_stderr_bytes = 0;
 unsigned long long g_stdout_flushes = 0;
 unsigned long long g_stderr_flushes = 0;
 int g_std_write_fail_code = 0;
+int g_std_write_partial_error = 0;
 long long g_std_write_limit = -1;
 
 void io_test_check(int condition, const char* file, int line, const char* message) {
@@ -112,6 +115,7 @@ long long mas_runtime_std_read(unsigned char* ptr, unsigned long long capacity) 
     if (ptr == NULL || capacity == 0) {
         return 0;
     }
+    g_stdin_read_calls += 1;
     if (g_stdin_offset >= g_stdin_fail_offset) {
         return -(long long)MAS_IO_ERROR_OTHER;
     }
@@ -120,6 +124,9 @@ long long mas_runtime_std_read(unsigned char* ptr, unsigned long long capacity) 
         available = g_stdin_fail_offset - g_stdin_offset;
     }
     take = available < (size_t)capacity ? available : (size_t)capacity;
+    if (take > g_stdin_delivery_limit) {
+        take = g_stdin_delivery_limit;
+    }
     if (take == 0) {
         return 0;
     }
@@ -128,10 +135,19 @@ long long mas_runtime_std_read(unsigned char* ptr, unsigned long long capacity) 
     return (long long)take;
 }
 
-long long mas_runtime_std_write(unsigned long long which, const unsigned char* ptr, unsigned long long len) {
-    unsigned long long accepted = len;
+long long mas_runtime_std_write_v2(
+    unsigned long long which,
+    const unsigned char* ptr,
+    unsigned long long len,
+    unsigned long long* accepted_out
+) {
+    unsigned long long take = len;
 
     (void)ptr;
+    if (accepted_out == NULL) {
+        return -(long long)MAS_IO_ERROR_INVALID_ARGUMENT;
+    }
+    *accepted_out = 0;
     if (g_std_write_fail_code != 0) {
         return -(long long)g_std_write_fail_code;
     }
@@ -144,19 +160,24 @@ long long mas_runtime_std_write(unsigned long long which, const unsigned char* p
         if (remaining <= 0) {
             return -(long long)MAS_IO_ERROR_OTHER;
         }
-        if ((unsigned long long)remaining < accepted) {
-            accepted = (unsigned long long)remaining;
+        if ((unsigned long long)remaining < take) {
+            take = (unsigned long long)remaining;
         }
     }
-    if (accepted == 0) {
+    if (take == 0) {
         return -(long long)MAS_IO_ERROR_OTHER;
     }
     if (which == MAS_IO_STDOUT) {
-        g_stdout_bytes += accepted;
+        g_stdout_bytes += take;
     } else {
-        g_stderr_bytes += accepted;
+        g_stderr_bytes += take;
     }
-    return (long long)accepted;
+    *accepted_out = take;
+    if (take < len && g_std_write_partial_error != 0) {
+        /* 同一次宿主写入只接受前缀后失败：桥必须回报这个前缀长度。 */
+        return -(long long)g_std_write_partial_error;
+    }
+    return 0;
 }
 
 long long mas_runtime_std_flush(unsigned long long which) {
@@ -182,10 +203,20 @@ void io_test_stdin_set(const char* data, size_t length) {
     g_stdin_length = length;
     g_stdin_offset = 0;
     g_stdin_fail_offset = (size_t)-1;
+    g_stdin_delivery_limit = (size_t)-1;
+    g_stdin_read_calls = 0;
 }
 
 void io_test_stdin_fail_after(size_t offset) {
     g_stdin_fail_offset = offset;
+}
+
+void io_test_stdin_deliver(size_t limit) {
+    g_stdin_delivery_limit = limit;
+}
+
+unsigned long long io_test_stdin_read_calls(void) {
+    return g_stdin_read_calls;
 }
 
 void io_test_std_reset(void) {
@@ -195,6 +226,7 @@ void io_test_std_reset(void) {
     g_stdout_flushes = 0;
     g_stderr_flushes = 0;
     g_std_write_fail_code = 0;
+    g_std_write_partial_error = 0;
     g_std_write_limit = -1;
 }
 
@@ -399,7 +431,11 @@ static int io_test_begin(void) {
     return 1;
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    if (argc == 5 && strcmp(argv[1], "--append-worker") == 0) {
+        return io_test_run_append_worker(argv[2], atoi(argv[3]), (size_t)strtoull(argv[4], NULL, 10));
+    }
+
     if (!io_test_begin()) {
         printf("FAIL 无法创建测试临时目录\n");
         return 2;
@@ -411,6 +447,7 @@ int main(void) {
     io_test_run_text();
     io_test_run_fs();
     io_test_run_links();
+    io_test_run_concurrency();
 
     io_test_remove_tree(g_test_root);
     printf("断言 %d 条，失败 %d 条\n", g_test_checks, g_test_failures);

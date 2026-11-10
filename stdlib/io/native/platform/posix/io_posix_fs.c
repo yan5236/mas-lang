@@ -33,6 +33,15 @@ extern int renameat2(
 #endif
 #endif
 
+#if defined(__APPLE__)
+/* macOS 10.12 起提供 renamex_np；<sys/stdio.h> 只在 __DARWIN_C_FULL 下声明它，
+ * 这里自行声明，避免依赖特性宏组合。RENAME_EXCL 表示目标已存在时失败。 */
+extern int renamex_np(const char* from, const char* to, unsigned int flags);
+#ifndef RENAME_EXCL
+#define RENAME_EXCL 0x00000004u
+#endif
+#endif
+
 /** 跟随符号链接查询元数据：`stat` 取目标信息，非普通文件不返回大小。 */
 int64_t mas_io_platform_metadata(
     const unsigned char* path,
@@ -205,7 +214,8 @@ int64_t mas_io_platform_make_dir(const unsigned char* path, size_t path_len) {
 
 /**
  * 禁止覆盖的移动：Linux 优先 `renameat2(..., RENAME_NOREPLACE)`；
- * 内核或文件系统不支持时退回 `link()` + `unlink()` 的原子组合，
+ * macOS 使用 `renamex_np(..., RENAME_EXCL)`，都是单次原子移动且支持目录。
+ * 其他 POSIX 退回 `link()` + `unlink()` 的原子组合，但不支持目录，
  * 两者都不可用（例如目录或没有硬链接的文件系统）返回 `NotSupported`。
  * 绝不使用“先检查目标不存在再普通 `rename`”这种有竞态的做法。
  */
@@ -229,6 +239,19 @@ int64_t mas_io_platform_rename(
         free(from);
         return code;
     }
+
+#if defined(__APPLE__)
+    if (renamex_np(from, to, RENAME_EXCL) == 0) {
+        free(from);
+        free(to);
+        return MAS_IO_OK;
+    }
+    error = errno;
+    free(from);
+    free(to);
+    /* 宿主或文件系统不支持独占重命名时按设计返回 NotSupported，不回退到非原子做法。 */
+    return mas_io_posix_map(error);
+#endif
 
 #if defined(__linux__)
     if (renameat2(AT_FDCWD, from, AT_FDCWD, to, RENAME_NOREPLACE) == 0) {

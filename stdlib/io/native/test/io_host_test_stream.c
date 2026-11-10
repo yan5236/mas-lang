@@ -118,6 +118,76 @@ static void test_read_zero_and_negative(void) {
     }
 }
 
+/**
+ * 覆盖失败定位后的读位置：以 End 为起点算出负目标时，宿主游标不能被留在文件末尾。
+ * 失败前已预读的 8191 字节必须继续交付，后续读取总数应为剩余的 39999 字节。
+ */
+static void test_failed_seek_keeps_buffered_data(void) {
+    const char* path = io_test_path("seek-failure.bin");
+    unsigned char data[40000];
+    MasIoOpenResult open_read;
+    size_t index;
+
+    for (index = 0; index < sizeof(data); index += 1) {
+        data[index] = (unsigned char)(index % 251);
+    }
+    CHECK(io_test_write_file(path, data, sizeof(data)).ok, "准备 40000 字节定位失败用例文件");
+    open_read = io_test_open(path, MAS_IO_MODE_READ);
+    CHECK(open_read.ok, "打开定位失败用例读句柄");
+    if (!open_read.ok) {
+        return;
+    }
+
+    {
+        MasIoReadResult first = io_test_read(open_read.value, 1);
+        MasIoSeekResult failed = io_test_seek(open_read.value, -50000, MAS_IO_SEEK_END);
+        size_t total = 1;
+        int mismatch = 0;
+        int read_ok = 1;
+
+        CHECK(io_test_bytes_equal(first.value, data, 1), "先读 1 字节");
+        CHECK(
+            !failed.ok && failed.code == MAS_IO_ERROR_INVALID_ARGUMENT,
+            "越过文件开头的 End 定位返回 InvalidArgument"
+        );
+
+        for (;;) {
+            MasIoReadResult chunk = io_test_read(open_read.value, 4096);
+
+            if (!chunk.ok) {
+                read_ok = 0;
+                break;
+            }
+            if (chunk.value.len == 0 && chunk.eof) {
+                break;
+            }
+            if (chunk.value.len == 0) {
+                read_ok = 0;
+                break;
+            }
+            if (chunk.value.len > (unsigned long long)(sizeof(data) - total)
+                || memcmp(chunk.value.ptr, data + total, (size_t)chunk.value.len) != 0) {
+                mismatch = 1;
+                break;
+            }
+            total += (size_t)chunk.value.len;
+        }
+
+        CHECK(read_ok, "失败定位后继续读取仍然成功");
+        CHECK(mismatch == 0, "失败定位后交付的数据与文件内容逐字节一致");
+        CHECK(total == sizeof(data), "失败定位后交付剩余的 39999 字节，不丢预读数据");
+    }
+
+    {
+        MasIoSeekResult retry = io_test_seek(open_read.value, -1, MAS_IO_SEEK_END);
+        MasIoReadResult last = io_test_read(open_read.value, 1);
+
+        CHECK(retry.ok && retry.position == (int64_t)sizeof(data) - 1, "失败之后允许重试定位");
+        CHECK(io_test_bytes_equal(last.value, data + sizeof(data) - 1, 1), "重试定位后读到最后一个字节");
+    }
+    CHECK(io_test_close(open_read.value).ok, "关闭定位失败用例读句柄");
+}
+
 /** 覆盖短读与 EOF：有数据时 eof 为假，只有空读取才报告 EOF。 */
 static void test_short_read_and_eof(void) {
     const char* path = io_test_path("short.txt");
@@ -288,4 +358,5 @@ void io_test_run_streams(void) {
     test_write_full_segment();
     test_seek_origins();
     test_buffered_seek();
+    test_failed_seek_keeps_buffered_data();
 }
