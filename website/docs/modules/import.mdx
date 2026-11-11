@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## 前置条件
 
-`import` 和 `export import` 需要项目上下文：入口文件向上能找到 `settings.toml`。只用一个 `.ms` 文件运行（例如 `maslang run hello.ms`，目录里没有 `settings.toml`）时无法解析导入，会报“模块导入应在语义分析前完成展开”。用 `fama new` 建工程，或手动提供项目配置。
+`import` 和 `export import` 通常需要项目上下文：入口文件向上能找到 `settings.toml`。只有一个 `.ms` 文件（例如 `maslang run hello.ms`，目录里没有 `settings.toml`）时，只有随附标准库 `io` 可以解析，其他导入仍会报“模块导入应在语义分析前完成展开”。需要导入项目内模块或第三方包时，用 `fama new` 建工程，或手动提供项目配置。
 
 ## 导入语法
 
@@ -42,6 +42,9 @@ import utils.math.*
 
 // 导入已安装的依赖包（需在 settings.toml 声明并执行 fama install）
 import time { unix_seconds }
+
+// 随附标准库不需要声明依赖，直接导入即可
+import io { stdout, write_text_to }
 ```
 
 具名列表可以写在一行，也可以换行，并允许尾逗号。项目内同一个文件的模块别名必须唯一，并且不能和顶层声明或直接导入的名字重复。
@@ -66,7 +69,12 @@ import local.time { format }
 
 ## 导入解析顺序
 
-1. 顶层名称匹配 `settings.toml` 中的 `[dependencies]` 时，按声明版本查找已安装的包。
-2. 其他名称解析到 `src/` 下的本地模块。
+判断以**发出导入的包自己的** `settings.toml` 为准：
 
-依赖包必须先用 `fama add` 声明、再用 `fama install` 安装到 `mod_module/<name>@<version>/`；缺失时会提示“未安装依赖 …，请先执行 fama install”。
+1. 顶层名称匹配当前包 `[dependencies]` 时，按声明版本查找已安装的包。
+2. 顶层名称是随附标准库（目前是 `io`）且当前包没有声明同名依赖时，指向随工具链分发的包；它优先于项目内同名源码。
+3. 其他名称解析到 `src/` 下的本地模块。
+
+`local.` 前缀跳过前两步，始终解析项目内源码。依赖包必须先用 `fama add` 声明、再用 `fama install` 安装到 `mod_module/<name>@<version>/`；缺失时会提示“未安装依赖 …，请先执行 fama install”。随附标准库不需要安装，也不会写进 `mod-lock.yml`；第三方包同样可以省略自己的 `io` 依赖声明，它导入的是随附 io。
+
+同一个可执行程序的模块图如果实际加载了随附 `io` 与显式声明的 `io` 两套原生实现，链接前会报错，并提示移除 `[dependencies].io` 后改用随附版，或让所有导入方显式声明同一份依赖。仅声明但没有导入不构成冲突。
