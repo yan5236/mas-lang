@@ -55,5 +55,7 @@ jobs:
           test "$("$RUNNER_TEMP/mas-hello")" = Helloworld
       - name: Run time example with prebuilt objects
         run: cargo +stable run --locked -p fama -- run examples/projects/time-api
+      - name: Run bundled io example without installing it
+        run: cargo +stable run --locked -p fama -- run examples/projects/io-api
       - name: Test workspace
         run: cargo +stable test --workspace --locked --no-fail-fast
