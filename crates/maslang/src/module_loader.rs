@@ -11,13 +11,24 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
+use crate::standard_library;
 
 /// 保存模块装载后的扁平化源码与最终程序，供后续语义与代码生成复用。
 pub struct ModuleLoadResult {
     pub origins: Vec<crate::source_map::ModuleOrigin>,
     pub source: SourceFile,
     pub program: Program,
+    /// 真实磁盘包根；随附标准库不登记在这里，避免把虚拟路径当成用户工程。
     pub package_roots: Vec<PathBuf>,
+    /// 模块图实际加载的随附标准库包名，链接阶段据此物化原生资产。
+    pub(crate) bundled_packages: Vec<&'static str>,
+}
+
+/// 保存一次导入目标解析的结果，区分磁盘模块与随附标准库模块。
+struct ResolvedModule {
+    file: PathBuf,
+    package_root: PathBuf,
+    bundled_source: Option<&'static str>,
 }
 
 /// 从入口源码开始装载整个模块图，并把模块重写为单个可编译程序。
@@ -25,23 +36,92 @@ pub fn load_module_graph(
     entry: &SourceFile,
     settings: &CompilerSettings,
 ) -> Result<ModuleLoadResult, CompilerError> {
-    let Some(entry_path) = canonicalize_existing_path(Path::new(entry.path())) else {
+    let Some(entry_path) = resolve_entry_path(Path::new(entry.path())) else {
         return parse_single_source(entry, settings);
     };
-    let Some(project_root) = discover_project_root(&entry_path) else {
-        return parse_single_source(entry, settings);
+    match discover_project_root(&entry_path) {
+        Some(project_root) => {
+            let entry_package_root = discover_package_root(&entry_path, &project_root)?;
+            let mut loader = ModuleLoader::new(settings, project_root, false);
+            loader.load_module_with_source(
+                &entry_path,
+                &entry_package_root,
+                true,
+                Some(entry.clone()),
+            )?;
+            loader.into_result(entry)
+        }
+        // 没有项目清单时只补上随附标准库导入；其他导入保持原有单文件行为。
+        None => load_without_project(entry, settings, &entry_path),
+    }
+}
+
+/// 无项目清单入口的装载入口：只有全部导入都指向随附标准库时才走模块图。
+fn load_without_project(
+    entry: &SourceFile,
+    settings: &CompilerSettings,
+    entry_path: &Path,
+) -> Result<ModuleLoadResult, CompilerError> {
+    let tokens = Lexer::new(entry, settings).tokenize()?;
+    let program = Parser::new(tokens, settings).parse_program()?;
+    let mut has_import = false;
+    let mut standard_library_only = true;
+    for statement in &program.statements {
+        let path = match statement {
+            Stmt::Import { path, .. } | Stmt::ExportImport { path, .. } => path,
+            _ => continue,
+        };
+        has_import = true;
+        let segments = path.normalized_segments();
+        let bundled = !path.is_local()
+            && segments
+                .first()
+                .is_some_and(|name| standard_library::find(name).is_some());
+        if !bundled {
+            standard_library_only = false;
+            break;
+        }
+    }
+    if !has_import || !standard_library_only {
+        return Ok(ModuleLoadResult {
+            origins: Vec::new(),
+            source: entry.clone(),
+            program,
+            package_roots: Vec::new(),
+            bundled_packages: Vec::new(),
+        });
+    }
+
+    let Some(entry_package_root) = entry_path.parent() else {
+        return Ok(ModuleLoadResult {
+            origins: Vec::new(),
+            source: entry.clone(),
+            program,
+            package_roots: Vec::new(),
+            bundled_packages: Vec::new(),
+        });
     };
-    let entry_package_root = discover_package_root(&entry_path, &project_root)?;
-    let mut loader = ModuleLoader::new(settings, project_root);
-    loader.load_module_with_source(&entry_path, &entry_package_root, true, Some(entry.clone()))?;
-    Ok(ModuleLoadResult {
-        origins: loader.origins,
-        source: SourceFile::new(entry.path(), loader.synthetic_source),
-        program: Program {
-            statements: loader.statements,
-        },
-        package_roots: loader.package_roots.into_iter().collect(),
-    })
+    let mut loader = ModuleLoader::new(settings, entry_package_root.to_path_buf(), true);
+    loader.load_module_with_source(entry_path, entry_package_root, true, Some(entry.clone()))?;
+    loader.into_result(entry)
+}
+
+/// 把入口路径解析成后续项目发现可以使用的规范形式。
+///
+/// 文件存在时返回 canonical 路径；编辑器尚未保存的新文件则规范化其父目录后保留文件名。
+fn resolve_entry_path(path: &Path) -> Option<PathBuf> {
+    if path.is_file() {
+        return fs::canonicalize(path).ok();
+    }
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let parent = absolute.parent()?;
+    let file_name = absolute.file_name()?;
+    let canonical_parent = fs::canonicalize(parent).ok()?;
+    Some(canonical_parent.join(file_name))
 }
 
 /// 维护模块装载过程中的缓存、循环检测和最终扁平化结果。
@@ -55,6 +135,12 @@ struct ModuleLoader<'a> {
     origins: Vec<crate::source_map::ModuleOrigin>,
     synthetic_source: String,
     statements: Vec<Stmt>,
+    /// 入口没有项目清单时，依赖声明视为空，只解析随附标准库导入。
+    project_less: bool,
+    /// 模块图实际加载的随附标准库包名，用于去重和链接期物化。
+    bundled_packages: BTreeSet<&'static str>,
+    /// 显式依赖实际加载到的包根；与同名随附包同时出现时在链接前报冲突。
+    explicit_roots: BTreeMap<&'static str, PathBuf>,
 }
 
 /// 保存项目设置中模块解析所需的依赖版本。
@@ -77,7 +163,7 @@ struct ModuleRewriter {
 
 impl<'a> ModuleLoader<'a> {
     /// 为一次模块装载流程创建新的装载器实例。
-    fn new(settings: &'a CompilerSettings, project_root: PathBuf) -> Self {
+    fn new(settings: &'a CompilerSettings, project_root: PathBuf, project_less: bool) -> Self {
         Self {
             settings,
             project_root,
@@ -88,17 +174,61 @@ impl<'a> ModuleLoader<'a> {
             origins: Vec::new(),
             synthetic_source: String::new(),
             statements: Vec::new(),
+            project_less,
+            bundled_packages: BTreeSet::new(),
+            explicit_roots: BTreeMap::new(),
         }
     }
 
-    /// 装载单个模块文件，递归处理其导入关系并缓存公开符号表。
-    fn load_module(
+    /// 汇总装载结果，并在返回前检查随附与显式标准库是否重复加载。
+    fn into_result(self, entry: &SourceFile) -> Result<ModuleLoadResult, CompilerError> {
+        self.check_bundled_conflicts()?;
+        Ok(ModuleLoadResult {
+            bundled_packages: self.bundled_packages.into_iter().collect(),
+            origins: self.origins,
+            source: SourceFile::new(entry.path(), self.synthetic_source),
+            program: Program {
+                statements: self.statements,
+            },
+            package_roots: self.package_roots.into_iter().collect(),
+        })
+    }
+
+    /// 同一模块图同时加载随附与显式两套原生实现时，链接会产生重复 C 符号，提前给出迁移建议。
+    fn check_bundled_conflicts(&self) -> Result<(), CompilerError> {
+        for name in &self.bundled_packages {
+            let Some(root) = self.explicit_roots.get(name) else {
+                continue;
+            };
+            let version = standard_library::find(name)
+                .map(|package| package.version)
+                .unwrap_or("?");
+            return Err(CompilerError::build_message(
+                format!(
+                    "模块图同时加载了随附 `{name}` {version} 与显式依赖 `{name}`（{}）两套原生实现：链接会得到重复 C 符号，程序无法生成。请移除项目 `[dependencies].{name}` 声明后改用随附 {name}，或让每个导入方显式声明同一份 `{name}` 依赖。",
+                    display_path(root)
+                ),
+                Span::new(0, 0),
+            ));
+        }
+        Ok(())
+    }
+
+    /// 装载解析后的目标模块，随附标准库直接使用内嵌源码。
+    fn load_resolved_module(
         &mut self,
-        module_path: &Path,
-        package_root: &Path,
+        module: &ResolvedModule,
         is_entry: bool,
     ) -> Result<LoadedModule, CompilerError> {
-        self.load_module_with_source(module_path, package_root, is_entry, None)
+        let source_override = module
+            .bundled_source
+            .map(|text| SourceFile::new(module.file.display().to_string(), text.to_string()));
+        self.load_module_with_source(
+            &module.file,
+            &module.package_root,
+            is_entry,
+            source_override,
+        )
     }
 
     /// 装载模块时允许调用方为入口模块提供内存源码，确保编辑器未保存文本也能参与分析。
@@ -113,7 +243,9 @@ impl<'a> ModuleLoader<'a> {
             return Ok(loaded.clone());
         }
 
-        self.package_roots.insert(package_root.to_path_buf());
+        if !standard_library::is_bundled_package_root(package_root) {
+            self.package_roots.insert(package_root.to_path_buf());
+        }
 
         if !self.active_modules.insert(module_path.to_path_buf()) {
             return Err(CompilerError::build_message(
@@ -238,8 +370,8 @@ impl<'a> ModuleLoader<'a> {
         kind: &ImportKind,
         imports: &mut BTreeMap<String, String>,
     ) -> Result<(), CompilerError> {
-        let (target_file, target_package_root) = self.resolve_module_path(package_root, path)?;
-        let target_module = self.load_module(&target_file, &target_package_root, false)?;
+        let target = self.resolve_module_path(package_root, path)?;
+        let target_module = self.load_resolved_module(&target, false)?;
         merge_imports(kind, &target_module.exports, imports, path)?;
         Ok(())
     }
@@ -253,22 +385,46 @@ impl<'a> ModuleLoader<'a> {
         imports: &mut BTreeMap<String, String>,
         exports: &mut BTreeMap<String, String>,
     ) -> Result<(), CompilerError> {
-        let (target_file, target_package_root) = self.resolve_module_path(package_root, path)?;
-        let target_module = self.load_module(&target_file, &target_package_root, false)?;
+        let target = self.resolve_module_path(package_root, path)?;
+        let target_module = self.load_resolved_module(&target, false)?;
         let merged = merge_imports(kind, &target_module.exports, imports, path)?;
         exports.extend(merged);
         Ok(())
     }
 
-    /// 根据导入路径决定应解析为当前包本地模块，还是项目根目录中的已安装依赖模块。
+    /// 根据导入路径决定目标模块：显式依赖、随附标准库还是当前包本地模块。
     fn resolve_module_path(
         &mut self,
         package_root: &Path,
         path: &ImportPath,
-    ) -> Result<(PathBuf, PathBuf), CompilerError> {
+    ) -> Result<ResolvedModule, CompilerError> {
         let segments = path.normalized_segments();
         if segments.is_empty() {
             return Err(CompilerError::syntax_message("导入路径不能为空", path.span));
+        }
+
+        // 随附标准库包内部没有依赖声明，只能在自己的包内解析。
+        if let Some(package) = standard_library::package_for_root(package_root) {
+            let relative = if !path.is_local() && segments[0] == package.name {
+                &segments[1..]
+            } else {
+                segments
+            };
+            let Some(module) = standard_library::lookup(&package, relative) else {
+                return Err(CompilerError::build_message(
+                    format!(
+                        "找不到模块文件：{}",
+                        standard_library::missing_module_path(&package, relative).display()
+                    ),
+                    path.span,
+                ));
+            };
+            self.bundled_packages.insert(package.name);
+            return Ok(ResolvedModule {
+                file: module.file,
+                package_root: package_root.to_path_buf(),
+                bundled_source: Some(module.text),
+            });
         }
 
         if !path.is_local() {
@@ -278,12 +434,45 @@ impl<'a> ModuleLoader<'a> {
                     self.find_dependency_root(&segments[0], &dependency.version, path.span)?;
                 let target =
                     resolve_module_file(&dependency_root.join("src"), &segments[1..], path.span)?;
-                return Ok((target, dependency_root));
+                // 显式依赖优先；同时记下包根，供随附标准库冲突检查复用。
+                if let Some(bundled) = standard_library::find(&segments[0]) {
+                    self.explicit_roots
+                        .entry(bundled.name)
+                        .or_insert_with(|| dependency_root.clone());
+                }
+                return Ok(ResolvedModule {
+                    file: target,
+                    package_root: dependency_root,
+                    bundled_source: None,
+                });
+            }
+            // 未声明依赖时，裸标准库名指向随附包，并优先于同名项目源码。
+            if let Some(package) = standard_library::find(&segments[0]) {
+                let Some(module) = standard_library::lookup(&package, &segments[1..]) else {
+                    return Err(CompilerError::build_message(
+                        format!(
+                            "找不到模块文件：{}",
+                            standard_library::missing_module_path(&package, &segments[1..])
+                                .display()
+                        ),
+                        path.span,
+                    ));
+                };
+                self.bundled_packages.insert(package.name);
+                return Ok(ResolvedModule {
+                    file: module.file,
+                    package_root: standard_library::package_root(&package),
+                    bundled_source: Some(module.text),
+                });
             }
         }
 
         let target = resolve_module_file(&package_root.join("src"), segments, path.span)?;
-        Ok((target, package_root.to_path_buf()))
+        Ok(ResolvedModule {
+            file: target,
+            package_root: package_root.to_path_buf(),
+            bundled_source: None,
+        })
     }
 
     /// 读取并缓存当前包的 TOML 依赖表；清单格式错误时返回带路径的诊断。
@@ -298,6 +487,12 @@ impl<'a> ModuleLoader<'a> {
         }
 
         let manifest_path = package_root.join("settings.toml");
+        if self.project_less && !manifest_path.is_file() {
+            return Ok(self
+                .dependency_cache
+                .entry(package_root.to_path_buf())
+                .or_default());
+        }
         if let std::collections::btree_map::Entry::Vacant(entry) =
             self.dependency_cache.entry(package_root.to_path_buf())
         {
@@ -849,7 +1044,9 @@ fn merge_imports(
     let mut inserted = BTreeMap::new();
     let mut bind = |name: String, internal: &String| {
         if (path.alias.is_some() && inserted.contains_key(&name))
-            || imports.get(&name).is_some_and(|previous| previous != internal)
+            || imports
+                .get(&name)
+                .is_some_and(|previous| previous != internal)
         {
             return Err(CompilerError::build_message(
                 format!("导入的成员名 `{name}` 重复"),
@@ -975,11 +1172,12 @@ fn canonicalize_path(path: &Path) -> Result<PathBuf, CompilerError> {
     })
 }
 
-fn canonicalize_existing_path(path: &Path) -> Option<PathBuf> {
-    if !path.is_file() {
-        return None;
-    }
-    fs::canonicalize(path).ok()
+/// 去掉 Windows 规范路径的 `\\?\` 前缀，让诊断里的用户路径保持可读。
+fn display_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    text.strip_prefix("\\\\?\\")
+        .map(str::to_string)
+        .unwrap_or(text)
 }
 
 fn parse_single_source(
@@ -993,6 +1191,7 @@ fn parse_single_source(
         source: source.clone(),
         program,
         package_roots: Vec::new(),
+        bundled_packages: Vec::new(),
     })
 }
 

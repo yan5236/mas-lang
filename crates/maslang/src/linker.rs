@@ -11,14 +11,16 @@ use crate::native_link::{DEFAULT_TARGET_TRIPLE, resolve_native_link_inputs};
 use crate::runtime_bootstrap;
 use crate::settings::CompilerSettings;
 use crate::source::{SourceFile, Span};
+use crate::standard_library;
 use crate::temp_directory::TemporaryDirectory;
 
 /// 检查可执行入口，执行对象文件生成与本机链接，成功时返回产物路径。
-pub fn compile_to_executable(
+pub(crate) fn compile_to_executable(
     source: &SourceFile,
     settings: &CompilerSettings,
     program: &Program,
     package_roots: &[PathBuf],
+    bundled_packages: &[&'static str],
     options: &CompileOptions,
 ) -> Result<PathBuf, CompilerError> {
     if !program.statements.iter().any(|statement| {
@@ -39,8 +41,18 @@ pub fn compile_to_executable(
         &generated_object.object_bytes,
         source,
     )?;
+    // 随附标准库只在真正导入并生成可执行程序时物化到本次构建的独占工作区，
+    // 再把临时包根交给普通原生依赖解析复用版本、目标、ABI 与指纹校验。
+    let mut native_package_roots = package_roots.to_vec();
+    for package in bundled_packages {
+        native_package_roots.push(standard_library::materialize(
+            package,
+            &workspace.bundled_root,
+            source,
+        )?);
+    }
     let native_objects = resolve_native_link_inputs(
-        package_roots,
+        &native_package_roots,
         &workspace.native_root,
         source,
         options.allow_native_source_build,
@@ -106,7 +118,11 @@ fn link_executable(
             .arg("--extern")
             .arg(format!("mas_runtime={}", library.display()));
     } else {
-        write_text(bootstrap_path, runtime_bootstrap::bootstrap_source(), source)?;
+        write_text(
+            bootstrap_path,
+            runtime_bootstrap::bootstrap_source(),
+            source,
+        )?;
     }
     command
         .arg("--edition")
@@ -216,6 +232,8 @@ struct BuildWorkspace {
     object_path: PathBuf,
     bootstrap_path: PathBuf,
     native_root: PathBuf,
+    /// 随附标准库物化目录；生命周期覆盖整个链接过程。
+    bundled_root: PathBuf,
 }
 
 impl BuildWorkspace {
@@ -232,6 +250,7 @@ impl BuildWorkspace {
             object_path: root.path().join("program.obj"),
             bootstrap_path: root.path().join("bootstrap.rs"),
             native_root: root.path().join("native"),
+            bundled_root: root.path().join("bundled"),
             _root: root,
         })
     }
