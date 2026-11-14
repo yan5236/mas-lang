@@ -83,7 +83,7 @@ fama install
 mathlib = { path = "../mathlib", version = "0.1.0" }
 ```
 
-`fama install` installs the dependency into `mod_module/<name>@<version>/` and records it in `mod-lock.yml`. After that you can `import mathlib { ... }`. The `time` standard library ships as a package in the same form — see the [time standard library](./stdlib/time/overview).
+`fama install` installs the dependency into `mod_module/<name>@<version>/` and records it in `mod-lock.yml`. After that you can `import mathlib { ... }`. The `time` standard library ships as a package in the same form — see the [time standard library](./stdlib/time/overview). The `io` standard library ships with the toolchain instead: no dependency declaration or install step needed — see the [io standard library](./stdlib/io/overview).
 
 ## Global Configuration
 

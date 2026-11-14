@@ -23,31 +23,37 @@ pub fn restore_error(mut error: CompilerError, origins: &[ModuleOrigin]) -> Comp
                 .saturating_sub(origin.offset)
                 .min(origin.source.text().len()),
         );
+        // 先按所属模块映射，再回退到整个模块图：跨模块引用的类型与函数只在导入方
+        // 模块里记着内部名，只查当前模块会把 `__ms_*` 内部标识泄漏到诊断里。
+        let visible_name = |inner: &str| -> Option<String> {
+            origin
+                .bindings
+                .iter()
+                .find(|(_, internal)| internal.as_str() == inner)
+                .or_else(|| {
+                    origins
+                        .iter()
+                        .flat_map(|candidate| candidate.bindings.iter())
+                        .find(|(_, internal)| internal.as_str() == inner)
+                })
+                .map(|(name, _)| name.clone())
+        };
         for argument in &mut error.args {
             // 按完整诊断标识符替换，避免名称前缀或下划线产生歧义。
-            let parts: Vec<_> = argument
+            let parts: Vec<String> = argument
                 .split('`')
                 .enumerate()
                 .map(|(index, part)| {
                     if index % 2 == 1 {
-                        origin
-                            .bindings
-                            .iter()
-                            .find(|(_, internal)| internal.as_str() == part)
-                            .map(|(name, _)| name.as_str())
-                            .unwrap_or(part)
+                        visible_name(part).unwrap_or_else(|| part.to_string())
                     } else {
-                        part
+                        part.to_string()
                     }
                 })
                 .collect();
             *argument = parts.join("`");
-            if let Some((name, _)) = origin
-                .bindings
-                .iter()
-                .find(|(_, internal)| *internal == argument)
-            {
-                *argument = name.clone();
+            if let Some(name) = visible_name(argument) {
+                *argument = name;
             }
         }
         error.source = Some(origin.source.clone());

@@ -13,6 +13,7 @@ pub mod semantic;
 pub mod settings;
 pub mod source;
 mod source_map;
+mod standard_library;
 pub mod temp_directory;
 pub mod token;
 
@@ -39,15 +40,26 @@ pub fn analyze_source(
     source: &SourceFile,
     settings: &CompilerSettings,
 ) -> Result<FrontendOutput, CompilerError> {
+    Ok(analyze_source_with_standard_library(source, settings)?.0)
+}
+
+/// 在前端分析基础上带回模块图实际加载的随附标准库包名，仅用于编译器内部链路。
+fn analyze_source_with_standard_library(
+    source: &SourceFile,
+    settings: &CompilerSettings,
+) -> Result<(FrontendOutput, Vec<&'static str>), CompilerError> {
     let loaded = module_loader::load_module_graph(source, settings)?;
     SemanticAnalyzer::new(settings)
         .analyze(&loaded.program)
         .map_err(|error| source_map::restore_error(error, &loaded.origins))?;
-    Ok(FrontendOutput {
-        source: loaded.source,
-        program: loaded.program,
-        package_roots: loaded.package_roots,
-    })
+    Ok((
+        FrontendOutput {
+            source: loaded.source,
+            program: loaded.program,
+            package_roots: loaded.package_roots,
+        },
+        loaded.bundled_packages,
+    ))
 }
 
 /// 分析并编译具有显式 main 入口的 Windows 程序，成功时返回产物路径。
@@ -56,12 +68,13 @@ pub fn compile_to_executable(
     settings: &CompilerSettings,
     options: &CompileOptions,
 ) -> Result<PathBuf, CompilerError> {
-    let frontend = analyze_source(source, settings)?;
+    let (frontend, bundled_packages) = analyze_source_with_standard_library(source, settings)?;
     linker::compile_to_executable(
         &frontend.source,
         settings,
         &frontend.program,
         &frontend.package_roots,
+        &bundled_packages,
         options,
     )
 }
@@ -310,7 +323,10 @@ func main():
         .unwrap();
         let output = std::process::Command::new(binary).output().unwrap();
         assert!(output.status.success());
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), "3\n7\n9\n11\n42\nMas\n");
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "3\n7\n9\n11\n42\nMas\n"
+        );
 
         fs::remove_dir_all(Path::new(&root)).unwrap();
     }
@@ -328,7 +344,8 @@ func main():
         }
         let path = root.join("src").join("main.ms");
         fs::write(&path, "").unwrap();
-        let source = |imports: &str| SourceFile::new(path.display().to_string(), imports.to_string());
+        let source =
+            |imports: &str| SourceFile::new(path.display().to_string(), imports.to_string());
         analyze_source(
             &source("import local.a { pick }\nimport local.a.*\n"),
             &zh_settings(),

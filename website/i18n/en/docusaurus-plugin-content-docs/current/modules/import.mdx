@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## Prerequisites
 
-`import` and `export import` require a project context: a `settings.toml` that can be found by walking up from the entry file. Running a single `.ms` file (for example `maslang run hello.ms` in a directory without `settings.toml`) cannot resolve imports and reports that module imports must be expanded before semantic analysis. Create a project with `fama new`, or provide the project configuration manually.
+`import` and `export import` usually require a project context: a `settings.toml` that can be found by walking up from the entry file. When running a single `.ms` file (for example `maslang run hello.ms` in a directory without `settings.toml`), only the bundled `io` standard library can be resolved; other imports still report that module imports must be expanded before semantic analysis. To import project modules or third-party packages, create a project with `fama new`, or provide the project configuration manually.
 
 ## Import Syntax
 
@@ -42,6 +42,9 @@ import utils.math.*
 
 // Import an installed dependency package (declare it in settings.toml, then run fama install)
 import time { unix_seconds }
+
+// The bundled standard library needs no dependency declaration; import it directly
+import io { stdout, write_text_to }
 ```
 
 Named lists may be written on one line or across lines, and allow a trailing comma. Module aliases within one file of a project must be unique, and must not collide with top-level declarations or directly imported names.
@@ -66,7 +69,12 @@ import local.time { format }
 
 ## Resolution Order
 
-1. Names declared in `settings.toml` under `[dependencies]` resolve to the installed package at its declared version.
-2. Other names resolve to local modules under `src/`.
+Resolution is decided by the `settings.toml` of the package that contains the import:
 
-A dependency must first be declared with `fama add` and then installed with `fama install` into `mod_module/<name>@<version>/`; when it is missing, the compiler reports that the dependency is not installed and that `fama install` should be run first.
+1. Names declared in that package's `[dependencies]` resolve to the installed package at its declared version.
+2. A bare name that matches a bundled standard library (currently `io`), when that package does not declare a same-named dependency, resolves to the package shipped with the toolchain; it takes precedence over project source with the same name.
+3. Other names resolve to local modules under `src/`.
+
+The `local.` prefix skips the first two steps and always resolves project source. A dependency must first be declared with `fama add` and then installed with `fama install` into `mod_module/<name>@<version>/`; when it is missing, the compiler reports that the dependency is not installed and that `fama install` should be run first. The bundled standard library needs no install and is not recorded in `mod-lock.yml`; third-party packages may likewise omit their own `io` dependency declaration and still get the bundled `io`.
+
+If one executable's module graph actually loads both the bundled `io` and an explicitly declared `io` native implementation, the compiler reports an error before linking and asks you to remove `[dependencies].io` in favor of the bundled package, or to declare the same dependency from every importer. Declaring it without importing it is not a conflict.

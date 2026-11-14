@@ -2,26 +2,28 @@
 
 `io` 提供应用级的**同步**文件、目录和标准流操作，以及无损的二进制读写。包版本 `0.1.0`，原生 ABI 版本 `2`。ABI 2 只改变了标准流写桥的符号与签名，ABI 1 的旧符号 `mas_runtime_std_write` 保留原语义，旧包可以继续在新运行时上运行。
 
-它是普通的标准库包，不是编译器内建能力：用 Fama 安装后，`import io { ... }` 即可使用。文本与二进制严格分开——文本是 `string`（合法 UTF-8），二进制是 `bytes`（任意字节）；把两者混用会在编译期或运行期被拦住。
+它是**随工具链分发**的标准库，不是需要单独安装的普通包：编译器内嵌了 `stdlib/io` 的 Mas 源码和发布矩阵内各目标的预编译对象，任何没有声明 `[dependencies].io` 的包都能直接 `import io { ... }`。文本与二进制严格分开——文本是 `string`（合法 UTF-8），二进制是 `bytes`（任意字节）；把两者混用会在编译期或运行期被拦住。
 
-## 安装
+## 使用
 
-在项目 `settings.toml` 中声明 path 依赖，指向仓库里的 `stdlib/io`：
+源码里直接导入即可，不需要改 `settings.toml`，也不需要 `fama install`：
 
-```toml
-[dependencies]
-"io" = { path = "../../../stdlib/io", version = "0.1.0" }
+```mas-lang
+import io { stdout, write_text_to }
+
+func main():
+    print(write_text_to(stdout(), "bundled io\n").ok)
 ```
-
-然后执行 `fama install`，把包安装到项目的 `mod_module/io@0.1.0/`。完整可运行工程见 [`examples/projects/io-api`](../../examples/projects/io-api)。
 
 ```sh
-fama install
-fama build
-fama run
+maslang run demo.ms
 ```
 
-Windows x64 使用包内预编译对象，普通构建不需要额外参数；其余四个目标等待 CI 回填产物（见[预编译产物与目标矩阵](#预编译产物与目标矩阵)）。
+随附的 io 版本由工具链决定，当前是 `0.1.0` / 原生 ABI 2。没有 `settings.toml` 的单个 `.ms` 文件同样可以这样构建运行；完整可运行工程见 [`examples/projects/io-api`](../../examples/projects/io-api)。
+
+工程仍然可以显式声明 `[dependencies].io` 来使用某个已安装的版本：显式依赖优先，旧工程不需要任何改动。想改用随附 io，删掉这条声明后正常构建即可。如果同一个可执行程序的模块图实际加载了随附 io 与显式 io 两套原生实现，编译器会在链接前报错并给出迁移建议——仅声明但未导入不构成冲突。
+
+矩阵内目标默认消费预编译对象，普通构建不需要额外参数；矩阵外目标导入 io 后会在链接前报出目标三元组（见[预编译产物与目标矩阵](#预编译产物与目标矩阵)）。
 
 ## 导入
 
@@ -196,27 +198,27 @@ import io {
 
 ## 预编译产物与目标矩阵
 
-发布矩阵沿用 `time` 的五个目标：
+发布矩阵沿用 `time` 的五个目标，编译器按自己构建时的目标内嵌对应产物：
 
 | 目标三元组 | 现状 |
 | --- | --- |
-| `x86_64-pc-windows-msvc` | **已带预编译产物**（本机 MSVC 工具链实际编译），普通 `fama build` 可直接消费 |
-| `x86_64-unknown-linux-gnu` | 待 CI 回填 |
-| `aarch64-unknown-linux-gnu` | 待 CI 回填 |
-| `x86_64-apple-darwin` | 待 CI 回填 |
-| `aarch64-apple-darwin` | 待 CI 回填 |
+| `x86_64-pc-windows-msvc` | **已带预编译产物**（本机 MSVC 工具链实际编译），普通构建直接消费 |
+| `x86_64-unknown-linux-gnu` | **已带预编译产物**（CI runner 生成并回填） |
+| `aarch64-unknown-linux-gnu` | **已带预编译产物**（CI runner 生成并回填） |
+| `x86_64-apple-darwin` | **已带预编译产物**（CI runner 生成并回填） |
+| `aarch64-apple-darwin` | **已带预编译产物**（CI runner 生成并回填） |
 
-四个待回填目标上，普通消费会因缺少预编译对象而在链接前报错，这是预期状态。维护者可以用 `--allow-native-source-build` 在本机从 C 源刷新产物：
+矩阵外的目标上，导入 io 的可执行程序会在链接前报出当前目标三元组；纯分析和不导入 io 的程序不受影响。维护者可以用 `--allow-native-source-build` 从 C 源刷新产物，刷新结果只写进本次构建的临时目录，不会落到工程、安装目录或源码树：
 
 ```sh
-fama build --allow-native-source-build
+maslang build demo.ms --allow-native-source-build
 ```
 
-发布前再把 `native/artifacts/<target>/` 复制回标准库包。CI 工作流是 `.github/workflows/io-artifacts.yml`。
+给随附包补充新目标产物时，仍走 `.github/workflows/io-artifacts.yml`，再把 `native/artifacts/<target>/` 复制回 `stdlib/io`；下一次构建编译器时会重新内嵌。
 
 ## 最小完整示例
 
-下面的程序只用到 `io` 的公开 API：整文件写入、追加、严格文本读取、分块读取、元数据和显式关闭。
+下面的程序只用到 `io` 的公开 API：整文件写入、追加、严格文本读取、分块读取、元数据和显式关闭。把它保存成单个文件（比如 `demo.ms`）就能直接运行，不需要工程清单。
 
 ```mas-lang
 import io {
@@ -257,7 +259,7 @@ func main():
     print("closed=" + string(again.code == IOErrorKind.Closed))
 ```
 
-在工程根目录运行，输出：
+运行 `maslang run demo.ms`，输出：
 
 ```text
 write ok=true

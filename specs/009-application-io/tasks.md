@@ -147,3 +147,31 @@ IO 发布后再启动 `net` 规范，用小型 HTTP 服务验证多连接、超�
 - POSIX 断管：向已关闭管道写入默认可能由 `SIGPIPE` 终止进程，运行时未接管该信号；断管返回可恢复错误只在 Windows 上验证。
 - POSIX 侧仍未覆盖：目录名非法 UTF-8、符号链接删除规则、权限/只读文件系统错误映射、`EINTR` 重试、>2 GiB 偏移、跨文件系统改名。
 - Windows 交互式控制台文本分支仍未自动化（测试进程的标准输出都是管道）。
+
+## 随附分发（2026-11-11 第四轮）
+
+`io` 改为随工具链分发：编译器在构建时内嵌 `stdlib/io` 的 Mas 源码、包清单、C 源与头文件，以及构建目标（`TARGET`）的预编译清单与对象；模块层用独立虚拟根解析随附包，链接层把包物化到本次构建的独占工作区后复用原有原生校验。`stdlib/io` 仍是唯一维护来源，公开签名与原生 ABI 2 不变。
+
+### 消费约定
+
+- 包未声明 `[dependencies].io` 时，裸 `import io { ... }` 指向随附包，并优先于项目内同名源码；`local.io` 仍解析项目源码。
+- 没有 `settings.toml` 的单个 `.ms` 文件也能构建运行随附 IO；其他导入保持原行为，不扩大搜索范围。
+- 显式依赖优先，旧工程无需改动；同一模块图实际加载两套 IO 原生实现时，链接前报冲突并给出迁移建议；仅声明未导入不构成冲突。
+- Fama 不安装随附 IO、不写 IO 锁项、不创建 `mod_module/io@<version>`；矩阵外目标导入 IO 并链接时会在诊断里报出目标三元组。
+
+### 命令与结果（Windows x64 MSVC，本机实跑）
+
+| 命令 | 结果 |
+| --- | --- |
+| `cargo test --workspace --locked --no-fail-fast` | **348 passed / 0 failed**（含下方三组随附用例与既有 `io_package` 10 项） |
+| `cargo test -p maslang --test bundled_io --locked` | **7 passed**：无清单单文件、复制编译器二进制、重复导入只链一次、显式优先、冲突诊断、`local.io` 与裸 `io` 并存、无清单不放宽普通模块 |
+| `cargo test -p mas-lang-lsp --test bundled_io --locked` | **2 passed**：无清单分析无诊断；未知符号仍有诊断（对照） |
+| `cargo test -p fama --test bundled_io --locked` | **1 passed**：全新工程不跑 install、无依赖缓存，`fama build` / `fama run` 成功，且不生成 `mod_module/io@*` 或 IO 锁项 |
+| `cargo run -q -p fama -- run examples/projects/io-api` | 退出码 0，输出与示例 README 预期一致（示例已移除 IO 依赖与锁项） |
+| 复制 `maslang.exe` 到仓库外目录、在无关 cwd 构建单文件 | 通过：标准流输出与整文件读写均正确，内嵌资产不依赖仓库路径 |
+
+### 未运行 / 未验证
+
+- `.github/workflows/native.yml` 新增的“随附 io 示例”步骤尚未在 GitHub runner 上执行；本轮只有 Windows x64 本机证据。
+- 矩阵外目标的链接诊断只有代码路径与文案，没有在该目标上实际构建工具链验证。
+- 内嵌对象仍由原有 `io-artifacts` 流程生成；本轮未重新生成 C 对象或指纹。

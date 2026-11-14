@@ -8,16 +8,24 @@ sidebar_position: 1
 
 它把**文本**和**二进制**分成两种类型：需要文本时用 `string`，处理图片、压缩包或任意文件时用 `bytes`。混用会在编译期或运行期被拦住，不会悄悄损坏数据。
 
-## 安装
+## 使用
 
-`io` 是普通标准库包，不是编译器内建模块。在项目 `settings.toml` 中声明 path 依赖：
+`io` 随工具链分发，不需要声明依赖，也不需要安装。源码里直接导入即可：
 
-```toml
-[dependencies]
-"io" = { path = "../../../stdlib/io", version = "0.1.0" }
+```mas-lang
+import io { stdout, write_text_to }
+
+func main():
+    print(write_text_to(stdout(), "bundled io\n").ok)
 ```
 
-然后执行 `fama install`，包会安装到 `mod_module/io@0.1.0/`。完整可运行工程见仓库里的 `examples/projects/io-api`。
+```sh
+maslang run demo.ms
+```
+
+没有 `settings.toml` 的单个 `.ms` 文件也能这样运行。随附版本由工具链决定，当前是 `0.1.0` / 原生 ABI 2；发布矩阵内目标默认消费预编译对象。
+
+工程仍然可以显式声明 `[dependencies].io` 使用某个已安装版本——显式依赖优先，旧工程不用改。想改用随附 io，删掉声明后正常构建即可；同一程序如果实际加载了两套 io 原生实现，编译器会在链接前报错并提示迁移。完整可运行工程见仓库里的 `examples/projects/io-api`。
 
 ## 导入
 

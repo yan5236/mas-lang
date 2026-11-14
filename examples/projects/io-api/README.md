@@ -6,11 +6,10 @@
 
 ## 运行
 
-需要先在仓库根目录构建工具链。然后进入本目录执行：
+`io` 随工具链分发，本工程没有声明任何依赖，也不需要安装。先在仓库根目录构建工具链，然后进入本目录执行：
 
 ```sh
 # 如果 PATH 里已经有 fama
-fama install
 fama build
 fama run
 ```
@@ -18,20 +17,17 @@ fama run
 在仓库内直接用源码里的 Fama 也可以：
 
 ```powershell
-cargo run -q -p fama -- install .
 cargo run -q -p fama -- build .
 cargo run -q -p fama -- run .
 ```
 
-`fama install` 会把 `stdlib/io` 安装到本工程的 `mod_module/io@0.1.0/`；`fama run` 会在本工程根目录启动编译好的程序。
-
-Windows x64 普通构建直接使用包内预编译对象，不需要额外参数。只有维护者刷新原生对象时才用 `--allow-native-source-build`：
+`fama run` 会在本工程根目录启动编译好的程序。io 的 Mas 源码和当前目标的预编译对象都内嵌在工具链里，普通构建直接消费，不需要额外参数。只有维护者刷新原生对象时才用 `--allow-native-source-build`：
 
 ```powershell
 cargo run -q -p fama -- build . --allow-native-source-build
 ```
 
-其他四个发布目标（Linux x64/ARM64、macOS x64/ARM64）尚未回填预编译产物，普通构建会报缺失；需要在该目标上打开源码回退，或等待 CI 产物。
+发布矩阵内的五个目标（Windows x64、Linux x64/ARM64、macOS x64/ARM64）都带预编译产物。旧工程如果显式声明了 `[dependencies].io`，可以保持原样继续用已安装的版本；想改用随附 io，删掉声明后正常构建即可。同一程序如果实际加载了两套 io 原生实现，编译器会在链接前报错并提示迁移。
 
 ## 预期输出
 
@@ -99,7 +95,7 @@ done
 
 中间文件 `copied.bin` 是分块复制的目标，检查完成后被重命名为 `moved.bin` 再删除，所以运行结束时不保留。
 
-`build/` 和 `mod_module/` 是本地构建输出与依赖缓存，不进入版本控制。
+`build/` 是本地构建输出，不进入版本控制。
 
 ## 覆盖范围
 
